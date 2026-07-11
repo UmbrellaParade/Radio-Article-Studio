@@ -92,7 +92,8 @@ SNS投稿の予約/履歴管理
 ```
 
 現時点では、公開Google Sheets CSV/export URLまたはCSVファイルを取り込む。
-privateなGoogle Sheets OAuth、Driveフォルダ同期、Apps Script連携は次フェーズ。
+共有フォームのWAV/MP3アップロードは、回答JSONに音源データを同梱して運営側が読み込み、回答画面からダウンロードする。
+privateなGoogle Sheets OAuth、Driveフォルダ直送、Apps Script連携は次フェーズ。
 
 ## 放送回データ
 
@@ -227,6 +228,9 @@ SNSで紹介してよいか
 ```
 
 音源ファイルは、応募後に放送回フォルダーへ整理する。
+現MVPでは、共有フォームでWAV/MP3をアップロードすると回答JSONに同梱される。
+運営側は回答JSONを読み込んだ後、回答管理画面から音源をダウンロードする。
+将来的にはGoogle Driveへ直接アップロードし、放送回フォルダーとローカルフォルダーへ同期する。
 
 ## パーソナリティ曲管理
 

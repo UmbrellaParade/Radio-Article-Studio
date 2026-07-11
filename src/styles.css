@@ -444,9 +444,19 @@ textarea {
 
 .question-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 120px minmax(220px, 260px) 86px;
+  grid-template-columns: minmax(220px, 1fr) 120px minmax(220px, 260px) 86px 40px;
   gap: 8px;
   align-items: center;
+}
+
+.upload-field {
+  display: grid;
+  gap: 7px;
+}
+
+.upload-field input[type="file"] {
+  min-height: 0;
+  padding: 9px;
 }
 
 .mini-check {
@@ -528,6 +538,34 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.attachment-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #eadfce;
+}
+
+.attachment-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fff8ee;
+}
+
+.attachment-item span {
+  font-weight: 800;
+}
+
+.attachment-item small {
+  color: #7a7182;
+  font-weight: 800;
 }
 
 .public-shell {
@@ -694,6 +732,10 @@ textarea {
   }
 
   .question-row {
+    grid-template-columns: 1fr;
+  }
+
+  .attachment-item {
     grid-template-columns: 1fr;
   }
 

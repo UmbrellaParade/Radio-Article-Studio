@@ -52,6 +52,19 @@ const detectUrlType = (url = "") => {
   return "Other";
 };
 
+const AUDIO_FILE_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,.mp3,.wav";
+
+const isAudioUpload = (file) => {
+  const name = file?.name?.toLowerCase() ?? "";
+  return name.endsWith(".mp3") || name.endsWith(".wav") || ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"].includes(file?.type);
+};
+
+const formatAnswerValue = (value) => {
+  if (!value) return "-";
+  if (typeof value === "object" && value.fileName) return `${value.fileName} (${Math.round((value.size || 0) / 1024 / 1024 * 10) / 10}MB)`;
+  return String(value);
+};
+
 const THUMBNAIL_PRESETS = [
   { key: "article16x9", label: "記事サムネ 16:9", width: 1280, height: 720, fileName: "article-thumbnail.png" },
   { key: "standfm1x1", label: "stand.fm 正方形 1:1", width: 1080, height: 1080, fileName: "standfm-thumbnail.png" },
@@ -364,12 +377,12 @@ const sampleData = {
       name: "リスナー楽曲応募フォーム",
       type: "リスナー",
       status: "準備中",
-      description: "楽曲URL、音源ファイル、記事掲載可否を集めるフォーム。",
+      description: "送って頂く楽曲の楽曲名、楽曲URL、WAV/MP3音源、記事掲載可否を集めるフォーム。",
       questions: [
         { id: "q_artist", label: "アーティスト名 正式表記", kind: "short", required: true, use: "article" },
-        { id: "q_song", label: "曲名 正式表記", kind: "short", required: true, use: "article" },
-        { id: "q_music_url", label: "楽曲URL", kind: "url", required: true, use: "article" },
-        { id: "q_audio", label: "音源ファイル（WAV / mp3）", kind: "file", required: false, use: "internal" },
+        { id: "q_song", label: "送って頂く楽曲: 楽曲名", kind: "short", required: true, use: "article" },
+        { id: "q_music_url", label: "送って頂く楽曲: 楽曲URL（YouTube / Suno）", kind: "url", required: true, use: "article" },
+        { id: "q_audio", label: "送って頂く楽曲: WAV/MP3アップロード", kind: "file", required: true, use: "internal" },
         { id: "q_credit", label: "クレジット/表記注意", kind: "long", required: false, use: "constraint" }
       ]
     },
@@ -381,9 +394,9 @@ const sampleData = {
       description: "かなめ🦐/べるぼ☂の紹介曲を運営側で入力するフォーム。",
       questions: [
         { id: "q_owner", label: "担当", kind: "choice", required: true, use: "article" },
-        { id: "q_title", label: "楽曲名", kind: "short", required: true, use: "article" },
-        { id: "q_url", label: "楽曲URL（YouTube / Suno）", kind: "url", required: true, use: "article" },
-        { id: "q_audio", label: "音源ファイル（WAV / mp3）", kind: "file", required: false, use: "internal" },
+        { id: "q_title", label: "送って頂く楽曲: 楽曲名", kind: "short", required: true, use: "article" },
+        { id: "q_url", label: "送って頂く楽曲: 楽曲URL（YouTube / Suno）", kind: "url", required: true, use: "article" },
+        { id: "q_audio", label: "送って頂く楽曲: WAV/MP3アップロード", kind: "file", required: false, use: "internal" },
         { id: "q_point", label: "記事で触れてほしいポイント", kind: "long", required: false, use: "article" }
       ]
     }
@@ -401,7 +414,8 @@ const sampleData = {
         "TEN6/天ロックフェス、リアルライブ企画、スタートラインに込めた想いを中心に記事化。",
       internalOnly: "NG質問や触れない話題はここに残す。記事本文には出さない。",
       constraints:
-        "Silfiraは参加ではなくプロデュース。TEN6/天ロックフェス主催は深海魚（フカミカトト）さん。"
+        "Silfiraは参加ではなくプロデュース。TEN6/天ロックフェス主催は深海魚（フカミカトト）さん。",
+      attachments: []
     }
   ],
   tracks: [
@@ -496,13 +510,19 @@ function migrateData(input) {
   const forms = (input.forms ?? sampleData.forms).map((form) => {
     const questions = (form.questions ?? []).map((question) => {
       if (form.id === "form_personality" && question.id === "q_title") {
-        return { ...question, label: "楽曲名" };
+        return { ...question, label: "送って頂く楽曲: 楽曲名" };
       }
       if (form.id === "form_personality" && question.id === "q_url") {
-        return { ...question, label: "楽曲URL（YouTube / Suno）" };
+        return { ...question, label: "送って頂く楽曲: 楽曲URL（YouTube / Suno）" };
+      }
+      if (question.id === "q_song") {
+        return { ...question, label: "送って頂く楽曲: 楽曲名" };
+      }
+      if (question.id === "q_music_url") {
+        return { ...question, label: "送って頂く楽曲: 楽曲URL（YouTube / Suno）" };
       }
       if (question.id === "q_audio") {
-        return { ...question, label: "音源ファイル（WAV / mp3）" };
+        return { ...question, label: "送って頂く楽曲: WAV/MP3アップロード", required: form.id === "form_listener" ? true : question.required };
       }
       return question;
     });
@@ -511,7 +531,7 @@ function migrateData(input) {
       const urlIndex = questions.findIndex((question) => question.id === "q_url");
       const audioQuestion = {
         id: "q_audio",
-        label: "音源ファイル（WAV / mp3）",
+        label: "送って頂く楽曲: WAV/MP3アップロード",
         kind: "file",
         required: false,
         use: "internal"
@@ -543,6 +563,10 @@ function migrateData(input) {
       }
     },
     forms,
+    responses: (input.responses ?? sampleData.responses).map((response) => ({
+      attachments: [],
+      ...response
+    })),
     tracks: (input.tracks ?? sampleData.tracks).map((track) => ({
       audioFile: "",
       ...track,
@@ -570,7 +594,11 @@ function App() {
 
   useEffect(() => {
     if (sharedPayload) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      console.warn("Radio Article Studio: browser storage quota exceeded. Export JSON to preserve current data.");
+    }
   }, [data, sharedPayload]);
 
   useEffect(() => {
@@ -715,6 +743,19 @@ function App() {
     );
   };
 
+  const removeQuestion = (formId, questionId) => {
+    updateData("forms", (forms) =>
+      forms.map((form) =>
+        form.id === formId
+          ? {
+              ...form,
+              questions: form.questions.filter((question) => question.id !== questionId)
+            }
+          : form
+      )
+    );
+  };
+
   const addResponse = () => {
     if (!selectedEpisode) return;
     updateData("responses", (responses) => [
@@ -728,7 +769,8 @@ function App() {
         publicInfo: "",
         articleUse: "",
         internalOnly: "",
-        constraints: ""
+        constraints: "",
+        attachments: []
       }
     ]);
     setActive("responses");
@@ -939,6 +981,12 @@ ${assetRows || "-"}
       try {
         const parsed = JSON.parse(String(reader.result));
         const response = parsed.response ?? parsed;
+        const attachments =
+          response.attachments ??
+          parsed.attachments ??
+          (parsed.rawAnswers ?? [])
+            .map((answer) => answer.attachment)
+            .filter(Boolean);
         const normalized = {
           id: response.id || newId("res"),
           episodeId: response.episodeId || selectedEpisode?.id || data.episodes[0]?.id || "",
@@ -948,7 +996,8 @@ ${assetRows || "-"}
           publicInfo: response.publicInfo || "",
           articleUse: response.articleUse || "",
           internalOnly: response.internalOnly || "",
-          constraints: response.constraints || ""
+          constraints: response.constraints || "",
+          attachments
         };
         updateData("responses", (responses) => [normalized, ...responses]);
         setActive("responses");
@@ -1055,6 +1104,7 @@ ${assetRows || "-"}
               addForm={addForm}
               addQuestion={addQuestion}
               patchQuestion={patchQuestion}
+              removeQuestion={removeQuestion}
             />
           )}
           {active === "responses" && (
@@ -1122,10 +1172,27 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     setAnswers((current) => ({ ...current, [questionId]: value }));
   };
 
+  const updateFileAnswer = async (questionId, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!isAudioUpload(file)) {
+      alert("WAVまたはMP3ファイルを選んでください。");
+      event.target.value = "";
+      return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    updateAnswer(questionId, {
+      fileName: file.name,
+      mimeType: file.type || (file.name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg"),
+      size: file.size,
+      dataUrl
+    });
+  };
+
   const formatAnswers = (uses) =>
     form.questions
       .filter((question) => uses.includes(question.use))
-      .map((question) => `${question.label}: ${answers[question.id] || "-"}`)
+      .map((question) => `${question.label}: ${formatAnswerValue(answers[question.id])}`)
       .join("\n");
 
   const inferRespondent = () => {
@@ -1133,29 +1200,44 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     return (nameQuestion && answers[nameQuestion.id]) || "";
   };
 
-  const buildResponsePayload = () => ({
-    version: 1,
-    type: "radio-article-studio-response",
-    exportedAt: new Date().toISOString(),
-    response: {
-      id: newId("res"),
-      episodeId: "",
-      formId: form.id,
-      respondent: inferRespondent(),
-      status: "未確認",
-      publicInfo: formatAnswers(["public"]),
-      articleUse: formatAnswers(["article", "sns", "manga"]),
-      internalOnly: formatAnswers(["internal"]),
-      constraints: formatAnswers(["constraint"])
-    },
-    rawAnswers: form.questions.map((question) => ({
-      id: question.id,
-      label: question.label,
-      use: question.use,
-      useLabel: QUESTION_USE_LABELS[question.use] ?? question.use,
-      answer: answers[question.id] || ""
-    }))
-  });
+  const buildResponsePayload = () => {
+    const attachments = form.questions
+      .filter((question) => question.kind === "file" && answers[question.id]?.dataUrl)
+      .map((question) => ({
+        questionId: question.id,
+        questionLabel: question.label,
+        fileName: answers[question.id].fileName,
+        mimeType: answers[question.id].mimeType,
+        size: answers[question.id].size,
+        dataUrl: answers[question.id].dataUrl
+      }));
+
+    return {
+      version: 1,
+      type: "radio-article-studio-response",
+      exportedAt: new Date().toISOString(),
+      response: {
+        id: newId("res"),
+        episodeId: "",
+        formId: form.id,
+        respondent: inferRespondent(),
+        status: "未確認",
+        publicInfo: formatAnswers(["public"]),
+        articleUse: formatAnswers(["article", "sns", "manga"]),
+        internalOnly: formatAnswers(["internal"]),
+        constraints: formatAnswers(["constraint"]),
+        attachments
+      },
+      rawAnswers: form.questions.map((question) => ({
+        id: question.id,
+        label: question.label,
+        use: question.use,
+        useLabel: QUESTION_USE_LABELS[question.use] ?? question.use,
+        answer: formatAnswerValue(answers[question.id]),
+        attachment: question.kind === "file" ? answers[question.id] || null : null
+      }))
+    };
+  };
 
   const submit = (event) => {
     event.preventDefault();
@@ -1198,7 +1280,17 @@ function PublicSubmissionForm({ logoSrc, payload }) {
             <label className="field wide" key={question.id}>
               <span>{question.label}{question.required ? " *" : ""}</span>
               <small>{QUESTION_USE_LABELS[question.use] ?? question.use}</small>
-              {question.kind === "long" ? (
+              {question.kind === "file" ? (
+                <div className="upload-field">
+                  <input
+                    type="file"
+                    required={Boolean(question.required)}
+                    accept={AUDIO_FILE_ACCEPT}
+                    onChange={(event) => updateFileAnswer(question.id, event)}
+                  />
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : "WAVまたはMP3をアップロード"}</small>
+                </div>
+              ) : question.kind === "long" ? (
                 <textarea
                   required={Boolean(question.required)}
                   value={answers[question.id] ?? ""}
@@ -1208,7 +1300,6 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                 <input
                   type={question.kind === "url" ? "url" : "text"}
                   required={Boolean(question.required)}
-                  placeholder={question.kind === "file" ? "Drive URLなど、ファイルを受け取れる共有URL" : ""}
                   value={answers[question.id] ?? ""}
                   onChange={(event) => updateAnswer(question.id, event.target.value)}
                 />
@@ -1406,6 +1497,14 @@ function SourceImportCard({ title, description, value, onChange, onImportUrl, on
   );
 }
 
+function downloadAttachment(attachment) {
+  if (!attachment?.dataUrl) return;
+  const anchor = document.createElement("a");
+  anchor.href = attachment.dataUrl;
+  anchor.download = attachment.fileName || "audio-file";
+  anchor.click();
+}
+
 function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem, removeItem, addEpisode }) {
   return (
     <div className="view-stack">
@@ -1436,7 +1535,7 @@ function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem
   );
 }
 
-function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuestion }) {
+function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuestion, removeQuestion }) {
   const [copiedFormId, setCopiedFormId] = useState("");
 
   const copyShareUrl = async (form) => {
@@ -1489,6 +1588,7 @@ function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuesti
                     <input type="checkbox" checked={Boolean(question.required)} onChange={(event) => patchQuestion(form.id, question.id, { required: event.target.checked })} />
                     必須
                   </label>
+                  <button className="icon-danger" onClick={() => removeQuestion(form.id, question.id)} aria-label="質問を削除"><Trash2 size={16} /></button>
                 </div>
               ))}
               <button className="secondary" onClick={() => addQuestion(form.id)}><Plus size={16} />質問追加</button>
@@ -1532,6 +1632,18 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
               <TextArea label="制作側だけに共有するメモ" value={response.internalOnly} onChange={(value) => patchItem("responses", response.id, { internalOnly: value })} />
               <TextArea label="記事/SNSで触れないこと・表記ルール" value={response.constraints} onChange={(value) => patchItem("responses", response.id, { constraints: value })} />
             </div>
+            {response.attachments?.length > 0 && (
+              <div className="attachment-list">
+                <div className="subhead">添付音源</div>
+                {response.attachments.map((attachment, index) => (
+                  <div className="attachment-item" key={`${attachment.fileName}-${index}`}>
+                    <span>{attachment.fileName}</span>
+                    <small>{Math.round((attachment.size || 0) / 1024 / 1024 * 10) / 10}MB</small>
+                    <button className="secondary" onClick={() => downloadAttachment(attachment)}><Download size={16} />ダウンロード</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </article>
         ))}
       </div>
