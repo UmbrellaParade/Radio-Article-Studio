@@ -563,7 +563,38 @@ const decodeCompressedSharePayload = (value) => {
   return JSON.parse(json);
 };
 
+const getRawStoredDataForShare = () => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? { ...sampleData, ...JSON.parse(stored) } : sampleData;
+  } catch {
+    return sampleData;
+  }
+};
+
+const resolveFormReferencePayload = (formId) => {
+  const data = getRawStoredDataForShare();
+  const form = (data.forms ?? []).find((item) => item.id === formId);
+  return form ? makeSharePayload(form, { ...sampleData.settings, ...(data.settings ?? {}) }) : { error: true };
+};
+
+const resolvePeriodReferencePayload = (periodId) => {
+  const data = getRawStoredDataForShare();
+  const period = (data.applicationPeriods ?? []).find((item) => item.id === periodId);
+  if (!period) return { error: true };
+  const form = (data.forms ?? []).find((item) => item.id === period.formId);
+  if (!form) return { error: true };
+  const episode = (data.episodes ?? []).find((item) => item.id === period.episodeId);
+  return makeSharePayload(form, { ...sampleData.settings, ...(data.settings ?? {}) }, { period, episode });
+};
+
 const readSharedFormPayload = () => {
+  const periodReferenceMatch = window.location.hash.match(/^#\/p\/([^/?#]+)$/);
+  if (periodReferenceMatch) return resolvePeriodReferencePayload(decodeURIComponent(periodReferenceMatch[1]));
+
+  const formReferenceMatch = window.location.hash.match(/^#\/f\/([^/?#]+)$/);
+  if (formReferenceMatch) return resolveFormReferencePayload(decodeURIComponent(formReferenceMatch[1]));
+
   const compressedMatch = window.location.hash.match(/^#\/s\/(.+)$/);
   if (compressedMatch) {
     try {
@@ -620,6 +651,11 @@ const makeSharePayload = (form, settings = sampleData.settings, context = {}) =>
 };
 
 const makeShareUrl = (form, settings = sampleData.settings, context = {}) =>
+  context.period?.id
+    ? `${window.location.origin}${window.location.pathname}#/p/${encodeURIComponent(context.period.id)}`
+    : `${window.location.origin}${window.location.pathname}#/f/${encodeURIComponent(form.id)}`;
+
+const makePortableShareUrl = (form, settings = sampleData.settings, context = {}) =>
   `${window.location.origin}${window.location.pathname}#/s/${encodeCompressedSharePayload(makeSharePayload(form, settings, context))}`;
 
 const makeLegacyShareUrl = (form, settings = sampleData.settings, context = {}) =>
@@ -2374,6 +2410,15 @@ function ApplicationPeriods({
     window.setTimeout(() => setCopiedPeriodId(""), 1800);
   };
 
+  const copyPortablePeriodShareUrl = async (period) => {
+    const form = forms.find((item) => item.id === period.formId);
+    if (!form) return;
+    const episode = episodes.find((item) => item.id === period.episodeId);
+    await navigator.clipboard.writeText(makePortableShareUrl(form, settings, { period, episode }));
+    setCopiedPeriodId(`${period.id}:portable`);
+    window.setTimeout(() => setCopiedPeriodId(""), 1800);
+  };
+
   return (
     <div className="view-stack">
       <SectionTitle
@@ -2411,12 +2456,15 @@ function ApplicationPeriods({
               <div className="share-box">
                 <div>
                   <strong><Share2 size={16} />応募フォームURL</strong>
-                  <span>フォーム内容を圧縮した短い共有URLです。回答者側でもこのまま開けます。</span>
+                  <span>通常はこの短いURLを使います。相手の端末にまだない作りたてのカスタムフォームは、フォーム内容込みの予備URLが確実です。</span>
                 </div>
                 <input readOnly value={shareUrl} onFocus={(event) => event.target.select()} />
                 <div className="inline-actions">
                   <button className="secondary" onClick={() => copyPeriodShareUrl(period)} disabled={!shareUrl}>
                     <ClipboardCopy size={16} />{copiedPeriodId === period.id ? "コピー済み" : "リンクをコピー"}
+                  </button>
+                  <button className="secondary" onClick={() => copyPortablePeriodShareUrl(period)} disabled={!shareUrl}>
+                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:portable` ? "コピー済み" : "予備URLをコピー"}
                   </button>
                   <button className="primary" onClick={() => importPeriodCsvUrl(period)}>
                     <Upload size={16} />この期間のCSVを取り込み
@@ -2444,6 +2492,12 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
     window.setTimeout(() => setCopiedFormId(""), 1800);
   };
 
+  const copyPortableShareUrl = async (form) => {
+    await navigator.clipboard.writeText(makePortableShareUrl(form, settings));
+    setCopiedFormId(`${form.id}:portable`);
+    window.setTimeout(() => setCopiedFormId(""), 1800);
+  };
+
   return (
     <div className="view-stack">
       <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、短縮共有フォームURLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
@@ -2461,12 +2515,17 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
             <div className="share-box">
               <div>
                 <strong><Share2 size={16} />共有フォーム</strong>
-                <span>フォーム内容を圧縮した短いURLです。期間を指定する場合は「応募期間管理」のURLを使います。</span>
+                <span>通常はこの短いURLを使います。期間を指定する場合は「応募期間管理」のURLを使います。相手の端末にまだない作りたてのカスタムフォームは予備URLが確実です。</span>
               </div>
               <input readOnly value={makeShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
-              <button className="secondary" onClick={() => copyShareUrl(form)}>
-                <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "リンクをコピー"}
-              </button>
+              <div className="inline-actions">
+                <button className="secondary" onClick={() => copyShareUrl(form)}>
+                  <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "リンクをコピー"}
+                </button>
+                <button className="secondary" onClick={() => copyPortableShareUrl(form)}>
+                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:portable` ? "コピー済み" : "予備URLをコピー"}
+                </button>
+              </div>
             </div>
             <div className="question-list">
               <div className="subhead">質問項目</div>
