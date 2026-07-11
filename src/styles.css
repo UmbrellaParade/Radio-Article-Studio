@@ -334,6 +334,13 @@ h1 {
   gap: 12px;
 }
 
+.track-meta-grid {
+  display: grid;
+  grid-template-columns: 96px minmax(180px, 240px) minmax(220px, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .field {
   display: grid;
   gap: 6px;
@@ -384,6 +391,13 @@ textarea {
   margin-top: 16px;
 }
 
+.hint-text {
+  margin: -2px 0 2px;
+  color: #665d70;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .question-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 120px minmax(220px, 260px) 86px;
@@ -413,7 +427,8 @@ textarea {
 }
 
 .share-box,
-.result-box {
+.result-box,
+.song-card {
   display: grid;
   gap: 10px;
   margin-top: 16px;
@@ -421,6 +436,32 @@ textarea {
   border: 1px solid #d6ccbd;
   border-radius: 8px;
   background: #f7f2e9;
+}
+
+.song-card {
+  margin-top: 12px;
+  background: #fff8ee;
+}
+
+.song-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #241f2f;
+  font-weight: 900;
+}
+
+.song-card-title svg {
+  color: #129fb0;
+}
+
+.song-card-title b {
+  margin-left: auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #241f2f;
+  color: #fff;
+  font-size: 12px;
 }
 
 .share-box strong {
@@ -544,6 +585,7 @@ textarea {
   .workspace,
   .two-col,
   .form-grid,
+  .track-meta-grid,
   .stat-grid {
     grid-template-columns: 1fr;
   }

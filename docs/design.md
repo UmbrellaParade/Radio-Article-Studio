@@ -111,8 +111,6 @@ SNS投稿ステータス
 ```text
 form_id
 フォーム名
-用途
-受付中/停止中
 対象放送回
 回答期限
 回答者種別
@@ -227,9 +225,9 @@ SNSで紹介してよいか
 ```text
 放送回
 担当: かなめ🦐 / べるぼ☂
-曲名
-楽曲URL
-URL種別: Suno / YouTube / その他
+楽曲名
+楽曲URL: Suno / YouTube
+音源ファイル: WAV / mp3
 曲紹介メモ
 記事で触れてほしいポイント
 タグ候補
@@ -247,9 +245,9 @@ slot_no
 アーティスト名
 アーティスト表記ルール
 敬称ルール
-曲名
-URL種別
-元URL
+楽曲名
+楽曲URL: Suno / YouTube
+音源ファイル: WAV / mp3
 埋め込みURL
 Suno UUID
 YouTube ID

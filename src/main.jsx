@@ -35,6 +35,23 @@ const QUESTION_USE_OPTIONS = [
 
 const QUESTION_USE_LABELS = Object.fromEntries(QUESTION_USE_OPTIONS);
 
+const QUESTION_KIND_OPTIONS = [
+  ["short", "短文"],
+  ["long", "長文"],
+  ["url", "URL"],
+  ["choice", "選択式"],
+  ["file", "ファイル"]
+];
+
+const detectUrlType = (url = "") => {
+  const normalized = url.toLowerCase();
+  if (normalized.includes("suno.com")) return "Suno";
+  if (normalized.includes("youtube.com") || normalized.includes("youtu.be")) return "YouTube";
+  if (normalized.includes("spotify.com")) return "Spotify";
+  if (normalized.match(/\.(mp3|wav)(\?|#|$)/)) return "Audio";
+  return "Other";
+};
+
 const newId = (prefix) => {
   if (crypto?.randomUUID) return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
@@ -128,7 +145,7 @@ const sampleData = {
         { id: "q_artist", label: "アーティスト名 正式表記", kind: "short", required: true, use: "article" },
         { id: "q_song", label: "曲名 正式表記", kind: "short", required: true, use: "article" },
         { id: "q_music_url", label: "楽曲URL", kind: "url", required: true, use: "article" },
-        { id: "q_audio", label: "音源ファイル mp3/wav", kind: "file", required: false, use: "internal" },
+        { id: "q_audio", label: "音源ファイル（WAV / mp3）", kind: "file", required: false, use: "internal" },
         { id: "q_credit", label: "クレジット/表記注意", kind: "long", required: false, use: "constraint" }
       ]
     },
@@ -140,8 +157,9 @@ const sampleData = {
       description: "かなめ🦐/べるぼ☂の紹介曲を運営側で入力するフォーム。",
       questions: [
         { id: "q_owner", label: "担当", kind: "choice", required: true, use: "article" },
-        { id: "q_title", label: "曲名", kind: "short", required: true, use: "article" },
-        { id: "q_url", label: "楽曲URL", kind: "url", required: true, use: "article" },
+        { id: "q_title", label: "楽曲名", kind: "short", required: true, use: "article" },
+        { id: "q_url", label: "楽曲URL（YouTube / Suno）", kind: "url", required: true, use: "article" },
+        { id: "q_audio", label: "音源ファイル（WAV / mp3）", kind: "file", required: false, use: "internal" },
         { id: "q_point", label: "記事で触れてほしいポイント", kind: "long", required: false, use: "article" }
       ]
     }
@@ -172,6 +190,7 @@ const sampleData = {
       title: "スタートライン",
       urlType: "YouTube",
       url: "https://youtu.be/bALQZxlngvI",
+      audioFile: "",
       embedUrl: "https://www.youtube.com/embed/bALQZxlngvI",
       honorific: "通常表記",
       articlePoint: "TEN6出演をきっかけに作られた、夢のスタートラインを感じる曲。",
@@ -186,6 +205,7 @@ const sampleData = {
       title: "Rainbound (Demo)",
       urlType: "Suno",
       url: "https://suno.com/s/6Kuki8xssObQnKWJ",
+      audioFile: "",
       embedUrl: "https://suno.com/embed/89f93041-4baf-4ed2-9c09-59d4ce25a2c1",
       honorific: "さんなし",
       articlePoint: "雨をテーマにしたロックチューン。",
@@ -200,6 +220,7 @@ const sampleData = {
       title: "Bitter Pop Lemon",
       urlType: "Suno",
       url: "https://suno.com/s/oiwDlnZRpx09KoI5",
+      audioFile: "",
       embedUrl: "https://suno.com/embed/f0281aa9-40b3-4f35-9215-4751d3de97e9",
       honorific: "さんなし",
       articlePoint: "K-POPタッチのポップ感。",
@@ -214,6 +235,7 @@ const sampleData = {
       title: "雨粒のシンコペーション",
       urlType: "Suno",
       url: "https://suno.com/s/SHzMOvCfu4xyCfli",
+      audioFile: "",
       embedUrl: "https://suno.com/embed/b4ea0b11-606e-4c10-bd42-c8c253485d13",
       honorific: "さん付け",
       articlePoint: "ミックスの美しさと雨テーマのグルーヴ。",
@@ -246,12 +268,58 @@ const sampleData = {
   ]
 };
 
+function migrateData(input) {
+  const forms = (input.forms ?? sampleData.forms).map((form) => {
+    const questions = (form.questions ?? []).map((question) => {
+      if (form.id === "form_personality" && question.id === "q_title") {
+        return { ...question, label: "楽曲名" };
+      }
+      if (form.id === "form_personality" && question.id === "q_url") {
+        return { ...question, label: "楽曲URL（YouTube / Suno）" };
+      }
+      if (question.id === "q_audio") {
+        return { ...question, label: "音源ファイル（WAV / mp3）" };
+      }
+      return question;
+    });
+
+    if (form.id === "form_personality" && !questions.some((question) => question.id === "q_audio")) {
+      const urlIndex = questions.findIndex((question) => question.id === "q_url");
+      const audioQuestion = {
+        id: "q_audio",
+        label: "音源ファイル（WAV / mp3）",
+        kind: "file",
+        required: false,
+        use: "internal"
+      };
+      if (urlIndex >= 0) {
+        questions.splice(urlIndex + 1, 0, audioQuestion);
+      } else {
+        questions.push(audioQuestion);
+      }
+    }
+
+    return { ...form, questions };
+  });
+
+  return {
+    ...sampleData,
+    ...input,
+    forms,
+    tracks: (input.tracks ?? sampleData.tracks).map((track) => ({
+      audioFile: "",
+      ...track,
+      urlType: track.urlType || detectUrlType(track.url)
+    }))
+  };
+}
+
 function loadData() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : sampleData;
+    return migrateData(stored ? JSON.parse(stored) : sampleData);
   } catch {
-    return sampleData;
+    return migrateData(sampleData);
   }
 }
 
@@ -333,6 +401,7 @@ function App() {
         title: "",
         urlType: "Suno",
         url: "",
+        audioFile: "",
         embedUrl: "",
         honorific: "",
         articlePoint: "",
@@ -452,7 +521,7 @@ ${response.constraints || "-"}`
       .map(
         (track) =>
           `${track.slotNo}. ${track.title || "曲名未入力"} / ${track.artist || "アーティスト未入力"}\n` +
-          `   種別: ${track.source} / URL: ${track.url || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
+          `   種別: ${track.source} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
           `   記事ポイント: ${track.articlePoint || "-"}`
       )
       .join("\n");
@@ -950,8 +1019,6 @@ function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuesti
             </div>
             <div className="form-grid">
               <Field label="フォーム名" value={form.name} onChange={(value) => patchItem("forms", form.id, { name: value })} />
-              <SelectField label="用途" value={form.type} options={["ゲスト", "リスナー", "運営", "自由フォーム"]} onChange={(value) => patchItem("forms", form.id, { type: value })} />
-              <SelectField label="状態" value={form.status} options={["準備中", "受付中", "停止中", "運用中"]} onChange={(value) => patchItem("forms", form.id, { status: value })} />
               <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
             </div>
             <div className="share-box">
@@ -966,15 +1033,14 @@ function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuesti
             </div>
             <div className="question-list">
               <div className="subhead">質問項目</div>
+              <p className="hint-text">入力形式: 短文は1行、長文は複数行、URLはリンク、選択式は決まった候補から選ぶ項目です。</p>
               {form.questions.map((question) => (
                 <div className="question-row" key={question.id}>
                   <input value={question.label} onChange={(event) => patchQuestion(form.id, question.id, { label: event.target.value })} />
                   <select value={question.kind} onChange={(event) => patchQuestion(form.id, question.id, { kind: event.target.value })}>
-                    <option>short</option>
-                    <option>long</option>
-                    <option>url</option>
-                    <option>choice</option>
-                    <option>file</option>
+                    {QUESTION_KIND_OPTIONS.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
                   </select>
                   <select value={question.use} onChange={(event) => patchQuestion(form.id, question.id, { use: event.target.value })}>
                     {QUESTION_USE_OPTIONS.map(([value, label]) => (
@@ -1036,27 +1102,39 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
 }
 
 function Tracks({ tracks, patchItem, removeItem, addTrack }) {
+  const updateTrackUrl = (track, url) => {
+    patchItem("tracks", track.id, { url, urlType: detectUrlType(url) });
+  };
+
   return (
     <div className="view-stack">
-      <SectionTitle title="楽曲/音源管理" subtitle="ゲスト曲、パーソナリティ曲、リスナー応募曲を同じ形式で管理します。" action={<button className="primary" onClick={addTrack}><Plus size={16} />楽曲追加</button>} />
+      <SectionTitle title="楽曲/音源管理" subtitle="1曲を1ブロックで管理します。楽曲名、楽曲URL、音源ファイルをまとめて入力します。" action={<button className="primary" onClick={addTrack}><Plus size={16} />楽曲追加</button>} />
       <div className="records">
         {tracks.map((track) => (
           <article className="record" key={track.id}>
             <div className="record-head">
-              <strong>{track.slotNo}. {track.title || "曲名未入力"} / {track.artist || "アーティスト未入力"}</strong>
+              <strong>{track.slotNo}. {track.title || "楽曲名未入力"} / {track.artist || "アーティスト未入力"}</strong>
               <button className="icon-danger" onClick={() => removeItem("tracks", track.id)}><Trash2 size={16} /></button>
             </div>
-            <div className="form-grid">
+            <div className="track-meta-grid">
               <Field label="曲順" type="number" value={track.slotNo} onChange={(value) => patchItem("tracks", track.id, { slotNo: value })} />
-              <SelectField label="種別" value={track.source} options={["ゲスト曲", "パーソナリティ曲", "リスナー応募曲"]} onChange={(value) => patchItem("tracks", track.id, { source: value })} />
+              <SelectField label="紹介枠" value={track.source} options={["ゲスト曲", "パーソナリティ曲", "リスナー応募曲"]} onChange={(value) => patchItem("tracks", track.id, { source: value })} />
               <Field label="アーティスト名" value={track.artist} onChange={(value) => patchItem("tracks", track.id, { artist: value })} />
-              <Field label="曲名" value={track.title} onChange={(value) => patchItem("tracks", track.id, { title: value })} />
-              <SelectField label="URL種別" value={track.urlType} options={["Suno", "YouTube", "Spotify", "Audio", "Other"]} onChange={(value) => patchItem("tracks", track.id, { urlType: value })} />
-              <Field label="元URL" value={track.url} onChange={(value) => patchItem("tracks", track.id, { url: value })} />
-              <Field label="埋め込みURL" value={track.embedUrl} onChange={(value) => patchItem("tracks", track.id, { embedUrl: value })} />
-              <Field label="敬称ルール" value={track.honorific} onChange={(value) => patchItem("tracks", track.id, { honorific: value })} />
-              <SelectField label="状態" value={track.status} options={["未確認", "URL確認済み", "埋め込み取得済み", "記事反映済み"]} onChange={(value) => patchItem("tracks", track.id, { status: value })} />
-              <TextArea label="記事で触れるポイント" value={track.articlePoint} onChange={(value) => patchItem("tracks", track.id, { articlePoint: value })} />
+            </div>
+            <div className="song-card">
+              <div className="song-card-title">
+                <Music size={17} />
+                <span>1曲分の情報</span>
+                <b>{track.url ? detectUrlType(track.url) : "URL未入力"}</b>
+              </div>
+              <div className="form-grid">
+                <Field label="楽曲名" value={track.title} onChange={(value) => patchItem("tracks", track.id, { title: value })} />
+                <Field label="楽曲URL（YouTube / Suno）" value={track.url} onChange={(value) => updateTrackUrl(track, value)} />
+                <Field label="音源ファイル（WAV / mp3）" value={track.audioFile} onChange={(value) => patchItem("tracks", track.id, { audioFile: value })} />
+                <Field label="埋め込みURL（必要なら）" value={track.embedUrl} onChange={(value) => patchItem("tracks", track.id, { embedUrl: value })} />
+                <Field label="敬称ルール" value={track.honorific} onChange={(value) => patchItem("tracks", track.id, { honorific: value })} />
+                <TextArea label="記事で触れるポイント" value={track.articlePoint} onChange={(value) => patchItem("tracks", track.id, { articlePoint: value })} />
+              </div>
             </div>
           </article>
         ))}
