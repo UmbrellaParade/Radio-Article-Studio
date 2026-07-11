@@ -46,7 +46,7 @@ Implemented:
 1. Dashboard.
 2. Spreadsheet/CSV import for guest questionnaires, listener song submissions, and personality song sheets.
 3. Bellbo-only manual song URL entry.
-4. Broadcast episode management.
+4. Broadcast episode management with automatic broadcast slot, guest episode title, and article URL slug handling.
 5. Form template management.
 6. Shareable form URL prototype.
 7. Response JSON creation/import with WAV/MP3 attachments.

@@ -417,6 +417,11 @@ select {
   padding: 8px 10px;
 }
 
+input[readonly] {
+  background: #f6f1ea;
+  color: #5b5267;
+}
+
 input[type="range"] {
   padding: 0;
   accent-color: #129fb0;
@@ -440,6 +445,11 @@ textarea {
   color: #665d70;
   font-size: 13px;
   line-height: 1.7;
+}
+
+.hint-text.wide {
+  grid-column: 1 / -1;
+  margin-top: -6px;
 }
 
 .question-row {

@@ -100,6 +100,58 @@ const newId = (prefix) => {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 };
 
+const WEEKDAY_LABELS = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"];
+
+const getBroadcastSlot = (dateString = "") => {
+  if (!dateString) return "";
+  const date = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  const weekNumber = Math.floor((date.getDate() - 1) / 7) + 1;
+  return `第${weekNumber}${WEEKDAY_LABELS[date.getDay()]}`;
+};
+
+const formatLocalDate = (date = new Date()) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const ensureGuestHonorific = (guestName = "") => {
+  const trimmed = String(guestName).trim();
+  if (!trimmed) return "";
+  return trimmed.endsWith("さん") ? trimmed : `${trimmed}さん`;
+};
+
+const makeGuestEpisodeTitle = (guestName = "") => {
+  const titledName = ensureGuestHonorific(guestName);
+  return titledName ? `${titledName}ゲスト回🌟` : "";
+};
+
+const slugify = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/さん$/, "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+
+const extractSlugFromUrl = (url = "") => {
+  try {
+    const pathname = new URL(url).pathname;
+    return pathname.split("/").filter(Boolean).pop() ?? "";
+  } catch {
+    return "";
+  }
+};
+
+const buildArticleUrl = (site = "", slug = "") => {
+  const normalizedSite = String(site).trim().replace(/\/+$/, "");
+  const normalizedSlug = String(slug).trim().replace(/^\/+|\/+$/g, "");
+  if (!normalizedSite || !normalizedSlug) return "";
+  return `${normalizedSite}/${normalizedSlug}/`;
+};
+
 const normalizeKey = (value = "") =>
   String(value)
     .trim()
@@ -345,7 +397,7 @@ const sampleData = {
   episodes: [
     {
       id: "ep_yui_2026_07_10",
-      title: "結音さんゲスト回",
+      title: "結音さんゲスト回🌟",
       date: "2026-07-10",
       slot: "第2木曜日",
       time: "21:30-23:00",
@@ -353,6 +405,7 @@ const sampleData = {
       guestName: "結音さん",
       standfmUrl: "https://stand.fm/episodes/6a4fa398337119d74b6669ff",
       status: "公開済み",
+      articleSlug: "sunopa-yui-silfira-guest",
       articleUrl: "https://ai-music.noiseinmysoul.com/sunopa-yui-silfira-guest/",
       notes: "サンプル。実運用では放送後にstand.fm URLを入れる。"
     }
@@ -546,9 +599,21 @@ function migrateData(input) {
     return { ...form, questions };
   });
 
+  const settings = { ...sampleData.settings, ...(input.settings ?? {}) };
+  const episodes = (input.episodes ?? sampleData.episodes).map((episode) => {
+    const articleSlug = episode.articleSlug || extractSlugFromUrl(episode.articleUrl);
+    return {
+      ...episode,
+      slot: episode.slot || getBroadcastSlot(episode.date),
+      articleSlug,
+      articleUrl: episode.articleUrl || buildArticleUrl(settings.wordpressSite, articleSlug)
+    };
+  });
+
   return {
     ...sampleData,
     ...input,
+    settings,
     imports: { ...defaultImports, ...(input.imports ?? {}) },
     thumbnailStudio: {
       ...defaultThumbnailStudio,
@@ -562,6 +627,7 @@ function migrateData(input) {
         ...(input.thumbnailStudio?.guestIcon ?? {})
       }
     },
+    episodes,
     forms,
     responses: (input.responses ?? sampleData.responses).map((response) => ({
       attachments: [],
@@ -627,16 +693,18 @@ function App() {
   };
 
   const addEpisode = () => {
+    const today = formatLocalDate();
     const episode = {
       id: newId("ep"),
       title: "新しい放送回",
-      date: new Date().toISOString().slice(0, 10),
-      slot: "第2木曜日",
+      date: today,
+      slot: getBroadcastSlot(today),
       time: "21:30-23:00",
       type: "ゲスト回",
       guestName: "",
       standfmUrl: "",
       status: "準備中",
+      articleSlug: "",
       articleUrl: "",
       notes: ""
     };
@@ -900,6 +968,7 @@ ${response.constraints || "-"}`
           `- ${asset.type}: ${asset.title || "-"} / Drive: ${asset.driveUrl || "-"} / local: ${asset.localPath || "-"} / credit: ${asset.credit || "-"}`
       )
       .join("\n");
+    const articleUrl = selectedEpisode.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode.articleSlug);
 
     return `Obsidianの以下フォルダーを読んで、今回のラジオ放送回を記事化してください。
 
@@ -913,6 +982,8 @@ ${data.settings.obsidianPath}
 - 種別: ${selectedEpisode.type}
 - ゲスト: ${selectedEpisode.guestName || "-"}
 - stand.fm URL: ${selectedEpisode.standfmUrl || "-"}
+- 記事スラッグ: ${selectedEpisode.articleSlug || "-"}
+- 記事URL: ${articleUrl || "-"}
 
 投稿先:
 ${data.settings.wordpressSite}
@@ -1094,6 +1165,7 @@ ${assetRows || "-"}
               patchItem={patchItem}
               removeItem={removeItem}
               addEpisode={addEpisode}
+              wordpressSite={data.settings.wordpressSite}
             />
           )}
           {active === "forms" && (
@@ -1343,6 +1415,7 @@ function Header({ logoSrc }) {
 }
 
 function Dashboard({ data, selectedEpisode, episodeTracks, episodeResponses, episodeAssets, setActive }) {
+  const articleUrl = selectedEpisode?.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode?.articleSlug);
   const stats = [
     ["放送回", data.episodes.length, CalendarDays],
     ["フォーム", data.forms.length, ListChecks],
@@ -1373,7 +1446,7 @@ function Dashboard({ data, selectedEpisode, episodeTracks, episodeResponses, epi
               <div><dt>放送日</dt><dd>{selectedEpisode.date}</dd></div>
               <div><dt>種別</dt><dd>{selectedEpisode.type}</dd></div>
               <div><dt>ゲスト</dt><dd>{selectedEpisode.guestName || "-"}</dd></div>
-              <div><dt>記事</dt><dd>{selectedEpisode.articleUrl || "未設定"}</dd></div>
+              <div><dt>記事</dt><dd>{articleUrl || "未設定"}</dd></div>
             </dl>
           ) : (
             <p>放送回を追加してください。</p>
@@ -1387,7 +1460,7 @@ function Dashboard({ data, selectedEpisode, episodeTracks, episodeResponses, epi
             <StatusLine done={episodeResponses.length > 0} label="ゲスト/回答情報" />
             <StatusLine done={episodeTracks.length > 0} label="紹介楽曲" />
             <StatusLine done={episodeAssets.some((asset) => asset.type.includes("16:9"))} label="記事アイキャッチ" />
-            <StatusLine done={Boolean(selectedEpisode?.articleUrl)} label="公開記事URL" />
+            <StatusLine done={Boolean(articleUrl)} label="公開記事URL" />
           </div>
         </article>
       </div>
@@ -1505,7 +1578,46 @@ function downloadAttachment(attachment) {
   anchor.click();
 }
 
-function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem, removeItem, addEpisode }) {
+function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem, removeItem, addEpisode, wordpressSite }) {
+  const patchEpisodeDate = (episode, date) => {
+    patchItem("episodes", episode.id, {
+      date,
+      slot: getBroadcastSlot(date)
+    });
+  };
+
+  const patchEpisodeType = (episode, type) => {
+    const patch = { type };
+    if (type === "ゲスト回" && episode.guestName) {
+      patch.title = makeGuestEpisodeTitle(episode.guestName);
+    }
+    patchItem("episodes", episode.id, patch);
+  };
+
+  const patchGuestName = (episode, guestName) => {
+    const patch = { guestName };
+    if (episode.type === "ゲスト回") {
+      patch.title = makeGuestEpisodeTitle(guestName);
+    }
+    const slugCandidate = slugify(guestName);
+    if (!episode.articleSlug && slugCandidate) {
+      patch.articleSlug = slugCandidate;
+      patch.articleUrl = buildArticleUrl(wordpressSite, slugCandidate);
+    }
+    patchItem("episodes", episode.id, patch);
+  };
+
+  const patchArticleSlug = (episode, value) => {
+    const articleSlug = slugify(value);
+    patchItem("episodes", episode.id, {
+      articleSlug,
+      articleUrl: buildArticleUrl(wordpressSite, articleSlug)
+    });
+  };
+
+  const slotOptions = (episode) =>
+    Array.from(new Set([episode.slot, getBroadcastSlot(episode.date), "第2木曜日", "第4木曜日", "特別回"].filter(Boolean)));
+
   return (
     <div className="view-stack">
       <SectionTitle title="放送回管理" subtitle="第2/第4木曜回、ゲスト回、通常回、stand.fm URL、記事URLを管理します。" action={<button className="primary" onClick={addEpisode}><Plus size={16} />追加</button>} />
@@ -1518,14 +1630,16 @@ function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem
             </div>
             <div className="form-grid">
               <Field label="タイトル" value={episode.title} onChange={(value) => patchItem("episodes", episode.id, { title: value })} />
-              <Field label="放送日" type="date" value={episode.date} onChange={(value) => patchItem("episodes", episode.id, { date: value })} />
-              <SelectField label="開催枠" value={episode.slot} options={["第2木曜日", "第4木曜日", "特別回"]} onChange={(value) => patchItem("episodes", episode.id, { slot: value })} />
+              <Field label="放送日" type="date" value={episode.date} onChange={(value) => patchEpisodeDate(episode, value)} />
+              <SelectField label="開催枠" value={episode.slot} options={slotOptions(episode)} onChange={(value) => patchItem("episodes", episode.id, { slot: value })} />
               <Field label="放送時間" value={episode.time} onChange={(value) => patchItem("episodes", episode.id, { time: value })} />
-              <SelectField label="種別" value={episode.type} options={["ゲスト回", "通常回", "リスナー曲回", "特別回"]} onChange={(value) => patchItem("episodes", episode.id, { type: value })} />
-              <Field label="ゲスト名" value={episode.guestName} onChange={(value) => patchItem("episodes", episode.id, { guestName: value })} />
+              <SelectField label="種別" value={episode.type} options={["ゲスト回", "通常回", "リスナー曲回", "特別回"]} onChange={(value) => patchEpisodeType(episode, value)} />
+              <Field label="ゲスト名" value={episode.guestName} onChange={(value) => patchGuestName(episode, value)} />
               <Field label="stand.fm URL" value={episode.standfmUrl} onChange={(value) => patchItem("episodes", episode.id, { standfmUrl: value })} />
               <SelectField label="ステータス" value={episode.status} options={["準備中", "素材待ち", "下書き作成済み", "確認待ち", "公開済み", "SNS投稿済み"]} onChange={(value) => patchItem("episodes", episode.id, { status: value })} />
-              <Field label="記事URL" value={episode.articleUrl} onChange={(value) => patchItem("episodes", episode.id, { articleUrl: value })} />
+              <Field label="記事スラッグ" value={episode.articleSlug} placeholder="例: yui / sunopa-yui-guest" onChange={(value) => patchArticleSlug(episode, value)} />
+              <Field label="記事URL" value={episode.articleUrl || buildArticleUrl(wordpressSite, episode.articleSlug)} readOnly wide />
+              <p className="hint-text wide">ゲスト回はゲスト名を入れると「〇〇さんゲスト回🌟」を自動入力します。スラッグはURL末尾になるため、基本はゲスト名の英語表記で入力してください。</p>
               <TextArea label="メモ" value={episode.notes} onChange={(value) => patchItem("episodes", episode.id, { notes: value })} />
             </div>
           </article>
@@ -1951,11 +2065,19 @@ function SectionTitle({ title, subtitle, action }) {
   );
 }
 
-function Field({ label, value, onChange, type = "text" }) {
+function Field({ label, value, onChange = () => {}, type = "text", placeholder = "", readOnly = false, wide = false }) {
+  const handleInput = (event) => onChange(event.target.value);
   return (
-    <label className="field">
+    <label className={wide ? "field wide" : "field"}>
       <span>{label}</span>
-      <input type={type} value={value ?? ""} onChange={(event) => onChange(event.target.value)} />
+      <input
+        type={type}
+        value={value ?? ""}
+        placeholder={placeholder}
+        readOnly={readOnly}
+        onChange={handleInput}
+        onInput={handleInput}
+      />
     </label>
   );
 }
