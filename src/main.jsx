@@ -26,6 +26,7 @@ import "./styles.css";
 const STORAGE_KEY = "radio-article-studio:v1";
 const DEFAULT_OBSIDIAN_PATH = "C:\\Users\\myabe\\OneDrive\\Desktop\\Obsidian Folder\\Umbrella Parade\\Sunoパ！記事";
 const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
+const DEFAULT_KANAME_X_HANDLE = "kaname_mbembe";
 
 const QUESTION_USE_OPTIONS = [
   ["public", "公開してOKなプロフィール"],
@@ -64,6 +65,12 @@ const isAudioUpload = (file) => {
   return name.endsWith(".mp3") || name.endsWith(".wav") || ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"].includes(file?.type);
 };
 
+const isAudioAttachment = (attachment) => {
+  const name = attachment?.fileName?.toLowerCase() ?? "";
+  const mime = attachment?.mimeType?.toLowerCase() ?? "";
+  return name.endsWith(".mp3") || name.endsWith(".wav") || mime.includes("audio/");
+};
+
 const normalizeXHandle = (value = "") =>
   String(value)
     .trim()
@@ -81,6 +88,19 @@ const formatXHandle = (value = "") => {
   const handle = normalizeXHandle(value);
   return handle ? `@${handle}` : "";
 };
+
+const isWebUrl = (url = "") => /^https?:\/\//i.test(String(url).trim());
+
+const makePlayableEmbedUrl = (url = "") => {
+  const trimmed = String(url).trim();
+  const youtube = trimmed.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/)([A-Za-z0-9_-]+)/);
+  if (youtube) return `https://www.youtube.com/embed/${youtube[1]}`;
+  const suno = trimmed.match(/suno\.com\/(?:song|embed)\/([a-f0-9-]{36})/i);
+  if (suno) return `https://suno.com/embed/${suno[1]}`;
+  return "";
+};
+
+const isSunoShortUrl = (url = "") => /suno\.com\/s\/[A-Za-z0-9_-]+/i.test(String(url).trim());
 
 const formatAnswerValue = (value) => {
   if (!value) return "-";
@@ -258,10 +278,8 @@ const toGoogleCsvUrl = (url) => {
 };
 
 const makeEmbedUrl = (url = "") => {
-  const youtube = url.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/)([A-Za-z0-9_-]+)/);
-  if (youtube) return `https://www.youtube.com/embed/${youtube[1]}`;
-  const suno = url.match(/suno\.com\/(?:song|embed)\/([a-f0-9-]{36})/i);
-  if (suno) return `https://suno.com/embed/${suno[1]}`;
+  const playableEmbedUrl = makePlayableEmbedUrl(url);
+  if (playableEmbedUrl) return playableEmbedUrl;
   if (url.includes("suno.com/")) return url;
   return "";
 };
@@ -514,7 +532,7 @@ const sampleData = {
     wordpressSite: "https://ai-music.noiseinmysoul.com/",
     sePonUrl: "https://umbrellaparade.github.io/SE_Pon/",
     bellboXHandle: DEFAULT_BELLBO_X_HANDLE,
-    kanameXHandle: ""
+    kanameXHandle: DEFAULT_KANAME_X_HANDLE
   },
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
@@ -755,6 +773,8 @@ function migrateData(input) {
   });
 
   const settings = { ...sampleData.settings, ...(input.settings ?? {}) };
+  if (!settings.bellboXHandle) settings.bellboXHandle = DEFAULT_BELLBO_X_HANDLE;
+  if (!settings.kanameXHandle) settings.kanameXHandle = DEFAULT_KANAME_X_HANDLE;
   const episodes = (input.episodes ?? sampleData.episodes).map((episode) => {
     const articleSlug = episode.articleSlug || extractSlugFromUrl(episode.articleUrl);
     return {
@@ -1638,6 +1658,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                     />
                     <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : "WAVまたはMP3をアップロード"}</small>
                   </label>
+                  <TrackPreview track={answers[question.id]} />
                 </div>
               ) : question.kind === "x_contact" ? (
                 <div className="x-contact-block">
@@ -1737,6 +1758,64 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         )}
       </article>
     </main>
+  );
+}
+
+function TrackPreview({ track }) {
+  const audio = track?.audio;
+  const url = String(track?.url ?? "").trim();
+  const playableEmbedUrl = makePlayableEmbedUrl(url);
+  const directAudioUrl = isWebUrl(url) && detectUrlType(url) === "Audio" ? url : "";
+  const showExternalLink = isWebUrl(url);
+
+  if (!audio?.dataUrl && !playableEmbedUrl && !directAudioUrl && !showExternalLink) {
+    return (
+      <div className="track-preview empty">
+        <strong><Music size={16} />プレビュー確認</strong>
+        <span>音源ファイル、YouTube URL、またはSunoの埋め込み可能URLを入れるとここで確認できます。</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="track-preview">
+      <div className="track-preview-head">
+        <strong><Music size={16} />プレビュー確認</strong>
+        {showExternalLink && (
+          <a className="secondary compact-link" href={url} target="_blank" rel="noreferrer">
+            元ページを開く
+          </a>
+        )}
+      </div>
+
+      {audio?.dataUrl && (
+        <div className="preview-player">
+          <span>アップロード音源</span>
+          <audio controls preload="metadata" src={audio.dataUrl} />
+        </div>
+      )}
+
+      {directAudioUrl && (
+        <div className="preview-player">
+          <span>URL音源</span>
+          <audio controls preload="metadata" src={directAudioUrl} />
+        </div>
+      )}
+
+      {playableEmbedUrl && (
+        <iframe
+          className="track-preview-frame"
+          title="楽曲URLプレビュー"
+          src={playableEmbedUrl}
+          allow="autoplay; clipboard-write; encrypted-media; picture-in-picture"
+          loading="lazy"
+        />
+      )}
+
+      {isSunoShortUrl(url) && !playableEmbedUrl && (
+        <p className="hint-text">Sunoの短縮URLは、この画面では埋め込みプレイヤー化できない場合があります。元ページを開いて曲を確認してください。</p>
+      )}
+    </div>
   );
 }
 
@@ -2096,6 +2175,9 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
                     <span>{attachment.fileName}</span>
                     <small>{Math.round((attachment.size || 0) / 1024 / 1024 * 10) / 10}MB</small>
                     <button className="secondary" onClick={() => downloadAttachment(attachment)}><Download size={16} />ダウンロード</button>
+                    {attachment.dataUrl && isAudioAttachment(attachment) && (
+                      <audio className="attachment-audio" controls preload="metadata" src={attachment.dataUrl} />
+                    )}
                   </div>
                 ))}
               </div>

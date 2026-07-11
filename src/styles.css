@@ -489,6 +489,68 @@ textarea {
   font-weight: 900;
 }
 
+.track-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.track-preview.empty {
+  background: #fbf6ed;
+  color: #665d70;
+}
+
+.track-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.track-preview strong,
+.preview-player span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #241f2f;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.track-preview.empty span {
+  color: #665d70;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.preview-player {
+  display: grid;
+  gap: 6px;
+}
+
+.preview-player audio,
+.attachment-audio {
+  width: 100%;
+}
+
+.track-preview-frame {
+  width: 100%;
+  min-height: 180px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #111;
+}
+
+.compact-link {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .x-contact-block {
   display: grid;
   gap: 10px;
@@ -643,6 +705,10 @@ textarea {
 .attachment-item small {
   color: #7a7182;
   font-weight: 800;
+}
+
+.attachment-audio {
+  grid-column: 1 / -1;
 }
 
 .public-shell {
