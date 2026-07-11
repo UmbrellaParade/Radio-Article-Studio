@@ -52,7 +52,7 @@ Implemented:
 7. Response JSON creation/import with grouped song fields, in-form song preview, WAV/MP3 attachments, and internal X contact blocks.
 8. Response management with public/article/internal/constraint separation.
 9. Track and audio metadata management.
-10. Thumbnail composition from three base images plus a guest icon, with registered image previews.
+10. Thumbnail composition from bundled fixed base images plus date text and an optional guest icon, with registered image previews.
 11. Thumbnail and production asset management.
 12. Codex request pack generation.
 13. JSON export/import backup.

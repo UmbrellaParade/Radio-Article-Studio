@@ -27,6 +27,7 @@ const STORAGE_KEY = "radio-article-studio:v1";
 const DEFAULT_OBSIDIAN_PATH = "C:\\Users\\myabe\\OneDrive\\Desktop\\Obsidian Folder\\Umbrella Parade\\Sunoパ！記事";
 const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
 const DEFAULT_KANAME_X_HANDLE = "kaname_mbembe";
+const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 
 const QUESTION_USE_OPTIONS = [
   ["public", "公開してOKなプロフィール"],
@@ -139,18 +140,48 @@ const formatAnswerValue = (value) => {
 };
 
 const THUMBNAIL_PRESETS = [
-  { key: "article16x9", label: "記事サムネ 16:9", width: 1280, height: 720, fileName: "article-thumbnail.png" },
-  { key: "standfm1x1", label: "stand.fm 正方形 1:1", width: 1080, height: 1080, fileName: "standfm-thumbnail.png" },
-  { key: "stream9x16", label: "配信背景 9:16", width: 1080, height: 1920, fileName: "stream-background.png" }
+  {
+    key: "article16x9",
+    label: "記事サムネ 16:9",
+    width: 1280,
+    height: 720,
+    fileName: "article-thumbnail.png",
+    baseName: "固定ベース 16:9",
+    baseUrl: publicAsset("thumbnail-templates/sunopa-article-16x9.png"),
+    dateBadge: { x: 50, y: 10.4, year: 24, date: 39, weekday: 26, offsets: [-24, 6, 38] }
+  },
+  {
+    key: "standfm1x1",
+    label: "stand.fm 正方形 1:1",
+    width: 1080,
+    height: 1080,
+    fileName: "standfm-thumbnail.png",
+    baseName: "固定ベース 1:1",
+    baseUrl: publicAsset("thumbnail-templates/sunopa-standfm-1x1.png"),
+    dateBadge: { x: 50, y: 16.2, year: 40, date: 62, weekday: 42, offsets: [-62, 1, 68] }
+  },
+  {
+    key: "stream9x16",
+    label: "配信背景 9:16",
+    width: 1080,
+    height: 1920,
+    fileName: "stream-background.png",
+    baseName: "固定ベース 9:16",
+    baseUrl: publicAsset("thumbnail-templates/sunopa-stream-9x16.png"),
+    dateBadge: { x: 50, y: 19.4, year: 48, date: 76, weekday: 52, offsets: [-76, 0, 84] }
+  }
 ];
 
 const defaultThumbnailStudio = {
+  date: "",
   guestIcon: { name: "", dataUrl: "" },
   templates: Object.fromEntries(
     THUMBNAIL_PRESETS.map((preset) => [
       preset.key,
       {
-        name: "",
+        name: preset.baseName,
+        source: "fixed",
+        assetUrl: preset.baseUrl,
         dataUrl: "",
         iconX: preset.key === "stream9x16" ? 50 : 74,
         iconY: preset.key === "stream9x16" ? 38 : 52,
@@ -174,6 +205,7 @@ const newId = (prefix) => {
 };
 
 const WEEKDAY_LABELS = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"];
+const WEEKDAY_SHORT_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 
 const getBroadcastSlot = (dateString = "") => {
   if (!dateString) return "";
@@ -185,6 +217,15 @@ const getBroadcastSlot = (dateString = "") => {
 
 const formatLocalDate = (date = new Date()) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const formatThumbnailDateLines = (dateString = "") => {
+  const match = String(dateString).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const date = new Date(`${year}-${month}-${day}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  return [year, `${Number(month)}/${Number(day)}`, `(${WEEKDAY_SHORT_LABELS[date.getDay()]})`];
+};
 
 const ensureGuestHonorific = (guestName = "") => {
   const trimmed = String(guestName).trim();
@@ -807,10 +848,15 @@ function migrateData(input) {
     thumbnailStudio: {
       ...defaultThumbnailStudio,
       ...(input.thumbnailStudio ?? {}),
-      templates: {
-        ...defaultThumbnailStudio.templates,
-        ...(input.thumbnailStudio?.templates ?? {})
-      },
+      templates: Object.fromEntries(
+        THUMBNAIL_PRESETS.map((preset) => [
+          preset.key,
+          {
+            ...defaultThumbnailStudio.templates[preset.key],
+            ...(input.thumbnailStudio?.templates?.[preset.key] ?? {})
+          }
+        ])
+      ),
       guestIcon: {
         ...defaultThumbnailStudio.guestIcon,
         ...(input.thumbnailStudio?.guestIcon ?? {})
@@ -1409,6 +1455,7 @@ ${assetRows || "-"}
               thumbnailStudio={data.thumbnailStudio ?? defaultThumbnailStudio}
               updateThumbnailStudio={updateThumbnailStudio}
               guestName={selectedEpisode?.guestName ?? ""}
+              episodeDate={selectedEpisode?.date ?? ""}
             />
           )}
           {active === "pack" && (
@@ -2302,15 +2349,58 @@ function drawCover(ctx, image, width, height) {
   drawCoverAt(ctx, image, 0, 0, width, height);
 }
 
-async function renderThumbnail({ preset, template, icon }) {
-  if (!template?.dataUrl || !icon?.dataUrl) throw new Error("template-or-icon-missing");
+const isCustomTemplate = (template) => template?.source === "custom" && Boolean(template?.dataUrl);
+const getTemplateSource = (template) => (isCustomTemplate(template) ? template.dataUrl : template?.assetUrl || "");
+
+function drawDateBadge(ctx, preset, dateString) {
+  const lines = formatThumbnailDateLines(dateString);
+  if (!lines) return;
+
+  const config = preset.dateBadge;
+  const centerX = (preset.width * config.x) / 100;
+  const centerY = (preset.height * config.y) / 100;
+  const [year, date, weekday] = lines;
+  const fontFamily = 'Georgia, "Times New Roman", "Yu Mincho", "Hiragino Mincho ProN", serif';
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#f8d18a";
+  ctx.strokeStyle = "rgba(59, 33, 10, .58)";
+  ctx.shadowColor = "rgba(255, 191, 82, .72)";
+  ctx.shadowBlur = Math.max(10, Math.round(config.date * 0.32));
+  ctx.lineJoin = "round";
+
+  [
+    { text: year, size: config.year, weight: 700, offset: config.offsets[0], stroke: 2.2 },
+    { text: date, size: config.date, weight: 700, offset: config.offsets[1], stroke: 2.8 },
+    { text: weekday, size: config.weekday, weight: 700, offset: config.offsets[2], stroke: 2.2 }
+  ].forEach((line) => {
+    ctx.font = `${line.weight} ${line.size}px ${fontFamily}`;
+    ctx.lineWidth = line.stroke;
+    ctx.strokeText(line.text, centerX, centerY + line.offset);
+    ctx.fillText(line.text, centerX, centerY + line.offset);
+  });
+
+  ctx.restore();
+}
+
+async function renderThumbnail({ preset, template, icon, date }) {
+  const templateSource = getTemplateSource(template);
+  if (!templateSource) throw new Error("template-missing");
   const canvas = document.createElement("canvas");
   canvas.width = preset.width;
   canvas.height = preset.height;
   const ctx = canvas.getContext("2d");
-  const [baseImage, iconImage] = await Promise.all([loadCanvasImage(template.dataUrl), loadCanvasImage(icon.dataUrl)]);
+  const [baseImage, iconImage] = await Promise.all([
+    loadCanvasImage(templateSource),
+    icon?.dataUrl ? loadCanvasImage(icon.dataUrl) : Promise.resolve(null)
+  ]);
 
   drawCover(ctx, baseImage, preset.width, preset.height);
+  drawDateBadge(ctx, preset, date);
+
+  if (!iconImage) return canvas.toDataURL("image/png");
 
   const diameter = Math.round((Math.min(preset.width, preset.height) * Number(template.iconSize || 28)) / 100);
   const centerX = Math.round((preset.width * Number(template.iconX || 50)) / 100);
@@ -2336,9 +2426,10 @@ async function renderThumbnail({ preset, template, icon }) {
   return canvas.toDataURL("image/png");
 }
 
-function ThumbnailComposer({ studio, updateStudio, guestName }) {
+function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   const [preview, setPreview] = useState({});
   const [message, setMessage] = useState("");
+  const thumbnailDate = studio.date || episodeDate || "";
 
   const handleTemplateFile = async (presetKey, event) => {
     const file = event.target.files?.[0];
@@ -2354,6 +2445,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
           ...defaultThumbnailStudio.templates[presetKey],
           ...current.templates?.[presetKey],
           name: file.name,
+          source: "custom",
           dataUrl
         }
       }
@@ -2385,17 +2477,46 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
     }));
   };
 
+  const patchDate = (date) => {
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      date
+    }));
+  };
+
+  const resetTemplate = (presetKey) => {
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      templates: {
+        ...defaultThumbnailStudio.templates,
+        ...current.templates,
+        [presetKey]: {
+          ...defaultThumbnailStudio.templates[presetKey],
+          iconX: current.templates?.[presetKey]?.iconX ?? defaultThumbnailStudio.templates[presetKey].iconX,
+          iconY: current.templates?.[presetKey]?.iconY ?? defaultThumbnailStudio.templates[presetKey].iconY,
+          iconSize: current.templates?.[presetKey]?.iconSize ?? defaultThumbnailStudio.templates[presetKey].iconSize,
+          source: "fixed",
+          dataUrl: ""
+        }
+      }
+    }));
+    setMessage("固定ベース画像に戻しました。");
+  };
+
   const generateOne = async (preset) => {
     try {
       const dataUrl = await renderThumbnail({
         preset,
         template: studio.templates?.[preset.key],
-        icon: studio.guestIcon
+        icon: studio.guestIcon,
+        date: thumbnailDate
       });
       setPreview((current) => ({ ...current, [preset.key]: dataUrl }));
       setMessage(`${preset.label} を生成しました。`);
     } catch {
-      setMessage("ベース画像とゲストアイコンを先にセットしてください。");
+      setMessage("ベース画像を読み込めませんでした。固定ベースに戻すか、画像を登録し直してください。");
     }
   };
 
@@ -2413,12 +2534,17 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
       <div className="record-head">
         <div>
           <h2>サムネ自動合成</h2>
-          <p className="muted">3サイズのベース画像に、ゲストアイコンを指定位置で重ねます。</p>
+          <p className="muted">固定ベース画像に、日付とゲストアイコンを指定位置で重ねます。</p>
         </div>
         <label className="secondary file-button">
           <Upload size={16} />ゲストアイコン
           <input type="file" accept="image/*" onChange={handleIconFile} />
         </label>
+      </div>
+
+      <div className="form-grid thumbnail-date-controls">
+        <Field label="サムネ日付" type="date" value={thumbnailDate} onChange={patchDate} />
+        <p className="hint-text wide">初期値は選択中の放送日です。日付は各ベース画像上部の二重丸に、添付サンプルと同じ3行形式で入ります。</p>
       </div>
 
       {studio.guestIcon?.name && (
@@ -2432,6 +2558,8 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
       <div className="thumbnail-grid">
         {THUMBNAIL_PRESETS.map((preset) => {
           const template = studio.templates?.[preset.key] ?? defaultThumbnailStudio.templates[preset.key];
+          const templateSource = getTemplateSource(template);
+          const templateLabel = isCustomTemplate(template) ? template.name : `${preset.baseName}（固定）`;
           return (
             <section className="thumbnail-card" key={preset.key}>
               <div className="thumbnail-card-head">
@@ -2442,11 +2570,12 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
                 <Upload size={16} />ベース画像
                 <input type="file" accept="image/*" onChange={(event) => handleTemplateFile(preset.key, event)} />
               </label>
-              <p className="muted">{template.name || "未セット"}</p>
-              {template.dataUrl ? (
+              <button className="secondary" onClick={() => resetTemplate(preset.key)}>固定ベースに戻す</button>
+              <p className="muted">{templateLabel}</p>
+              {templateSource ? (
                 <div className="registered-template">
                   <span>登録済みベース画像</span>
-                  <img className="thumbnail-preview" src={template.dataUrl} alt={`${preset.label} base`} />
+                  <img className="thumbnail-preview" src={templateSource} alt={`${preset.label} base`} />
                 </div>
               ) : (
                 <div className="empty-preview">ベース画像を登録するとここに表示されます</div>
@@ -2474,11 +2603,11 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
   );
 }
 
-function Assets({ assets, patchItem, removeItem, addAsset, thumbnailStudio, updateThumbnailStudio, guestName }) {
+function Assets({ assets, patchItem, removeItem, addAsset, thumbnailStudio, updateThumbnailStudio, guestName, episodeDate }) {
   return (
     <div className="view-stack">
       <SectionTitle title="サムネ/素材管理" subtitle="記事16:9、stand.fm 1:1、配信背景9:16、音源フォルダーなどを放送回に紐づけます。" action={<button className="primary" onClick={addAsset}><Plus size={16} />素材追加</button>} />
-      <ThumbnailComposer studio={thumbnailStudio} updateStudio={updateThumbnailStudio} guestName={guestName} />
+      <ThumbnailComposer studio={thumbnailStudio} updateStudio={updateThumbnailStudio} guestName={guestName} episodeDate={episodeDate} />
       <div className="records">
         {assets.map((asset) => (
           <article className="record" key={asset.id}>

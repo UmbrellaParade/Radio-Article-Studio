@@ -767,6 +767,14 @@ textarea {
   border-color: #14b6c8;
 }
 
+.thumbnail-date-controls {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fbf6ed;
+}
+
 .thumbnail-card {
   display: grid;
   gap: 10px;
