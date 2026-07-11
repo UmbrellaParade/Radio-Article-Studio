@@ -431,7 +431,7 @@ const normalizeKey = (value = "") =>
   String(value)
     .trim()
     .toLowerCase()
-    .replace(/[ 　_\-・:：/／（）()［\][\].。]/g, "");
+    .replace(/[ 　_\-・:：/／（）()［\][\].。!！?？]/g, "");
 
 const compactLines = (items) => items.filter(Boolean).join("\n");
 
@@ -440,6 +440,14 @@ const pick = (row, aliases) => {
   for (const alias of aliases) {
     const value = normalized[normalizeKey(alias)];
     if (value != null && String(value).trim() !== "") return String(value).trim();
+  }
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeKey(alias);
+    if (normalizedAlias.length < 4 || ["url", "xurl", "wav", "mp3"].includes(normalizedAlias)) continue;
+    const match = Object.entries(normalized).find(
+      ([key, value]) => key.includes(normalizedAlias) && value != null && String(value).trim() !== ""
+    );
+    if (match) return String(match[1]).trim();
   }
   return "";
 };
@@ -483,15 +491,37 @@ const parseCsv = (text) => {
   );
 };
 
-const toGoogleCsvUrl = (url) => {
-  const trimmed = url.trim();
-  if (!trimmed) return "";
+const getCsvImportTarget = (url = "") => {
+  const trimmed = String(url).trim();
+  if (!trimmed) return { url: "", error: "URLが未入力です。" };
+  if (/docs\.google\.com\/forms\/d\//i.test(trimmed)) {
+    return { url: "", error: "GoogleフォームURLではなく、回答先のGoogleスプレッドシートURLを入れてください。" };
+  }
+
+  const publishedSpreadsheetMatch = trimmed.match(/\/spreadsheets\/d\/e\/([^/]+)/);
+  if (publishedSpreadsheetMatch) {
+    const gid = trimmed.match(/[?&#]gid=([^&#]+)/)?.[1] ?? "0";
+    return {
+      url: `https://docs.google.com/spreadsheets/d/e/${publishedSpreadsheetMatch[1]}/pub?gid=${gid}&single=true&output=csv`,
+      error: ""
+    };
+  }
+
   const spreadsheetMatch = trimmed.match(/\/spreadsheets\/d\/([^/]+)/);
-  if (!spreadsheetMatch) return trimmed;
-  const gidMatch = trimmed.match(/[?&#]gid=([^&#]+)/);
-  const gid = gidMatch?.[1] ?? "0";
-  return `https://docs.google.com/spreadsheets/d/${spreadsheetMatch[1]}/export?format=csv&gid=${gid}`;
+  if (spreadsheetMatch) {
+    const gid = trimmed.match(/[?&#]gid=([^&#]+)/)?.[1] ?? "0";
+    return {
+      url: `https://docs.google.com/spreadsheets/d/${spreadsheetMatch[1]}/export?format=csv&gid=${gid}`,
+      error: ""
+    };
+  }
+
+  return { url: trimmed, error: "" };
 };
+
+const toGoogleCsvUrl = (url) => getCsvImportTarget(url).url;
+
+const looksLikeHtml = (text = "") => /^\s*<!doctype html|^\s*<html[\s>]/i.test(text);
 
 const makeEmbedUrl = (url = "") => {
   const playableEmbedUrl = makePlayableEmbedUrl(url);
@@ -598,11 +628,11 @@ const buildResponseFromRow = (row, episodeId, formId) => {
 };
 
 const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId = "") => {
-  const artist = pick(row, ["アーティスト名", "ゲスト名", "活動名", "応募者名", "担当"]) || fallbackArtist;
-  const title = pick(row, ["曲名", "楽曲名", "紹介曲", "タイトル"]);
-  const url = pick(row, ["楽曲URL", "曲URL", "URL", "Suno URL", "YouTube URL"]);
-  const audioFile = pick(row, ["音源ファイル", "音源ファイルURL", "WAV", "mp3", "音源URL", "Drive URL"]);
-  const articlePoint = pick(row, ["曲に込めた想い", "曲紹介", "記事で触れてほしいポイント", "紹介文", "メッセージ"]);
+  const artist = pick(row, ["アーティスト名", "ゲスト名", "活動名", "応募者名", "お名前", "お名前 よみかた", "担当"]) || fallbackArtist;
+  const title = pick(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"]);
+  const url = pick(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"]);
+  const audioFile = pick(row, ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"]);
+  const articlePoint = pick(row, ["曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"]);
   const honorific = pick(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"]);
 
   if (!title && !url && !audioFile) return null;
@@ -1597,39 +1627,65 @@ function App() {
     setData((current) => ({ ...current, imports: { ...defaultImports, ...current.imports, ...patch } }));
   };
 
-  const appendImportLog = (message) => {
-    setData((current) => ({
+  const appendImportLogToData = (current, message) => ({
       ...current,
       imports: {
         ...defaultImports,
         ...current.imports,
         lastLog: [`${new Date().toLocaleString("ja-JP")} ${message}`, ...(current.imports?.lastLog ?? [])].slice(0, 8)
       }
-    }));
+  });
+
+  const appendImportLog = (message) => {
+    setData((current) => appendImportLogToData(current, message));
+  };
+
+  const importCsvRows = (rows, kind, label = "CSV", periodId = "") => {
+    if (!selectedEpisode) {
+      appendImportLog(`${label}: 放送回を選んでから取り込んでください。`);
+      return;
+    }
+    if (!rows.length) {
+      appendImportLog(`${label}: CSVの回答行が見つかりませんでした。1行目に見出し、2行目以降に回答があるか確認してください。`);
+      return;
+    }
+
+    setData((current) => {
+      const currentEpisode = current.episodes.find((episode) => episode.id === selectedEpisode.id) ?? selectedEpisode;
+      const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, kind, periodId);
+      const emptyResultNote =
+        result.responses === 0 && result.tracks === 0 ? " 列名が合っていない可能性があります。Googleフォームの質問名を確認してください。" : "";
+      return appendImportLogToData(
+        next,
+        `${label}: ${rows.length}行を読み込み、回答${result.responses}件・楽曲${result.tracks}件を反映しました。${emptyResultNote}`
+      );
+    });
   };
 
   const importCsvText = (text, kind, label = "CSV") => {
     const rows = parseCsv(text);
-    setData((current) => {
-      const { data: next, result } = importRowsIntoData(current, selectedEpisode, rows, kind);
-      return next;
-    });
-    appendImportLog(`${label}: ${rows.length}行を読み込みました。`);
+    importCsvRows(rows, kind, label);
   };
 
   const importCsvUrl = async (kind, url, label) => {
-    const csvUrl = toGoogleCsvUrl(url);
+    const target = getCsvImportTarget(url);
+    const csvUrl = target.url;
+    if (target.error) {
+      appendImportLog(`${label}: ${target.error}`);
+      return;
+    }
     if (!csvUrl) {
       appendImportLog(`${label}: URLが未入力です。`);
       return;
     }
     try {
-      const response = await fetch(csvUrl);
+      const response = await fetch(csvUrl, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const text = await response.text();
+      if (looksLikeHtml(text)) throw new Error("HTML_RESPONSE");
       importCsvText(text, kind, label);
     } catch (error) {
-      appendImportLog(`${label}: 読み込みに失敗しました。公開CSV URLまたは共有設定を確認してください。`);
+      appendImportLog(`${label}: 読み込みに失敗しました。回答先スプレッドシートの共有設定、または公開CSV URLか確認してください。`);
     }
   };
 
@@ -1646,33 +1702,43 @@ function App() {
 
   const importPeriodCsvText = (period, text, label = "応募期間CSV") => {
     const rows = parseCsv(text);
-    const targetEpisode = data.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
+    if (!rows.length) {
+      appendImportLog(`${label}: CSVの回答行が見つかりませんでした。1行目に見出し、2行目以降に回答があるか確認してください。`);
+      return;
+    }
+
     setData((current) => {
-      const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? targetEpisode;
+      const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
       const { data: next } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
-      return {
+      const nextWithPeriod = {
         ...next,
         applicationPeriods: next.applicationPeriods.map((item) =>
           item.id === period.id ? { ...item, status: rows.length ? "取り込み済み" : item.status } : item
         )
       };
+      return appendImportLogToData(nextWithPeriod, `${label}: ${rows.length}行を応募期間「${period.title || period.id}」として読み込みました。`);
     });
-    appendImportLog(`${label}: ${rows.length}行を応募期間「${period.title || period.id}」として読み込みました。`);
   };
 
   const importPeriodCsvUrl = async (period) => {
-    const csvUrl = toGoogleCsvUrl(period.csvUrl);
+    const target = getCsvImportTarget(period.csvUrl);
+    const csvUrl = target.url;
+    if (target.error) {
+      appendImportLog(`応募期間「${period.title || period.id}」: ${target.error}`);
+      return;
+    }
     if (!csvUrl) {
       appendImportLog(`応募期間「${period.title || period.id}」: URLが未入力です。`);
       return;
     }
     try {
-      const response = await fetch(csvUrl);
+      const response = await fetch(csvUrl, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const text = await response.text();
+      if (looksLikeHtml(text)) throw new Error("HTML_RESPONSE");
       importPeriodCsvText(period, text, `応募期間「${period.title || period.id}」`);
     } catch {
-      appendImportLog(`応募期間「${period.title || period.id}」: 読み込みに失敗しました。公開CSV URLまたは共有設定を確認してください。`);
+      appendImportLog(`応募期間「${period.title || period.id}」: 読み込みに失敗しました。回答先スプレッドシートの共有設定、または公開CSV URLか確認してください。`);
     }
   };
 
