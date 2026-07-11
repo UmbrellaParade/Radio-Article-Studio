@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import LZString from "lz-string";
 import {
   CalendarDays,
   ClipboardCopy,
@@ -411,6 +412,7 @@ const buildResponseFromRow = (row, episodeId, formId) => {
   return {
     id: newId("res"),
     episodeId,
+    periodId: "",
     formId,
     respondent,
     status: "未確認",
@@ -421,7 +423,7 @@ const buildResponseFromRow = (row, episodeId, formId) => {
   };
 };
 
-const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "") => {
+const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId = "") => {
   const artist = pick(row, ["アーティスト名", "ゲスト名", "活動名", "応募者名", "担当"]) || fallbackArtist;
   const title = pick(row, ["曲名", "楽曲名", "紹介曲", "タイトル"]);
   const url = pick(row, ["楽曲URL", "曲URL", "URL", "Suno URL", "YouTube URL"]);
@@ -434,6 +436,7 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "") => {
   return {
     id: newId("tr"),
     episodeId,
+    periodId,
     slotNo: 0,
     source,
     artist,
@@ -448,7 +451,7 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "") => {
   };
 };
 
-const importRowsIntoData = (current, selectedEpisode, rows, kind) => {
+const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "") => {
   if (!selectedEpisode || rows.length === 0) {
     return { data: current, result: { responses: 0, tracks: 0 } };
   }
@@ -479,7 +482,7 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind) => {
     }
 
     if (kind === "listener") {
-      const track = buildTrackFromRow(row, selectedEpisode.id, "リスナー応募曲");
+      const track = buildTrackFromRow(row, selectedEpisode.id, "リスナー応募曲", "", periodId);
       if (track) {
         track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
         nextTracks = upsertTrack(nextTracks, track);
@@ -503,7 +506,7 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind) => {
   };
 };
 
-const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "", respondent = "") => {
+const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "", respondent = "", periodId = "") => {
   const source =
     formId === "form_listener" ? "リスナー応募曲" : formId === "form_personality" ? "パーソナリティ曲" : "ゲスト曲";
   const ownerAnswer =
@@ -518,6 +521,7 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
       return {
         id: newId("tr"),
         episodeId,
+        periodId,
         slotNo: 0,
         source,
         artist,
@@ -551,7 +555,24 @@ const decodeSharePayload = (value) => {
   return JSON.parse(new TextDecoder().decode(bytes));
 };
 
+const encodeCompressedSharePayload = (payload) => LZString.compressToEncodedURIComponent(JSON.stringify(payload));
+
+const decodeCompressedSharePayload = (value) => {
+  const json = LZString.decompressFromEncodedURIComponent(value);
+  if (!json) throw new Error("share-payload-decode-failed");
+  return JSON.parse(json);
+};
+
 const readSharedFormPayload = () => {
+  const compressedMatch = window.location.hash.match(/^#\/s\/(.+)$/);
+  if (compressedMatch) {
+    try {
+      return decodeCompressedSharePayload(compressedMatch[1]);
+    } catch {
+      return { error: true };
+    }
+  }
+
   const match = window.location.hash.match(/^#\/submit\/(.+)$/);
   if (!match) return null;
   try {
@@ -561,7 +582,7 @@ const readSharedFormPayload = () => {
   }
 };
 
-const makeShareUrl = (form, settings = sampleData.settings) => {
+const makeSharePayload = (form, settings = sampleData.settings, context = {}) => {
   const payload = {
     version: 1,
     type: "radio-article-studio-form",
@@ -577,7 +598,36 @@ const makeShareUrl = (form, settings = sampleData.settings) => {
       questions: form.questions
     }
   };
-  return `${window.location.origin}${window.location.pathname}#/submit/${encodeSharePayload(payload)}`;
+  if (context.period) {
+    payload.period = {
+      id: context.period.id,
+      title: context.period.title,
+      type: context.period.type,
+      startDate: context.period.startDate,
+      endDate: context.period.endDate,
+      episodeId: context.period.episodeId
+    };
+  }
+  if (context.episode) {
+    payload.episode = {
+      id: context.episode.id,
+      title: context.episode.title,
+      date: context.episode.date,
+      slot: context.episode.slot
+    };
+  }
+  return payload;
+};
+
+const makeShareUrl = (form, settings = sampleData.settings, context = {}) =>
+  `${window.location.origin}${window.location.pathname}#/s/${encodeCompressedSharePayload(makeSharePayload(form, settings, context))}`;
+
+const makeLegacyShareUrl = (form, settings = sampleData.settings, context = {}) =>
+  `${window.location.origin}${window.location.pathname}#/submit/${encodeSharePayload(makeSharePayload(form, settings, context))}`;
+
+const formatDateRange = (startDate = "", endDate = "") => {
+  if (startDate && endDate) return `${startDate} - ${endDate}`;
+  return startDate || endDate || "期間未設定";
 };
 
 const sampleData = {
@@ -650,10 +700,25 @@ const sampleData = {
       ]
     }
   ],
+  applicationPeriods: [
+    {
+      id: "period_listener_2026_07_10",
+      title: "7月リスナー応募曲",
+      type: "リスナー応募曲",
+      episodeId: "ep_yui_2026_07_10",
+      formId: "form_listener",
+      startDate: "2026-07-01",
+      endDate: "2026-07-09",
+      status: "受付終了",
+      csvUrl: "",
+      notes: "放送回に載せるリスナー応募曲を期間でまとめるサンプル。"
+    }
+  ],
   responses: [
     {
       id: "res_yui",
       episodeId: "ep_yui_2026_07_10",
+      periodId: "",
       formId: "form_guest",
       respondent: "結音さん",
       status: "確認済み",
@@ -671,6 +736,7 @@ const sampleData = {
     {
       id: "tr_startline",
       episodeId: "ep_yui_2026_07_10",
+      periodId: "",
       slotNo: 1,
       source: "ゲスト曲",
       artist: "Silfira",
@@ -686,6 +752,7 @@ const sampleData = {
     {
       id: "tr_kaname",
       episodeId: "ep_yui_2026_07_10",
+      periodId: "",
       slotNo: 2,
       source: "パーソナリティ曲",
       artist: "かなめ🦐",
@@ -701,6 +768,7 @@ const sampleData = {
     {
       id: "tr_bellbo",
       episodeId: "ep_yui_2026_07_10",
+      periodId: "",
       slotNo: 3,
       source: "パーソナリティ曲",
       artist: "べるぼ☂",
@@ -716,6 +784,7 @@ const sampleData = {
     {
       id: "tr_tiger",
       episodeId: "ep_yui_2026_07_10",
+      periodId: "period_listener_2026_07_10",
       slotNo: 5,
       source: "リスナー応募曲",
       artist: "GOKIGEN Tiger",
@@ -864,12 +933,26 @@ function migrateData(input) {
     },
     episodes,
     forms,
+    applicationPeriods: (input.applicationPeriods ?? sampleData.applicationPeriods).map((period) => ({
+      title: "",
+      type: "リスナー応募曲",
+      episodeId: episodes[0]?.id ?? "",
+      formId: forms.find((form) => form.id === "form_listener")?.id ?? forms[0]?.id ?? "",
+      startDate: "",
+      endDate: "",
+      status: "準備中",
+      csvUrl: "",
+      notes: "",
+      ...period
+    })),
     responses: (input.responses ?? sampleData.responses).map((response) => ({
       attachments: [],
+      periodId: "",
       ...response
     })),
     tracks: (input.tracks ?? sampleData.tracks).map((track) => ({
       audioFile: "",
+      periodId: "",
       ...track,
       urlType: track.urlType || detectUrlType(track.url)
     }))
@@ -919,6 +1002,7 @@ function App() {
 
   const episodeResponses = data.responses.filter((response) => response.episodeId === selectedEpisode?.id);
   const episodeAssets = data.assets.filter((asset) => asset.episodeId === selectedEpisode?.id);
+  const episodePeriods = data.applicationPeriods.filter((period) => period.episodeId === selectedEpisode?.id);
 
   const updateData = (key, updater) => {
     setData((current) => ({
@@ -1013,6 +1097,26 @@ function App() {
       }
     ]);
     setActive("forms");
+  };
+
+  const addApplicationPeriod = () => {
+    const episode = selectedEpisode ?? data.episodes[0];
+    const listenerForm = data.forms.find((form) => form.id === "form_listener") ?? data.forms.find((form) => form.type === "リスナー") ?? data.forms[0];
+    const today = formatLocalDate();
+    const period = {
+      id: newId("period"),
+      title: episode ? `${episode.date} ${episode.title} 応募期間` : "新しい応募期間",
+      type: "リスナー応募曲",
+      episodeId: episode?.id ?? "",
+      formId: listenerForm?.id ?? "",
+      startDate: today,
+      endDate: episode?.date ?? today,
+      status: "準備中",
+      csvUrl: "",
+      notes: ""
+    };
+    updateData("applicationPeriods", (periods) => [period, ...periods]);
+    setActive("periods");
   };
 
   const addQuestion = (formId) => {
@@ -1134,6 +1238,49 @@ function App() {
     reader.readAsText(file, "utf-8");
   };
 
+  const importPeriodCsvText = (period, text, label = "応募期間CSV") => {
+    const rows = parseCsv(text);
+    const targetEpisode = data.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
+    setData((current) => {
+      const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? targetEpisode;
+      const { data: next } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
+      return {
+        ...next,
+        applicationPeriods: next.applicationPeriods.map((item) =>
+          item.id === period.id ? { ...item, status: rows.length ? "取り込み済み" : item.status } : item
+        )
+      };
+    });
+    appendImportLog(`${label}: ${rows.length}行を応募期間「${period.title || period.id}」として読み込みました。`);
+  };
+
+  const importPeriodCsvUrl = async (period) => {
+    const csvUrl = toGoogleCsvUrl(period.csvUrl);
+    if (!csvUrl) {
+      appendImportLog(`応募期間「${period.title || period.id}」: URLが未入力です。`);
+      return;
+    }
+    try {
+      const response = await fetch(csvUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      importPeriodCsvText(period, text, `応募期間「${period.title || period.id}」`);
+    } catch {
+      appendImportLog(`応募期間「${period.title || period.id}」: 読み込みに失敗しました。公開CSV URLまたは共有設定を確認してください。`);
+    }
+  };
+
+  const importPeriodCsvFile = (period, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      importPeriodCsvText(period, String(reader.result), `応募期間「${period.title || period.id}」: ${file.name}`);
+      event.target.value = "";
+    };
+    reader.readAsText(file, "utf-8");
+  };
+
   const applyBellboTrackUrl = async () => {
     const url = data.imports?.bellboTrackUrl?.trim();
     if (!selectedEpisode || !url) {
@@ -1196,7 +1343,7 @@ ${response.constraints || "-"}`
       .map(
         (track) =>
           `${track.slotNo}. ${track.title || "曲名未入力"} / ${track.artist || "アーティスト未入力"}\n` +
-          `   種別: ${track.source} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
+          `   種別: ${track.source} / 応募期間: ${track.periodId || "-"} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
           `   記事ポイント: ${track.articlePoint || "-"}`
       )
       .join("\n");
@@ -1205,6 +1352,12 @@ ${response.constraints || "-"}`
       .map(
         (asset) =>
           `- ${asset.type}: ${asset.title || "-"} / Drive: ${asset.driveUrl || "-"} / local: ${asset.localPath || "-"} / credit: ${asset.credit || "-"}`
+      )
+      .join("\n");
+    const periodRows = episodePeriods
+      .map(
+        (period) =>
+          `- ${period.title || period.id}: ${formatDateRange(period.startDate, period.endDate)} / フォーム: ${period.formId || "-"} / CSV: ${period.csvUrl || "-"} / 状態: ${period.status || "-"}`
       )
       .join("\n");
     const articleUrl = selectedEpisode.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode.articleSlug);
@@ -1238,6 +1391,9 @@ ${data.settings.wordpressSite}
 ゲスト/回答情報:
 ${responseBlocks || "-"}
 
+応募期間:
+${periodRows || "-"}
+
 紹介楽曲:
 ${trackRows || "-"}
 
@@ -1249,7 +1405,7 @@ ${assetRows || "-"}
 - 記事本文に内部確認メモやNG回答そのものを載せない。
 - 主催/出演/参加/プロデュースなどの関係性を混同しない。
 - WordPress認証情報はチャットで別途共有する。`;
-  }, [data.settings, episodeAssets, episodeResponses, episodeTracks, selectedEpisode]);
+  }, [data.settings, episodeAssets, episodePeriods, episodeResponses, episodeTracks, selectedEpisode]);
 
   const copyPack = async () => {
     await navigator.clipboard.writeText(codexPack);
@@ -1300,6 +1456,7 @@ ${assetRows || "-"}
         const normalized = {
           id: response.id || newId("res"),
           episodeId: response.episodeId || selectedEpisode?.id || data.episodes[0]?.id || "",
+          periodId: response.periodId || "",
           formId: response.formId || data.forms[0]?.id || "",
           respondent: response.respondent || "",
           status: response.status || "未確認",
@@ -1309,7 +1466,7 @@ ${assetRows || "-"}
           constraints: response.constraints || "",
           attachments
         };
-        const importedTracks = buildTracksFromRawAnswers(parsed.rawAnswers ?? [], normalized.episodeId, normalized.formId, normalized.respondent);
+        const importedTracks = buildTracksFromRawAnswers(parsed.rawAnswers ?? [], normalized.episodeId, normalized.formId, normalized.respondent, normalized.periodId);
         setData((current) => {
           let nextTracks = current.tracks;
           importedTracks.forEach((track) => {
@@ -1353,6 +1510,7 @@ ${assetRows || "-"}
           ["dashboard", "ダッシュボード", Radio],
           ["imports", "取り込み", Upload],
           ["episodes", "放送回", CalendarDays],
+          ["periods", "応募期間", CalendarDays],
           ["forms", "フォーム", ListChecks],
           ["responses", "回答", Database],
           ["tracks", "楽曲", Music],
@@ -1397,6 +1555,7 @@ ${assetRows || "-"}
               episodeTracks={episodeTracks}
               episodeResponses={episodeResponses}
               episodeAssets={episodeAssets}
+              episodePeriods={episodePeriods}
               setActive={setActive}
             />
           )}
@@ -1419,6 +1578,19 @@ ${assetRows || "-"}
               removeItem={removeItem}
               addEpisode={addEpisode}
               wordpressSite={data.settings.wordpressSite}
+            />
+          )}
+          {active === "periods" && (
+            <ApplicationPeriods
+              periods={data.applicationPeriods}
+              episodes={data.episodes}
+              forms={data.forms}
+              settings={data.settings}
+              patchItem={patchItem}
+              removeItem={removeItem}
+              addPeriod={addApplicationPeriod}
+              importPeriodCsvUrl={importPeriodCsvUrl}
+              importPeriodCsvFile={importPeriodCsvFile}
             />
           )}
           {active === "forms" && (
@@ -1478,6 +1650,8 @@ ${assetRows || "-"}
 
 function PublicSubmissionForm({ logoSrc, payload }) {
   const form = payload?.form;
+  const period = payload?.period;
+  const episode = payload?.episode;
   const contactAccounts = {
     bellbo: normalizeXHandle(payload?.contactAccounts?.bellbo || DEFAULT_BELLBO_X_HANDLE),
     kaname: normalizeXHandle(payload?.contactAccounts?.kaname || DEFAULT_KANAME_X_HANDLE)
@@ -1624,7 +1798,8 @@ function PublicSubmissionForm({ logoSrc, payload }) {
       exportedAt: new Date().toISOString(),
       response: {
         id: newId("res"),
-        episodeId: "",
+        episodeId: episode?.id || period?.episodeId || "",
+        periodId: period?.id || "",
         formId: form.id,
         respondent: inferRespondent(),
         status: "未確認",
@@ -1689,6 +1864,12 @@ function PublicSubmissionForm({ logoSrc, payload }) {
             <p className="eyebrow slim">Shared Form</p>
             <h2>{form.name}</h2>
             {form.description && <p className="muted">{form.description}</p>}
+            {(period || episode) && (
+              <div className="public-context">
+                {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
+                {episode && <span>放送回: {episode.date || "-"} {episode.title || ""}</span>}
+              </div>
+            )}
           </div>
           <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
         </div>
@@ -1924,22 +2105,31 @@ function Header({ logoSrc }) {
   );
 }
 
-function Dashboard({ data, selectedEpisode, episodeTracks, episodeResponses, episodeAssets, setActive }) {
+function Dashboard({ data, selectedEpisode, episodeTracks, episodeResponses, episodeAssets, episodePeriods, setActive }) {
   const articleUrl = selectedEpisode?.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode?.articleSlug);
   const stats = [
     ["放送回", data.episodes.length, CalendarDays],
+    ["応募期間", data.applicationPeriods.length, CalendarDays],
     ["フォーム", data.forms.length, ListChecks],
     ["回答", data.responses.length, Database],
     ["楽曲", data.tracks.length, Music],
     ["素材", data.assets.length, Image]
   ];
+  const statTargets = {
+    放送回: "episodes",
+    応募期間: "periods",
+    フォーム: "forms",
+    回答: "responses",
+    楽曲: "tracks",
+    素材: "assets"
+  };
 
   return (
     <div className="view-stack">
       <SectionTitle title="ダッシュボード" subtitle="いま準備中の放送回と、制作の詰まりどころを見ます。" />
       <div className="stat-grid">
         {stats.map(([label, value, Icon]) => (
-          <button className="stat-card" key={label} onClick={() => setActive(label === "放送回" ? "episodes" : label === "素材" ? "assets" : label === "楽曲" ? "tracks" : label === "回答" ? "responses" : "forms")}>
+          <button className="stat-card" key={label} onClick={() => setActive(statTargets[label])}>
             <Icon size={22} />
             <span>{label}</span>
             <strong>{value}</strong>
@@ -1967,6 +2157,7 @@ function Dashboard({ data, selectedEpisode, episodeTracks, episodeResponses, epi
           <h2>制作状況</h2>
           <div className="check-list">
             <StatusLine done={Boolean(selectedEpisode?.standfmUrl)} label="stand.fm URL" />
+            <StatusLine done={episodePeriods.length > 0} label="応募期間" />
             <StatusLine done={episodeResponses.length > 0} label="ゲスト/回答情報" />
             <StatusLine done={episodeTracks.length > 0} label="紹介楽曲" />
             <StatusLine done={episodeAssets.some((asset) => asset.type.includes("16:9"))} label="記事アイキャッチ" />
@@ -2159,6 +2350,91 @@ function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem
   );
 }
 
+function ApplicationPeriods({
+  periods,
+  episodes,
+  forms,
+  settings,
+  patchItem,
+  removeItem,
+  addPeriod,
+  importPeriodCsvUrl,
+  importPeriodCsvFile
+}) {
+  const [copiedPeriodId, setCopiedPeriodId] = useState("");
+  const episodeLabels = Object.fromEntries(episodes.map((episode) => [episode.id, `${episode.date} ${episode.title}`]));
+  const formLabels = Object.fromEntries(forms.map((form) => [form.id, form.name]));
+
+  const copyPeriodShareUrl = async (period) => {
+    const form = forms.find((item) => item.id === period.formId);
+    if (!form) return;
+    const episode = episodes.find((item) => item.id === period.episodeId);
+    await navigator.clipboard.writeText(makeShareUrl(form, settings, { period, episode }));
+    setCopiedPeriodId(period.id);
+    window.setTimeout(() => setCopiedPeriodId(""), 1800);
+  };
+
+  return (
+    <div className="view-stack">
+      <SectionTitle
+        title="応募期間管理"
+        subtitle="リスナー応募曲などを、募集期間・放送回・フォーム・応募シート単位でまとめます。"
+        action={<button className="primary" onClick={addPeriod}><Plus size={16} />応募期間追加</button>}
+      />
+      <div className="records">
+        {periods.map((period) => {
+          const form = forms.find((item) => item.id === period.formId);
+          const episode = episodes.find((item) => item.id === period.episodeId);
+          const shareUrl = form ? makeShareUrl(form, settings, { period, episode }) : "";
+          return (
+            <article className="record" key={period.id}>
+              <div className="record-head">
+                <strong>{period.title || "応募期間名未入力"}</strong>
+                <button className="icon-danger" onClick={() => removeItem("applicationPeriods", period.id)}><Trash2 size={16} /></button>
+              </div>
+              <div className="period-summary">
+                <span>{period.status}</span>
+                <b>{formatDateRange(period.startDate, period.endDate)}</b>
+                <small>{episode ? `${episode.date} ${episode.title}` : "放送回未設定"}</small>
+              </div>
+              <div className="form-grid">
+                <Field label="募集名" value={period.title} onChange={(value) => patchItem("applicationPeriods", period.id, { title: value })} />
+                <SelectField label="種別" value={period.type} options={["リスナー応募曲", "ゲスト回答", "通常募集", "素材提出"]} onChange={(value) => patchItem("applicationPeriods", period.id, { type: value })} />
+                <SelectField label="対象放送回" value={period.episodeId} options={episodes.map((item) => item.id)} labels={episodeLabels} onChange={(value) => patchItem("applicationPeriods", period.id, { episodeId: value })} />
+                <SelectField label="使用フォーム" value={period.formId} options={forms.map((item) => item.id)} labels={formLabels} onChange={(value) => patchItem("applicationPeriods", period.id, { formId: value })} />
+                <Field label="受付開始" type="date" value={period.startDate} onChange={(value) => patchItem("applicationPeriods", period.id, { startDate: value })} />
+                <Field label="受付終了" type="date" value={period.endDate} onChange={(value) => patchItem("applicationPeriods", period.id, { endDate: value })} />
+                <SelectField label="状態" value={period.status} options={["準備中", "受付中", "受付終了", "取り込み済み", "保留"]} onChange={(value) => patchItem("applicationPeriods", period.id, { status: value })} />
+                <Field label="Google Sheets / CSV URL" value={period.csvUrl} onChange={(value) => patchItem("applicationPeriods", period.id, { csvUrl: value })} />
+                <TextArea label="メモ" value={period.notes} onChange={(value) => patchItem("applicationPeriods", period.id, { notes: value })} />
+              </div>
+              <div className="share-box">
+                <div>
+                  <strong><Share2 size={16} />応募フォームURL</strong>
+                  <span>フォーム内容を圧縮した短い共有URLです。回答者側でもこのまま開けます。</span>
+                </div>
+                <input readOnly value={shareUrl} onFocus={(event) => event.target.select()} />
+                <div className="inline-actions">
+                  <button className="secondary" onClick={() => copyPeriodShareUrl(period)} disabled={!shareUrl}>
+                    <ClipboardCopy size={16} />{copiedPeriodId === period.id ? "コピー済み" : "リンクをコピー"}
+                  </button>
+                  <button className="primary" onClick={() => importPeriodCsvUrl(period)}>
+                    <Upload size={16} />この期間のCSVを取り込み
+                  </button>
+                  <label className="secondary file-button">
+                    <Upload size={16} />CSVファイル
+                    <input type="file" accept=".csv,text/csv" onChange={(event) => importPeriodCsvFile(period, event)} />
+                  </label>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, patchQuestion, removeQuestion }) {
   const [copiedFormId, setCopiedFormId] = useState("");
 
@@ -2170,7 +2446,7 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
 
   return (
     <div className="view-stack">
-      <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、共有フォームURLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
+      <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、短縮共有フォームURLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
       <div className="records">
         {forms.map((form) => (
           <article className="record" key={form.id}>
@@ -2185,7 +2461,7 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
             <div className="share-box">
               <div>
                 <strong><Share2 size={16} />共有フォーム</strong>
-                <span>回答者は入力後、回答JSONをコピーまたはダウンロードします。自動回収はGoogle Sheets/Drive連携で追加予定。</span>
+                <span>フォーム内容を圧縮した短いURLです。期間を指定する場合は「応募期間管理」のURLを使います。</span>
               </div>
               <input readOnly value={makeShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
               <button className="secondary" onClick={() => copyShareUrl(form)}>

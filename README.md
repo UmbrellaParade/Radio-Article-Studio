@@ -47,17 +47,18 @@ Implemented:
 2. Spreadsheet/CSV import for guest questionnaires, listener song submissions, and personality song sheets.
 3. Bellbo-only manual song URL entry.
 4. Broadcast episode management with automatic broadcast slot, guest episode title, and article URL slug handling.
-5. Form template management.
-6. Shareable form URL prototype.
-7. Response JSON creation/import with grouped song fields, in-form song preview, WAV/MP3 attachments, and internal X contact blocks.
-8. Response management with public/article/internal/constraint separation.
-9. Track and audio metadata management.
-10. Thumbnail composition from bundled fixed base images plus date text and an optional guest icon, with registered image previews.
-11. Thumbnail and production asset management.
-12. Codex request pack generation.
-13. JSON export/import backup.
+5. Application period management for listener submissions.
+6. Form template management.
+7. Compressed shareable form URLs.
+8. Response JSON creation/import with grouped song fields, in-form song preview, WAV/MP3 attachments, and internal X contact blocks.
+9. Response management with public/article/internal/constraint separation.
+10. Track and audio metadata management.
+11. Thumbnail composition from bundled fixed base images plus date text and an optional guest icon, with registered image previews.
+12. Thumbnail and production asset management.
+13. Codex request pack generation.
+14. JSON export/import backup.
 
-The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Shared forms can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. They can also use an internal X contact block that normalizes handles into profile URLs and links respondents to the Bellbo/Kaname operating accounts before DM contact. The operator can import the response JSON, preview/download attached audio, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
+The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Application periods connect a date range, target episode, form, and listener submission sheet. Shared forms use compressed `#/s/...` URLs and can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. They can also use an internal X contact block that normalizes handles into profile URLs and links respondents to the Bellbo/Kaname operating accounts before DM contact. The operator can import the response JSON, preview/download attached audio, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
 
 ## Development
 

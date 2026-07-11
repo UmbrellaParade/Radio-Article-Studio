@@ -213,7 +213,7 @@ h1 {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -348,6 +348,37 @@ h1 {
 
 .record.selected {
   outline: 2px solid #14b6c8;
+}
+
+.period-summary {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) minmax(220px, 1.4fr);
+  gap: 10px;
+  align-items: center;
+  margin: -2px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #eadfce;
+  border-radius: 8px;
+  background: #fbf6ed;
+}
+
+.period-summary span {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #241f2f;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.period-summary b {
+  color: #241f2f;
+}
+
+.period-summary small {
+  color: #665d70;
+  line-height: 1.5;
 }
 
 .record-head {
@@ -694,6 +725,19 @@ textarea {
   line-height: 1.7;
 }
 
+.public-context {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #eadfce;
+  border-radius: 8px;
+  background: #fbf6ed;
+  color: #51495f;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .inline-actions {
   display: inline-flex;
   flex-wrap: wrap;
@@ -925,6 +969,7 @@ textarea {
   .bellbo-url-row,
   .form-grid,
   .track-meta-grid,
+  .period-summary,
   .stat-grid {
     grid-template-columns: 1fr;
   }
