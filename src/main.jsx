@@ -25,6 +25,7 @@ import "./styles.css";
 
 const STORAGE_KEY = "radio-article-studio:v1";
 const DEFAULT_OBSIDIAN_PATH = "C:\\Users\\myabe\\OneDrive\\Desktop\\Obsidian Folder\\Umbrella Parade\\Sunoパ！記事";
+const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
 
 const QUESTION_USE_OPTIONS = [
   ["public", "公開してOKなプロフィール"],
@@ -42,6 +43,7 @@ const QUESTION_KIND_OPTIONS = [
   ["long", "長文"],
   ["url", "URL"],
   ["track", "楽曲"],
+  ["x_contact", "X連絡ブロック"],
   ["choice", "選択式"],
   ["file", "ファイル単体"]
 ];
@@ -62,6 +64,24 @@ const isAudioUpload = (file) => {
   return name.endsWith(".mp3") || name.endsWith(".wav") || ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"].includes(file?.type);
 };
 
+const normalizeXHandle = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, "")
+    .replace(/^@/, "")
+    .split(/[/?#]/)[0]
+    .replace(/[^A-Za-z0-9_]/g, "");
+
+const makeXUrl = (value = "") => {
+  const handle = normalizeXHandle(value);
+  return handle ? `https://x.com/${handle}` : "";
+};
+
+const formatXHandle = (value = "") => {
+  const handle = normalizeXHandle(value);
+  return handle ? `@${handle}` : "";
+};
+
 const formatAnswerValue = (value) => {
   if (!value) return "-";
   if (typeof value === "object" && value.fileName) return `${value.fileName} (${Math.round((value.size || 0) / 1024 / 1024 * 10) / 10}MB)`;
@@ -70,6 +90,15 @@ const formatAnswerValue = (value) => {
       `楽曲名: ${value.title || "-"}`,
       `楽曲URL: ${value.url || "-"}`,
       `音源ファイル: ${formatAnswerValue(value.audio)}`
+    ]);
+  }
+  if (typeof value === "object" && ("xHandle" in value || "xUrl" in value || "dmOk" in value)) {
+    return compactLines([
+      `Xアカウント: ${value.xHandle || "-"}`,
+      `X URL: ${value.xUrl || "-"}`,
+      `べるぼ☂フォロー: ${value.followedBellbo ? "はい" : "未確認"}`,
+      `かなめ🦐フォロー: ${value.followedKaname ? "はい" : "未確認"}`,
+      `DM連絡OK: ${value.dmOk ? "はい" : "未確認"}`
     ]);
   }
   return String(value);
@@ -459,10 +488,14 @@ const readSharedFormPayload = () => {
   }
 };
 
-const makeShareUrl = (form) => {
+const makeShareUrl = (form, settings = sampleData.settings) => {
   const payload = {
     version: 1,
     type: "radio-article-studio-form",
+    contactAccounts: {
+      bellbo: normalizeXHandle(settings.bellboXHandle || DEFAULT_BELLBO_X_HANDLE),
+      kaname: normalizeXHandle(settings.kanameXHandle || "")
+    },
     form: {
       id: form.id,
       name: form.name,
@@ -479,7 +512,9 @@ const sampleData = {
     obsidianPath: DEFAULT_OBSIDIAN_PATH,
     obsidianFolderName: "Sunoパ！記事",
     wordpressSite: "https://ai-music.noiseinmysoul.com/",
-    sePonUrl: "https://umbrellaparade.github.io/SE_Pon/"
+    sePonUrl: "https://umbrellaparade.github.io/SE_Pon/",
+    bellboXHandle: DEFAULT_BELLBO_X_HANDLE,
+    kanameXHandle: ""
   },
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
@@ -509,6 +544,7 @@ const sampleData = {
       questions: [
         { id: "q_guest_name", label: "ゲスト名 正式表記", kind: "short", required: true, use: "public" },
         { id: "q_guest_x", label: "X URL", kind: "url", required: true, use: "public" },
+        { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: false, use: "internal" },
         { id: "q_profile", label: "活動紹介文", kind: "long", required: true, use: "public" },
         { id: "q_topics", label: "今回話したいこと", kind: "long", required: false, use: "article" },
         { id: "q_guest_track", label: "紹介する楽曲", kind: "track", required: false, use: "article" },
@@ -523,6 +559,7 @@ const sampleData = {
       description: "送って頂く楽曲の楽曲名、楽曲URL、WAV/MP3音源、記事掲載可否を集めるフォーム。",
       questions: [
         { id: "q_artist", label: "アーティスト名 正式表記", kind: "short", required: true, use: "article" },
+        { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: true, use: "internal" },
         { id: "q_track", label: "送って頂く楽曲", kind: "track", required: true, use: "article" },
         { id: "q_credit", label: "クレジット/表記注意", kind: "long", required: false, use: "constraint" }
       ]
@@ -646,10 +683,41 @@ const sampleData = {
 };
 
 function migrateData(input) {
+  const isLegacyTrackQuestion = (question) => {
+    const label = question.label ?? "";
+    return (
+      ["q_song", "q_music_url", "q_title", "q_url", "q_audio"].includes(question.id) ||
+      /^(曲名|楽曲名|楽曲URL|音源ファイル|送って頂く楽曲|紹介する楽曲)/.test(label) ||
+      (/(YouTube|Suno|WAV|MP3|mp3|wav)/.test(label) && /(楽曲|音源|アップロード)/.test(label))
+    );
+  };
+
   const forms = (input.forms ?? sampleData.forms).map((form) => {
     let questions = form.questions ?? [];
+    const formName = form.name ?? "";
+    const isGuestForm = form.id === "form_guest" || formName.includes("ゲスト");
+    const isListenerForm = form.id === "form_listener" || formName.includes("リスナー");
+    const isPersonalityForm = form.id === "form_personality" || formName.includes("パーソナリティ");
 
-    if (form.id === "form_guest" && !questions.some((question) => question.kind === "track")) {
+    if ((isGuestForm || isListenerForm) && !questions.some((question) => question.kind === "x_contact" || question.id === "q_contact_x")) {
+      const insertAfterId = isGuestForm ? "q_guest_x" : "q_artist";
+      const insertIndex = questions.findIndex((question) => question.id === insertAfterId);
+      const contactQuestion = {
+        id: "q_contact_x",
+        label: "連絡用Xアカウント",
+        kind: "x_contact",
+        required: isListenerForm,
+        use: "internal"
+      };
+      questions = [...questions];
+      if (insertIndex >= 0) {
+        questions.splice(insertIndex + 1, 0, contactQuestion);
+      } else {
+        questions.push(contactQuestion);
+      }
+    }
+
+    if (isGuestForm && !questions.some((question) => question.kind === "track")) {
       const topicsIndex = questions.findIndex((question) => question.id === "q_topics");
       const trackQuestion = { id: "q_guest_track", label: "紹介する楽曲", kind: "track", required: false, use: "article" };
       questions = [...questions];
@@ -660,18 +728,18 @@ function migrateData(input) {
       }
     }
 
-    if (form.id === "form_listener" || form.id === "form_personality") {
-      const oldTrackIds = new Set(["q_song", "q_music_url", "q_title", "q_url", "q_audio"]);
-      const existingTrack = questions.find((question) => question.kind === "track" || question.id === "q_track");
+    if (isListenerForm || isPersonalityForm) {
+      const existingTrack = questions.find((question) => question.kind === "track" || question.id === "q_track" || isLegacyTrackQuestion(question));
+      const shouldKeepExistingTrackShape = existingTrack?.kind === "track" || existingTrack?.id === "q_track";
       const trackQuestion = {
-        id: existingTrack?.id || "q_track",
-        label: existingTrack?.label || "送って頂く楽曲",
+        id: shouldKeepExistingTrackShape ? existingTrack.id : "q_track",
+        label: existingTrack?.kind === "track" ? existingTrack.label : "送って頂く楽曲",
         kind: "track",
         required: existingTrack?.required ?? true,
         use: existingTrack?.use || "article"
       };
-      const rest = questions.filter((question) => !oldTrackIds.has(question.id) && question.id !== trackQuestion.id);
-      const insertAfterId = form.id === "form_listener" ? "q_artist" : "q_owner";
+      const rest = questions.filter((question) => question.id !== trackQuestion.id && !isLegacyTrackQuestion(question));
+      const insertAfterId = isListenerForm ? "q_artist" : "q_owner";
       const insertIndex = rest.findIndex((question) => question.id === insertAfterId);
       questions = [...rest];
       if (!questions.some((question) => question.kind === "track")) {
@@ -1276,6 +1344,7 @@ ${assetRows || "-"}
           {active === "forms" && (
             <Forms
               forms={data.forms}
+              settings={data.settings}
               patchItem={patchItem}
               removeItem={removeItem}
               addForm={addForm}
@@ -1328,6 +1397,10 @@ ${assetRows || "-"}
 
 function PublicSubmissionForm({ logoSrc, payload }) {
   const form = payload?.form;
+  const contactAccounts = {
+    bellbo: normalizeXHandle(payload?.contactAccounts?.bellbo || DEFAULT_BELLBO_X_HANDLE),
+    kaname: normalizeXHandle(payload?.contactAccounts?.kaname || "")
+  };
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState("");
   const [copied, setCopied] = useState(false);
@@ -1360,6 +1433,27 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         ...patch
       }
     }));
+  };
+
+  const updateXContactAnswer = (questionId, patch) => {
+    setAnswers((current) => {
+      const previous = current[questionId] ?? {};
+      const next = {
+        rawX: "",
+        xHandle: "",
+        xUrl: "",
+        followedBellbo: false,
+        followedKaname: false,
+        dmOk: false,
+        ...previous,
+        ...patch
+      };
+      if ("rawX" in patch) {
+        next.xHandle = formatXHandle(patch.rawX);
+        next.xUrl = makeXUrl(patch.rawX);
+      }
+      return { ...current, [questionId]: next };
+    });
   };
 
   const updateFileAnswer = async (questionId, event) => {
@@ -1458,7 +1552,8 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         useLabel: QUESTION_USE_LABELS[question.use] ?? question.use,
         answer: formatAnswerValue(answers[question.id]),
         attachment: question.kind === "file" ? answers[question.id] || null : question.kind === "track" ? answers[question.id]?.audio || null : null,
-        track: question.kind === "track" ? answers[question.id] || null : null
+        track: question.kind === "track" ? answers[question.id] || null : null,
+        xContact: question.kind === "x_contact" ? answers[question.id] || null : null
       }))
     };
   };
@@ -1543,6 +1638,71 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                     />
                     <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : "WAVまたはMP3をアップロード"}</small>
                   </label>
+                </div>
+              ) : question.kind === "x_contact" ? (
+                <div className="x-contact-block">
+                  <label>
+                    <span>Xアカウント</span>
+                    <input
+                      required={Boolean(question.required)}
+                      placeholder="@bellbo13"
+                      value={answers[question.id]?.rawX ?? ""}
+                      onChange={(event) => updateXContactAnswer(question.id, { rawX: event.target.value })}
+                    />
+                    <small>
+                      {answers[question.id]?.xUrl ? (
+                        <a href={answers[question.id].xUrl} target="_blank" rel="noreferrer">
+                          {answers[question.id].xHandle} を開く
+                        </a>
+                      ) : (
+                        "@からでもURLからでも入力できます。"
+                      )}
+                    </small>
+                  </label>
+                  <div className="follow-actions">
+                    {contactAccounts.bellbo ? (
+                      <a className="secondary" href={makeXUrl(contactAccounts.bellbo)} target="_blank" rel="noreferrer">
+                        べるぼ☂をフォロー
+                      </a>
+                    ) : null}
+                    {contactAccounts.kaname ? (
+                      <a className="secondary" href={makeXUrl(contactAccounts.kaname)} target="_blank" rel="noreferrer">
+                        かなめ🦐をフォロー
+                      </a>
+                    ) : (
+                      <span className="muted small">かなめ🦐のXアカウントは運営側で未設定です。</span>
+                    )}
+                  </div>
+                  <label className="inline-check">
+                    <input
+                      type="checkbox"
+                      required={Boolean(question.required && contactAccounts.bellbo)}
+                      checked={Boolean(answers[question.id]?.followedBellbo)}
+                      onChange={(event) => updateXContactAnswer(question.id, { followedBellbo: event.target.checked })}
+                    />
+                    べるぼ☂をフォローしました
+                  </label>
+                  {contactAccounts.kaname && (
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        required={Boolean(question.required)}
+                        checked={Boolean(answers[question.id]?.followedKaname)}
+                        onChange={(event) => updateXContactAnswer(question.id, { followedKaname: event.target.checked })}
+                      />
+                      かなめ🦐をフォローしました
+                    </label>
+                  )}
+                  <label className="inline-check">
+                    <input
+                      type="checkbox"
+                      required={Boolean(question.required)}
+                      checked={Boolean(answers[question.id]?.dmOk)}
+                      onChange={(event) => updateXContactAnswer(question.id, { dmOk: event.target.checked })}
+                    />
+                    XのDMで運営から連絡を受け取ってOKです
+                  </label>
+                  <p className="hint-text">連絡用のため、記事本文には載せない内部確認情報として扱います。</p>
                 </div>
               ) : question.kind === "long" ? (
                 <textarea
@@ -1831,11 +1991,11 @@ function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem
   );
 }
 
-function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuestion, removeQuestion }) {
+function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, patchQuestion, removeQuestion }) {
   const [copiedFormId, setCopiedFormId] = useState("");
 
   const copyShareUrl = async (form) => {
-    await navigator.clipboard.writeText(makeShareUrl(form));
+    await navigator.clipboard.writeText(makeShareUrl(form, settings));
     setCopiedFormId(form.id);
     window.setTimeout(() => setCopiedFormId(""), 1800);
   };
@@ -1859,7 +2019,7 @@ function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuesti
                 <strong><Share2 size={16} />共有フォーム</strong>
                 <span>回答者は入力後、回答JSONをコピーまたはダウンロードします。自動回収はGoogle Sheets/Drive連携で追加予定。</span>
               </div>
-              <input readOnly value={makeShareUrl(form)} onFocus={(event) => event.target.select()} />
+              <input readOnly value={makeShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
               <button className="secondary" onClick={() => copyShareUrl(form)}>
                 <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "リンクをコピー"}
               </button>
@@ -2256,6 +2416,8 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
           <Field label="WordPressサイト" value={settings.wordpressSite} onChange={(value) => updateSettings({ wordpressSite: value })} />
           <Field label="SE_Pon URL" value={settings.sePonUrl} onChange={(value) => updateSettings({ sePonUrl: value })} />
+          <Field label="べるぼ☂ Xアカウント" value={settings.bellboXHandle || ""} onChange={(value) => updateSettings({ bellboXHandle: normalizeXHandle(value) })} />
+          <Field label="かなめ🦐 Xアカウント" value={settings.kanameXHandle || ""} onChange={(value) => updateSettings({ kanameXHandle: normalizeXHandle(value) })} />
         </div>
         <div className="button-row">
           <button className="secondary" onClick={() => updateSettings({ obsidianPath: DEFAULT_OBSIDIAN_PATH, obsidianFolderName: "Sunoパ！記事" })}>

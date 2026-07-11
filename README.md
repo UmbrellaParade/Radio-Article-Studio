@@ -49,7 +49,7 @@ Implemented:
 4. Broadcast episode management with automatic broadcast slot, guest episode title, and article URL slug handling.
 5. Form template management.
 6. Shareable form URL prototype.
-7. Response JSON creation/import with grouped song fields and WAV/MP3 attachments.
+7. Response JSON creation/import with grouped song fields, WAV/MP3 attachments, and internal X contact blocks.
 8. Response management with public/article/internal/constraint separation.
 9. Track and audio metadata management.
 10. Thumbnail composition from three base images plus a guest icon, with registered image previews.
@@ -57,7 +57,7 @@ Implemented:
 12. Codex request pack generation.
 13. JSON export/import backup.
 
-The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Shared forms can use a song field that groups title, URL, and WAV/MP3 upload in one block. The operator can import the response JSON, download attached audio, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
+The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Shared forms can use a song field that groups title, URL, and WAV/MP3 upload in one block. They can also use an internal X contact block that normalizes handles into profile URLs and asks respondents to follow the operating accounts before DM contact. The operator can import the response JSON, download attached audio, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
 
 ## Development
 

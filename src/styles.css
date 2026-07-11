@@ -489,6 +489,53 @@ textarea {
   font-weight: 900;
 }
 
+.x-contact-block {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.x-contact-block label {
+  display: grid;
+  gap: 6px;
+}
+
+.x-contact-block label span {
+  color: #6b6175;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.follow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inline-check {
+  display: flex !important;
+  grid-template-columns: unset !important;
+  align-items: center;
+  gap: 8px;
+  color: #51495f;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.inline-check input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+}
+
+.muted.small {
+  align-self: center;
+  font-size: 12px;
+}
+
 .mini-check {
   display: inline-flex;
   align-items: center;
