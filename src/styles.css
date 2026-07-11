@@ -466,7 +466,7 @@ h1 {
 
 .track-meta-grid {
   display: grid;
-  grid-template-columns: 96px minmax(180px, 240px) minmax(220px, 1fr);
+  grid-template-columns: 88px minmax(150px, 220px) minmax(220px, .9fr) minmax(320px, 1.4fr);
   gap: 12px;
   margin-bottom: 12px;
 }

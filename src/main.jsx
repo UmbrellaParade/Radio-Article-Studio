@@ -795,7 +795,20 @@ const buildResponseFromRow = (row, episodeId, formId) => {
 };
 
 const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId = "") => {
-  const submitter = pick(row, ["ゲスト名", "活動名", "応募者名", "お名前", "お名前 よみかた", "パーソナリティ名", "回答者", "担当"]) || fallbackArtist;
+  const ownerName =
+    pick(row, [
+      "ゲスト名",
+      "活動名",
+      "応募者名",
+      "応募者のお名前",
+      "お名前",
+      "お名前 よみかた",
+      "パーソナリティ名",
+      "回答者",
+      "担当",
+      "アーティスト名",
+      "アーティスト名 正式表記"
+    ]) || fallbackArtist;
   const aiArtist = pick(row, [
     "AIアーティスト名",
     "AIアーティストの名前",
@@ -807,7 +820,7 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId
     "AIアーティスト名（正式表記）",
     "AIアーティスト名(正式表記)"
   ]);
-  const artist = aiArtist || pick(row, ["アーティスト名", "ゲスト名", "活動名", "応募者名", "お名前", "お名前 よみかた", "担当"]) || fallbackArtist;
+  const artist = ownerName;
   const title = pick(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"]);
   const url = pick(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"]);
   const audioFile = pick(row, ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"]);
@@ -824,8 +837,7 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId
     source,
     artist,
     aiArtist,
-    submitter,
-    title: title || `${artist || source} 紹介曲`,
+    title: title || `${artist || aiArtist || source} 紹介曲`,
     urlType: detectUrlType(url),
     url,
     audioFile,
@@ -904,18 +916,17 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
   const source =
     formId === "form_listener" ? "リスナー応募曲" : formId === "form_personality" ? "パーソナリティ曲" : "ゲスト曲";
   const artistAnswer =
-    rawAnswers.find((answer) => /AIアーティスト|AI artist|AI名義|アーティスト名/.test(answer.label))?.answer ?? "";
+    rawAnswers.find((answer) => /AIアーティスト|AI artist|AI名義/.test(answer.label))?.answer ?? "";
   const ownerAnswer =
-    rawAnswers.find((answer) => /ゲスト名|活動名|応募者|担当|名前|パーソナリティ/.test(answer.label) && !/AIアーティスト|AI artist|AI名義|アーティスト名/.test(answer.label))?.answer ?? "";
-  const submitter = ownerAnswer && ownerAnswer !== "-" ? ownerAnswer : respondent;
-  const artist = artistAnswer && artistAnswer !== "-" ? artistAnswer : submitter;
+    rawAnswers.find((answer) => /ゲスト名|活動名|応募者|担当|名前|パーソナリティ|アーティスト名/.test(answer.label) && !/AIアーティスト|AI artist|AI名義/.test(answer.label))?.answer ?? "";
+  const artist = ownerAnswer && ownerAnswer !== "-" ? ownerAnswer : respondent;
 
   return rawAnswers
     .filter((answer) => answer.kind === "track" && answer.track)
     .map((answer) => {
       const track = answer.track;
       if (!track.title && !track.url && !track.audio?.fileName) return null;
-      const trackArtist = track.artist || artist;
+      const trackArtist = artist;
       const aiArtist = track.aiArtist || track.artist || (artistAnswer && artistAnswer !== "-" ? artistAnswer : "");
       return {
         id: newId("tr"),
@@ -925,8 +936,7 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
         source,
         artist: trackArtist,
         aiArtist,
-        submitter,
-        title: track.title || `${trackArtist || source} 紹介曲`,
+        title: track.title || `${trackArtist || aiArtist || source} 紹介曲`,
         urlType: detectUrlType(track.url),
         url: track.url || "",
         audioFile: track.audio?.fileName || "",
@@ -1314,7 +1324,8 @@ const sampleData = {
       periodId: "",
       slotNo: 1,
       source: "ゲスト曲",
-      artist: "Silfira",
+      artist: "結音さん",
+      aiArtist: "Silfira",
       title: "スタートライン",
       urlType: "YouTube",
       url: "https://youtu.be/bALQZxlngvI",
@@ -1554,7 +1565,6 @@ function migrateData(input) {
       audio: null,
       periodId: "",
       aiArtist: "",
-      submitter: "",
       ...track,
       urlType: track.urlType || detectUrlType(track.url)
     }))
@@ -1624,7 +1634,6 @@ function App() {
     .sort((a, b) => Number(a.slotNo) - Number(b.slotNo));
 
   const episodeResponses = data.responses.filter((response) => response.episodeId === selectedEpisode?.id);
-  const episodeAssets = data.assets.filter((asset) => asset.episodeId === selectedEpisode?.id);
   const episodePeriods = data.applicationPeriods.filter((period) => period.episodeId === selectedEpisode?.id);
 
   const updateData = (key, updater) => {
@@ -1674,7 +1683,6 @@ function App() {
         source: "ゲスト曲",
         artist: "",
         aiArtist: "",
-        submitter: "",
         title: "",
         urlType: "Suno",
         url: "",
@@ -1998,7 +2006,6 @@ function App() {
         slotNo: nextSlotNo(current.tracks, selectedEpisode.id),
         source: "パーソナリティ曲",
         artist: "べるぼ☂",
-        submitter: "べるぼ☂",
         aiArtist: "",
         title: fetchedTitle || "べるぼ☂ 紹介曲",
         urlType: detectUrlType(url),
@@ -2040,20 +2047,20 @@ ${response.constraints || "-"}`
     const trackRows = episodeTracks
       .map((track) => {
         const aiArtistNote = track.aiArtist ? ` / AIアーティスト名: ${track.aiArtist}` : "";
-        const submitterNote = track.submitter ? ` / 紹介者・回答者: ${track.submitter}` : "";
         return (
           `${track.slotNo}. ${track.title || "曲名未入力"} / ${track.artist || "アーティスト未入力"}\n` +
-          `   種別: ${track.source} / 応募期間: ${track.periodId || "-"}${aiArtistNote}${submitterNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
+          `   種別: ${track.source} / 応募期間: ${track.periodId || "-"}${aiArtistNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
           `   記事ポイント: ${track.articlePoint || "-"}`
         );
       })
       .join("\n");
 
-    const assetRows = episodeAssets
-      .map(
-        (asset) =>
-          `- ${asset.type}: ${asset.title || "-"} / Drive: ${asset.driveUrl || "-"} / local: ${asset.localPath || "-"} / credit: ${asset.credit || "-"}`
-      )
+    const thumbnailRows = THUMBNAIL_PRESETS
+      .map((preset) => {
+        const generated = data.thumbnailStudio?.generated?.[preset.key];
+        const template = data.thumbnailStudio?.templates?.[preset.key] ?? defaultThumbnailStudio.templates[preset.key];
+        return `- ${preset.label}: ${generated ? `生成済み / ${generated.fileName || preset.fileName}` : "未生成"} / ベース: ${template?.name || preset.baseName}`;
+      })
       .join("\n");
     const periodRows = episodePeriods
       .map(
@@ -2099,14 +2106,14 @@ ${periodRows || "-"}
 ${trackRows || "-"}
 
 サムネ/画像素材:
-${assetRows || "-"}
+${thumbnailRows || "-"}
 
 厳守ルール:
 - かなめ🦐、べるぼ☂はパーソナリティなので原則「さん」なし。
 - 記事本文に内部確認メモやNG回答そのものを載せない。
 - 主催/出演/参加/プロデュースなどの関係性を混同しない。
 - WordPress認証情報はチャットで別途共有する。`;
-  }, [data.settings, episodeAssets, episodePeriods, episodeResponses, episodeTracks, selectedEpisode]);
+  }, [data.settings, data.thumbnailStudio, episodePeriods, episodeResponses, episodeTracks, selectedEpisode]);
 
   const copyPack = async () => {
     await navigator.clipboard.writeText(codexPack);
@@ -2286,7 +2293,6 @@ ${assetRows || "-"}
               data={data}
               selectedEpisode={selectedEpisode}
               episodeTracks={episodeTracks}
-              episodeAssets={episodeAssets}
               setActive={setActive}
             />
           )}
@@ -2329,10 +2335,6 @@ ${assetRows || "-"}
           )}
           {active === "assets" && (
             <Assets
-              assets={episodeAssets}
-              patchItem={patchItem}
-              removeItem={removeItem}
-              addAsset={addAsset}
               thumbnailStudio={data.thumbnailStudio ?? defaultThumbnailStudio}
               updateThumbnailStudio={updateThumbnailStudio}
               guestName={selectedEpisode?.guestName ?? ""}
@@ -2990,13 +2992,14 @@ function Header({ logoSrc }) {
   );
 }
 
-function Dashboard({ data, selectedEpisode, episodeTracks, episodeAssets, setActive }) {
+function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
   const articleUrl = selectedEpisode?.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode?.articleSlug);
+  const thumbnailGeneratedCount = Object.keys(data.thumbnailStudio?.generated ?? {}).length;
   const stats = [
     ["放送回", data.episodes.length, CalendarDays],
     ["フォーム", data.forms.length, ListChecks],
     ["楽曲", data.tracks.length, Music],
-    ["素材", data.assets.length, Image]
+    ["素材", thumbnailGeneratedCount, Image]
   ];
   const statTargets = {
     放送回: "episodes",
@@ -3039,7 +3042,7 @@ function Dashboard({ data, selectedEpisode, episodeTracks, episodeAssets, setAct
           <div className="check-list">
             <StatusLine done={Boolean(selectedEpisode?.standfmUrl)} label="stand.fm URL" />
             <StatusLine done={episodeTracks.length > 0} label="紹介楽曲" />
-            <StatusLine done={episodeAssets.some((asset) => asset.type.includes("16:9"))} label="記事アイキャッチ" />
+            <StatusLine done={Boolean(data.thumbnailStudio?.generated?.article16x9)} label="記事アイキャッチ" />
             <StatusLine done={Boolean(articleUrl)} label="公開記事URL" />
           </div>
         </article>
@@ -3620,7 +3623,6 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
                 <SelectField label="紹介枠" value={track.source} options={["ゲスト曲", "パーソナリティ曲", "リスナー応募曲"]} onChange={(value) => patchItem("tracks", track.id, { source: value })} />
                 <Field label="アーティスト名" value={track.artist} onChange={(value) => patchItem("tracks", track.id, { artist: value })} />
                 <Field label="AIアーティスト名" value={track.aiArtist} onChange={(value) => patchItem("tracks", track.id, { aiArtist: value })} />
-                <Field label="紹介者/回答者" value={track.submitter} onChange={(value) => patchItem("tracks", track.id, { submitter: value })} />
               </div>
               <div className="song-card">
                 <div className="song-card-title">
@@ -4148,30 +4150,11 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   );
 }
 
-function Assets({ assets, patchItem, removeItem, addAsset, thumbnailStudio, updateThumbnailStudio, guestName, episodeDate }) {
+function Assets({ thumbnailStudio, updateThumbnailStudio, guestName, episodeDate }) {
   return (
     <div className="view-stack">
-      <SectionTitle title="サムネ/素材管理" subtitle="記事16:9、stand.fm 1:1、配信背景9:16、音源フォルダーなどを放送回に紐づけます。" action={<button className="primary" onClick={addAsset}><Plus size={16} />素材追加</button>} />
+      <SectionTitle title="サムネ/素材管理" subtitle="記事16:9、stand.fm 1:1、配信背景9:16を放送回に紐づけて作成します。" />
       <ThumbnailComposer studio={thumbnailStudio} updateStudio={updateThumbnailStudio} guestName={guestName} episodeDate={episodeDate} />
-      <div className="records">
-        {assets.map((asset) => (
-          <article className="record" key={asset.id}>
-            <div className="record-head">
-              <strong>{asset.type} / {asset.title || "素材名未入力"}</strong>
-              <button className="icon-danger" onClick={() => removeItem("assets", asset.id)}><Trash2 size={16} /></button>
-            </div>
-            <div className="form-grid">
-              <SelectField label="種別" value={asset.type} options={["記事アイキャッチ 16:9", "stand.fm正方形 1:1", "配信背景 9:16", "ゲストアイコン", "音源Driveフォルダー", "SE_Pon取り込み"]} onChange={(value) => patchItem("assets", asset.id, { type: value })} />
-              <Field label="タイトル" value={asset.title} onChange={(value) => patchItem("assets", asset.id, { title: value })} />
-              <Field label="Drive URL" value={asset.driveUrl} onChange={(value) => patchItem("assets", asset.id, { driveUrl: value })} />
-              <Field label="ローカルパス" value={asset.localPath} onChange={(value) => patchItem("assets", asset.id, { localPath: value })} />
-              <SelectField label="状態" value={asset.status} options={["制作待ち", "制作中", "制作済み", "確認済み", "使用済み"]} onChange={(value) => patchItem("assets", asset.id, { status: value })} />
-              <Field label="alt文" value={asset.alt} onChange={(value) => patchItem("assets", asset.id, { alt: value })} />
-              <Field label="クレジット" value={asset.credit} onChange={(value) => patchItem("assets", asset.id, { credit: value })} />
-            </div>
-          </article>
-        ))}
-      </div>
     </div>
   );
 }
