@@ -390,7 +390,7 @@ const THUMBNAIL_PRESETS = [
     width: 1280,
     height: 720,
     fileName: "article-thumbnail.png",
-    baseName: "固定ベース 16:9",
+    baseName: "初期ベース 16:9",
     baseUrl: publicAsset("thumbnail-templates/sunopa-article-16x9.png"),
     dateBadge: { x: 50, y: 10.4, year: 24, date: 39, weekday: 26, offsets: [-24, 6, 38] }
   },
@@ -400,7 +400,7 @@ const THUMBNAIL_PRESETS = [
     width: 1080,
     height: 1080,
     fileName: "standfm-thumbnail.png",
-    baseName: "固定ベース 1:1",
+    baseName: "初期ベース 1:1",
     baseUrl: publicAsset("thumbnail-templates/sunopa-standfm-1x1.png"),
     dateBadge: { x: 50, y: 15.2, year: 34, date: 54, weekday: 34, offsets: [-48, 1, 56] }
   },
@@ -410,7 +410,7 @@ const THUMBNAIL_PRESETS = [
     width: 1080,
     height: 1920,
     fileName: "stream-background.png",
-    baseName: "固定ベース 9:16",
+    baseName: "初期ベース 9:16",
     baseUrl: publicAsset("thumbnail-templates/sunopa-stream-9x16.png"),
     dateBadge: { x: 50, y: 23.2, year: 42, date: 66, weekday: 42, offsets: [-62, 0, 72] }
   }
@@ -5073,7 +5073,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         }
       }
     }));
-    setMessage("固定ベース画像に戻しました。");
+    setMessage("初期ベース画像に戻しました。");
   };
 
   const generateOne = async (preset) => {
@@ -5089,7 +5089,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         date: thumbnailDate,
         guestName
       });
-      const { fileName, generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, guestName);
+      const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, guestName);
       setGeneratedImages((current) => ({ ...current, [preset.key]: dataUrl }));
       updateStudio((current) => ({
         ...defaultThumbnailStudio,
@@ -5099,10 +5099,9 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           [preset.key]: generatedRecord
         }
       }));
-      setPreviewImage({ presetKey: preset.key, src: dataUrl, label: preset.label, width: preset.width, height: preset.height, fileName });
       setMessage(`${preset.label} を生成して保存しました。`);
     } catch {
-      setMessage("ベース画像を読み込めませんでした。固定ベースに戻すか、画像を登録し直してください。");
+      setMessage("ベース画像を読み込めませんでした。初期ベースに戻すか、画像を登録し直してください。");
     } finally {
       setGeneratingKey("");
     }
@@ -5211,7 +5210,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       <div className="record-head">
         <div>
           <h2>サムネ自動合成</h2>
-          <p className="muted">固定ベース画像に、日付とゲストアイコンを指定位置で重ねます。</p>
+          <p className="muted">登録したベース画像に、日付とゲストアイコンを指定位置で重ねます。</p>
         </div>
         <label className="secondary file-button">
           <Upload size={16} />ゲストアイコン
@@ -5252,9 +5251,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
                   alt={`登録済みゲストアイコン ${index + 1}`}
                   key={`${icon.name}-${index}`}
                   style={{
-                    objectPosition: `${icon.cropX}% ${icon.cropY}%`,
-                    transform: `scale(${icon.cropZoom / 100})`,
-                    transformOrigin: `${icon.cropX}% ${icon.cropY}%`
+                    objectPosition: `${icon.cropX}% ${icon.cropY}%`
                   }}
                 />
               ))}
@@ -5297,7 +5294,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           const template = getHydratedTemplate(preset.key);
           const templateSource = getTemplateSource(template);
           const isTemplateLoading = isCustomTemplate(template) && !templateSource && Boolean(template.baseImageKey);
-          const templateLabel = isCustomTemplate(template) ? template.name : `${preset.baseName}（固定）`;
+          const templateLabel = isCustomTemplate(template) ? template.name : `${preset.baseName}（初期）`;
           const savedGenerated = generated[preset.key];
           const savedGeneratedDataUrl = isTemplateLoading ? "" : generatedImages[preset.key] || savedGenerated?.dataUrl;
           const livePreviewDataUrl = livePreviewImages[preset.key];
@@ -5311,7 +5308,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
                 <Upload size={16} />ベース画像
                 <input type="file" accept="image/*" onChange={(event) => handleTemplateFile(preset.key, event)} />
               </label>
-              <button className="secondary" onClick={() => resetTemplate(preset.key)}>固定ベースに戻す</button>
+              <button className="secondary" onClick={() => resetTemplate(preset.key)}>初期ベースに戻す</button>
               <p className="muted">{templateLabel}</p>
               {templateSource ? (
                 <div className="registered-template">
