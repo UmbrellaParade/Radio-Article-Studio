@@ -243,6 +243,63 @@ const getContactAccountList = (source = {}) => {
 
 const isWebUrl = (url = "") => /^https?:\/\//i.test(String(url).trim());
 
+const getGoogleDriveFileId = (url = "") => {
+  const trimmed = String(url).trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("drive.google.com") && !host.includes("docs.google.com")) return "";
+    const idParam = parsed.searchParams.get("id");
+    if (idParam) return idParam;
+    return parsed.pathname.match(/\/file\/d\/([^/]+)/)?.[1] ?? "";
+  } catch {
+    return trimmed.match(/(?:id=|\/file\/d\/)([A-Za-z0-9_-]+)/)?.[1] ?? "";
+  }
+};
+
+const makeDirectAudioDownloadUrl = (url = "") => {
+  const trimmed = String(url).trim();
+  if (!isWebUrl(trimmed)) return "";
+  const driveFileId = getGoogleDriveFileId(trimmed);
+  if (driveFileId) return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(driveFileId)}`;
+  return trimmed;
+};
+
+const sanitizeDownloadName = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .slice(0, 90);
+
+const getUrlFileExtension = (url = "") => {
+  try {
+    return new URL(url).pathname.match(/\.(mp3|wav|m4a|aac|flac|ogg)$/i)?.[0] ?? "";
+  } catch {
+    return String(url).match(/\.(mp3|wav|m4a|aac|flac|ogg)(?:[?#]|$)/i)?.[0] ?? "";
+  }
+};
+
+const makeTrackAudioDownloadName = (track) => {
+  const extension = getUrlFileExtension(track.audioFile) || ".mp3";
+  const base = sanitizeDownloadName([track.slotNo, track.artist, track.title].filter(Boolean).join("_")) || "audio-file";
+  return base.toLowerCase().endsWith(extension.toLowerCase()) ? base : `${base}${extension}`;
+};
+
+const downloadTrackAudioFromUrl = (track) => {
+  const url = makeDirectAudioDownloadUrl(track.audioFile);
+  if (!url) return;
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.download = makeTrackAudioDownloadName(track);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+};
+
 const isSupportedTrackUrl = (url = "") => {
   const trimmed = String(url).trim();
   if (!trimmed) return true;
@@ -304,7 +361,7 @@ const THUMBNAIL_PRESETS = [
     fileName: "standfm-thumbnail.png",
     baseName: "固定ベース 1:1",
     baseUrl: publicAsset("thumbnail-templates/sunopa-standfm-1x1.png"),
-    dateBadge: { x: 50, y: 15.4, year: 40, date: 62, weekday: 42, offsets: [-62, 1, 68] }
+    dateBadge: { x: 50, y: 15.2, year: 34, date: 54, weekday: 34, offsets: [-48, 1, 56] }
   },
   {
     key: "stream9x16",
@@ -314,7 +371,7 @@ const THUMBNAIL_PRESETS = [
     fileName: "stream-background.png",
     baseName: "固定ベース 9:16",
     baseUrl: publicAsset("thumbnail-templates/sunopa-stream-9x16.png"),
-    dateBadge: { x: 50, y: 17.9, year: 48, date: 76, weekday: 52, offsets: [-76, 0, 84] }
+    dateBadge: { x: 50, y: 23.2, year: 42, date: 66, weekday: 42, offsets: [-62, 0, 72] }
   }
 ];
 
@@ -2188,9 +2245,7 @@ ${assetRows || "-"}
           ["dashboard", "ダッシュボード", Radio],
           ["imports", "取り込み", Upload],
           ["episodes", "放送回", CalendarDays],
-          ["periods", "応募期間", CalendarDays],
           ["forms", "フォーム", ListChecks],
-          ["responses", "回答", Database],
           ["tracks", "楽曲", Music],
           ["assets", "素材", Image],
           ["pack", "Codexパック", FileText],
@@ -2231,9 +2286,7 @@ ${assetRows || "-"}
               data={data}
               selectedEpisode={selectedEpisode}
               episodeTracks={episodeTracks}
-              episodeResponses={episodeResponses}
               episodeAssets={episodeAssets}
-              episodePeriods={episodePeriods}
               setActive={setActive}
             />
           )}
@@ -2259,20 +2312,6 @@ ${assetRows || "-"}
               wordpressSite={data.settings.wordpressSite}
             />
           )}
-          {active === "periods" && (
-            <ApplicationPeriods
-              periods={data.applicationPeriods}
-              episodes={data.episodes}
-              forms={data.forms}
-              settings={data.settings}
-              patchItem={patchItem}
-              removeItem={removeItem}
-              addPeriod={addApplicationPeriod}
-              importPeriodCsvUrl={importPeriodCsvUrl}
-              importPeriodCsvFile={importPeriodCsvFile}
-              importingSource={importingSource}
-            />
-          )}
           {active === "forms" && (
             <Forms
               forms={data.forms}
@@ -2283,16 +2322,6 @@ ${assetRows || "-"}
               addQuestion={addQuestion}
               patchQuestion={patchQuestion}
               removeQuestion={removeQuestion}
-            />
-          )}
-          {active === "responses" && (
-            <Responses
-              forms={data.forms}
-              responses={episodeResponses}
-              patchItem={patchItem}
-              removeItem={removeItem}
-              addResponse={addResponse}
-              importResponseJson={importResponseJson}
             />
           )}
           {active === "tracks" && (
@@ -2961,21 +2990,17 @@ function Header({ logoSrc }) {
   );
 }
 
-function Dashboard({ data, selectedEpisode, episodeTracks, episodeResponses, episodeAssets, episodePeriods, setActive }) {
+function Dashboard({ data, selectedEpisode, episodeTracks, episodeAssets, setActive }) {
   const articleUrl = selectedEpisode?.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode?.articleSlug);
   const stats = [
     ["放送回", data.episodes.length, CalendarDays],
-    ["応募期間", data.applicationPeriods.length, CalendarDays],
     ["フォーム", data.forms.length, ListChecks],
-    ["回答", data.responses.length, Database],
     ["楽曲", data.tracks.length, Music],
     ["素材", data.assets.length, Image]
   ];
   const statTargets = {
     放送回: "episodes",
-    応募期間: "periods",
     フォーム: "forms",
-    回答: "responses",
     楽曲: "tracks",
     素材: "assets"
   };
@@ -3013,8 +3038,6 @@ function Dashboard({ data, selectedEpisode, episodeTracks, episodeResponses, epi
           <h2>制作状況</h2>
           <div className="check-list">
             <StatusLine done={Boolean(selectedEpisode?.standfmUrl)} label="stand.fm URL" />
-            <StatusLine done={episodePeriods.length > 0} label="応募期間" />
-            <StatusLine done={episodeResponses.length > 0} label="ゲスト/回答情報" />
             <StatusLine done={episodeTracks.length > 0} label="紹介楽曲" />
             <StatusLine done={episodeAssets.some((asset) => asset.type.includes("16:9"))} label="記事アイキャッチ" />
             <StatusLine done={Boolean(articleUrl)} label="公開記事URL" />
@@ -3584,6 +3607,8 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
       <div className="records">
         {tracks.map((track) => {
           const audio = track.audio;
+          const audioDownloadUrl = makeDirectAudioDownloadUrl(track.audioFile);
+          const isDriveAudio = Boolean(getGoogleDriveFileId(track.audioFile));
           return (
             <article className="record" key={track.id}>
               <div className="record-head">
@@ -3611,6 +3636,19 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
                   <Field label="敬称ルール" value={track.honorific} onChange={(value) => patchItem("tracks", track.id, { honorific: value })} />
                   <TextArea label="記事で触れるポイント" value={track.articlePoint} onChange={(value) => patchItem("tracks", track.id, { articlePoint: value })} />
                 </div>
+                {audioDownloadUrl && !audio?.dataUrl && (
+                  <div className="track-audio-ops track-audio-url">
+                    <div>
+                      <strong>音源URLからダウンロード</strong>
+                      <small>{isDriveAudio ? "Google Driveを開かずに、直接ダウンロード用URLを呼び出します。" : "登録されている音源URLからダウンロードします。"}</small>
+                    </div>
+                    <div className="inline-actions">
+                      <button className="secondary" onClick={() => downloadTrackAudioFromUrl(track)}>
+                        <Download size={16} />音源をダウンロード
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {audio?.dataUrl && (
                   <div className="track-audio-ops">
                     <div>
