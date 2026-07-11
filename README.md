@@ -37,15 +37,22 @@ Short name:
 Radio Article Studio
 ```
 
-## MVP Scope
+## Current MVP
 
-Phase 1 focuses on a practical production ledger:
+The current app is a browser-based working prototype with localStorage persistence.
 
-1. Create broadcast episodes.
-2. Create form templates.
-3. View and manage responses.
-4. Manage track metadata.
-5. Generate a Codex request pack.
+Implemented:
+
+1. Dashboard.
+2. Broadcast episode management.
+3. Form template management.
+4. Response management with public/internal/constraint separation.
+5. Track and audio metadata management.
+6. Thumbnail and production asset management.
+7. Codex request pack generation.
+8. JSON export/import backup.
+
+External integrations such as Google Drive, WordPress, and SE_Pon are planned for later phases.
 
 ## Development
 
@@ -61,4 +68,3 @@ The main design document is in:
 ```text
 docs/design.md
 ```
-
