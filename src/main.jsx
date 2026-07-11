@@ -715,6 +715,62 @@ const pick = (row, aliases) => {
   return "";
 };
 
+const pickByLabelPattern = (row, patterns, excludePatterns = []) => {
+  for (const [key, value] of Object.entries(row)) {
+    const text = String(value ?? "").trim();
+    if (!text) continue;
+    const label = String(key || "");
+    if (excludePatterns.some((pattern) => pattern.test(label))) continue;
+    if (patterns.some((pattern) => pattern.test(label))) return text;
+  }
+  return "";
+};
+
+const pickImportValue = (row, aliases, patterns = [], excludePatterns = []) =>
+  pick(row, aliases) || pickByLabelPattern(row, patterns, excludePatterns);
+
+const isImportMetadataColumn = (key = "") => {
+  const normalized = normalizeKey(key);
+  return [
+    "タイムスタンプ",
+    "timestamp",
+    "メールアドレス",
+    "emailaddress",
+    "username",
+    "ユーザー名",
+    "スコア",
+    "score"
+  ].includes(normalized);
+};
+
+const meaningfulRowEntries = (row) =>
+  Object.entries(row)
+    .map(([label, value]) => ({ label: String(label || "").trim(), value: String(value ?? "").trim() }))
+    .filter(({ label, value }) => label && value && !isImportMetadataColumn(label));
+
+const formatRemainingAnswers = (row, usedValues = []) => {
+  const used = new Set(usedValues.filter(Boolean).map((value) => String(value).trim()));
+  return meaningfulRowEntries(row)
+    .filter(({ value }) => !used.has(value))
+    .map(({ label, value }) => `${label}: ${value}`)
+    .join("\n");
+};
+
+const summarizeImportColumns = (rows = []) => {
+  const labels = meaningfulRowEntries(rows[0] ?? {}).map(({ label }) => label).slice(0, 8);
+  return labels.length ? ` 取得した列: ${labels.join(" / ")}` : "";
+};
+
+const makeUniqueHeaders = (headers = []) => {
+  const seen = new Map();
+  return headers.map((header, index) => {
+    const base = String(header || "").trim() || `column_${index + 1}`;
+    const count = (seen.get(base) ?? 0) + 1;
+    seen.set(base, count);
+    return count === 1 ? base : `${base}_${count}`;
+  });
+};
+
 const parseCsv = (text) => {
   const rows = [];
   let row = [];
@@ -748,7 +804,7 @@ const parseCsv = (text) => {
   if (row.some((cell) => cell.trim() !== "")) rows.push(row);
   if (rows.length < 2) return [];
 
-  const headers = rows[0].map((header) => header.trim());
+  const headers = makeUniqueHeaders(rows[0]);
   return rows.slice(1).map((cells) =>
     Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, cells[index]?.trim() ?? ""]))
   );
@@ -798,7 +854,7 @@ const gvizResponseToRows = (response) => {
   }
 
   const columns = response.table?.cols ?? [];
-  const headers = columns.map((column, index) => String(column?.label || "").trim() || `column_${index + 1}`);
+  const headers = makeUniqueHeaders(columns.map((column, index) => String(column?.label || "").trim() || `column_${index + 1}`));
   return (response.table?.rows ?? [])
     .map((row) =>
       Object.fromEntries(headers.map((header, index) => [header, gvizCellToText(row.c?.[index])]))
@@ -948,15 +1004,43 @@ const appendTrack = (tracks, nextTrack) => [...tracks, nextTrack];
 
 const getDefaultOwnerHonorific = (source = "") => (source === "パーソナリティ曲" ? "さんなし" : "さん");
 
-const buildResponseFromRow = (row, episodeId, formId) => {
-  const respondent = pick(row, ["ゲスト名", "お名前", "名前", "活動名", "アーティスト名", "回答者", "応募者名"]);
-  const xUrl = pick(row, ["X URL", "Twitter URL", "X", "Twitter"]);
-  const iconUrl = pick(row, ["ゲストアイコン画像", "アイコン画像", "プロフィール画像", "サムネ用画像", "画像URL", "アイコンURL", "icon", "avatar", "profile image"]);
-  const profile = pick(row, ["活動紹介文", "プロフィール", "紹介文", "自己紹介", "公開プロフィール"]);
-  const topics = pick(row, ["今回話したいこと", "記事で紹介してほしい内容", "話したいこと", "トピック"]);
-  const songThought = pick(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "紹介文", "記事で触れてほしいポイント"]);
-  const internal = pick(row, ["制作側だけに共有するメモ", "内部確認", "運営メモ", "非公開メモ"]);
-  const constraints = pick(row, ["触れないでほしいこと", "NG質問", "表記注意", "注意事項", "記事/SNSで触れないこと・表記ルール"]);
+const buildResponseFromRow = (row, episodeId, formId, fallbackRespondent = "") => {
+  const hasMeaningfulAnswers = meaningfulRowEntries(row).length > 0;
+  const respondent =
+    pickImportValue(
+      row,
+      [
+        "ゲスト名",
+        "ゲスト名 正式表記",
+        "お名前",
+        "お名前 正式表記",
+        "名前",
+        "活動名",
+        "活動名義",
+        "クリエイター名",
+        "ハンドルネーム",
+        "ラジオネーム",
+        "ニックネーム",
+        "アーティスト名",
+        "回答者",
+        "応募者名"
+      ],
+      [/ゲスト.*(名|名前|表記)/, /お名前|名前|活動名|活動名義|名義|クリエイター名|ハンドルネーム|ラジオネーム|ニックネーム|呼び名|アーティスト名/],
+      [/AI\s*アーティスト|AI artist|AI名義/i]
+    ) || (hasMeaningfulAnswers ? fallbackRespondent : "");
+  const xUrl = pickImportValue(row, ["X URL", "Twitter URL", "Xアカウント", "Twitterアカウント", "X", "Twitter"], [/((X|Twitter|旧Twitter).*(URL|アカウント|ID|ユーザー名|リンク))|((URL|リンク).*(X|Twitter|旧Twitter))/i]);
+  const iconUrl = pickImportValue(
+    row,
+    ["ゲストアイコン画像", "アイコン画像", "プロフィール画像", "サムネ用画像", "画像URL", "アイコンURL", "icon", "avatar", "profile image"],
+    [/アイコン|プロフィール画像|サムネ|画像|icon|avatar|profile image/i],
+    [/音源|楽曲|曲|mp3|wav/i]
+  );
+  const profile = pickImportValue(row, ["活動紹介文", "プロフィール", "紹介文", "自己紹介", "公開プロフィール", "活動内容"], [/プロフィール|自己紹介|活動紹介|紹介文|公開プロフィール|活動内容|どんな活動/]);
+  const topics = pickImportValue(row, ["今回話したいこと", "記事で紹介してほしい内容", "話したいこと", "トピック", "トークテーマ"], [/話したい|語りたい|トークテーマ|テーマ|聞いてほしい|取り上げてほしい|記事で紹介/]);
+  const songThought = pickImportValue(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "紹介文", "記事で触れてほしいポイント"], [/曲.*(想い|思い|紹介|こだわり|ポイント|メッセージ)|楽曲.*(想い|思い|紹介|こだわり|ポイント|メッセージ)/]);
+  const internal = pickImportValue(row, ["制作側だけに共有するメモ", "内部確認", "運営メモ", "非公開メモ"], [/制作側|内部|運営|非公開|メモ|補足/]);
+  const constraints = pickImportValue(row, ["触れないでほしいこと", "NG質問", "表記注意", "注意事項", "記事/SNSで触れないこと・表記ルール"], [/触れない|NG|表記注意|注意事項|伏せたい|非公開|禁止|避けて|表記ルール/]);
+  const remainingAnswers = formatRemainingAnswers(row, [respondent, xUrl, iconUrl, profile, topics, songThought, internal, constraints]);
 
   return {
     id: newId("res"),
@@ -966,7 +1050,7 @@ const buildResponseFromRow = (row, episodeId, formId) => {
     respondent,
     status: "未確認",
     publicInfo: compactLines([profile, xUrl && `X: ${xUrl}`]),
-    articleUse: compactLines([topics, songThought]),
+    articleUse: compactLines([topics, songThought, remainingAnswers && `その他の回答:\n${remainingAnswers}`]),
     internalOnly: internal,
     constraints,
     attachments: iconUrl
@@ -987,51 +1071,74 @@ const buildResponseFromRow = (row, episodeId, formId) => {
 
 const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId = "") => {
   const ownerName =
-    pick(row, [
-      "ゲスト名",
-      "活動名",
-      "応募者名",
-      "応募者のお名前",
-      "お名前",
-      "お名前 よみかた",
-      "パーソナリティ名",
-      "回答者",
-      "担当",
-      "アーティスト名",
-      "アーティスト名 正式表記"
-    ]) || fallbackArtist;
-  const aiArtist = pick(row, [
-    "AIアーティスト名",
-    "AIアーティストの名前",
-    "AIアーティスト",
-    "AI artist",
-    "AI Artist",
-    "AI名義",
-    "AIアーティスト名 正式表記",
-    "AIアーティスト名（正式表記）",
-    "AIアーティスト名(正式表記)"
-  ]);
+    pickImportValue(
+      row,
+      [
+        "ゲスト名",
+        "活動名",
+        "活動名義",
+        "応募者名",
+        "応募者のお名前",
+        "お名前",
+        "お名前 よみかた",
+        "クリエイター名",
+        "ハンドルネーム",
+        "ラジオネーム",
+        "パーソナリティ名",
+        "回答者",
+        "担当",
+        "アーティスト名",
+        "アーティスト名 正式表記"
+      ],
+      [/ゲスト.*(名|名前|表記)/, /応募者|お名前|名前|活動名|活動名義|名義|クリエイター名|ハンドルネーム|ラジオネーム|パーソナリティ名|担当|アーティスト名/],
+      [/AI\s*アーティスト|AI artist|AI名義/i]
+    ) || fallbackArtist;
+  const aiArtist = pickImportValue(
+    row,
+    [
+      "AIアーティスト名",
+      "AIアーティストの名前",
+      "AIアーティスト",
+      "AI artist",
+      "AI Artist",
+      "AI名義",
+      "AIアーティスト名 正式表記",
+      "AIアーティスト名（正式表記）",
+      "AIアーティスト名(正式表記)"
+    ],
+    [/AI\s*(アーティスト|名義|名前|活動名)|AI artist/i]
+  );
   const artist = ownerName;
-  const title = pick(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"]);
-  const url = pick(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"]);
-  const audioFile = pick(row, ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"]);
-  const ownerIconUrl = pick(row, [
-    "応募者アイコン画像",
-    "応募者アイコン",
-    "応募者さんのアイコン",
-    "ゲストアイコン画像",
-    "アイコン画像",
-    "プロフィール画像",
-    "サムネ用画像",
-    "見出しサムネ画像",
-    "画像URL",
-    "アイコンURL",
-    "icon",
-    "avatar",
-    "profile image"
-  ]);
-  const articlePoint = pick(row, ["曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"]);
-  const honorific = pick(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"]) || getDefaultOwnerHonorific(source);
+  const title = pickImportValue(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"], [/曲名|楽曲名|楽曲.*タイトル|曲.*タイトル|紹介曲|タイトル/]);
+  const url = pickImportValue(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"], [/(楽曲|曲|Suno|YouTube|Youtube|ユーチューブ).*(URL|リンク)|(URL|リンク).*(楽曲|曲|Suno|YouTube|Youtube|ユーチューブ)/i]);
+  const audioFile = pickImportValue(
+    row,
+    ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"],
+    [/音源|楽曲.*アップロード|曲.*アップロード|mp3|wav|Drive|ドライブ/i],
+    [/アイコン|画像|プロフィール|サムネ/i]
+  );
+  const ownerIconUrl = pickImportValue(
+    row,
+    [
+      "応募者アイコン画像",
+      "応募者アイコン",
+      "応募者さんのアイコン",
+      "ゲストアイコン画像",
+      "アイコン画像",
+      "プロフィール画像",
+      "サムネ用画像",
+      "見出しサムネ画像",
+      "画像URL",
+      "アイコンURL",
+      "icon",
+      "avatar",
+      "profile image"
+    ],
+    [/アイコン|プロフィール画像|サムネ|見出し.*画像|画像URL|アイコンURL|icon|avatar|profile image/i],
+    [/音源|楽曲|曲|mp3|wav/i]
+  );
+  const articlePoint = pickImportValue(row, ["曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"], [/想い|思い|曲紹介|楽曲紹介|こだわり|おすすめ|ポイント|メッセージ|コメント|制作意図|記事で触れて/]);
+  const honorific = pickImportValue(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"], [/敬称|表記注意|クレジット|呼び方|名前の出し方/]) || getDefaultOwnerHonorific(source);
 
   if (!title && !url && !audioFile) return null;
 
@@ -1067,9 +1174,9 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
   let trackCount = 0;
   const importedGuestNames = [];
 
-  rows.forEach((row) => {
+  rows.forEach((row, rowIndex) => {
     if (kind === "guest") {
-      const response = buildResponseFromRow(row, selectedEpisode.id, "form_guest");
+      const response = buildResponseFromRow(row, selectedEpisode.id, "form_guest", `ゲスト回答${rowIndex + 1}`);
       if (response.respondent || response.publicInfo || response.articleUse || response.constraints || response.attachments?.length) {
         const guestIcon = makeGuestIconFromAttachment(findGuestIconAttachment(response.attachments), `${response.respondent || "guest"}-icon`);
         if (guestIcon) {
@@ -2251,7 +2358,9 @@ function App() {
       const currentEpisode = current.episodes.find((episode) => episode.id === selectedEpisode.id) ?? selectedEpisode;
       const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, kind, periodId);
       const emptyResultNote =
-        result.responses === 0 && result.tracks === 0 ? " 列名が合っていない可能性があります。Googleフォームの質問名を確認してください。" : "";
+        result.responses === 0 && result.tracks === 0
+          ? ` 列名が合っていない可能性があります。Googleフォームの質問名を確認してください。${summarizeImportColumns(rows)}`
+          : "";
       return appendImportLogToData(
         next,
         `${label}: ${rows.length}行を読み込み、回答${result.responses}件・楽曲${result.tracks}件を反映しました。${emptyResultNote}`
