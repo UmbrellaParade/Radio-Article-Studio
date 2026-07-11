@@ -698,16 +698,7 @@ const nextSlotNo = (tracks, episodeId) => {
   return Math.max(0, ...values) + 1;
 };
 
-const upsertTrack = (tracks, nextTrack) => {
-  const existingIndex = tracks.findIndex(
-    (track) =>
-      track.episodeId === nextTrack.episodeId &&
-      ((nextTrack.url && track.url === nextTrack.url) ||
-        (track.source === nextTrack.source && track.artist === nextTrack.artist && track.title === nextTrack.title))
-  );
-  if (existingIndex === -1) return [...tracks, nextTrack];
-  return tracks.map((track, index) => (index === existingIndex ? { ...track, ...nextTrack, id: track.id, slotNo: track.slotNo } : track));
-};
+const appendTrack = (tracks, nextTrack) => [...tracks, nextTrack];
 
 const buildResponseFromRow = (row, episodeId, formId) => {
   const respondent = pick(row, ["ゲスト名", "お名前", "名前", "活動名", "アーティスト名", "回答者", "応募者名"]);
@@ -747,7 +738,19 @@ const buildResponseFromRow = (row, episodeId, formId) => {
 };
 
 const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId = "") => {
-  const artist = pick(row, ["アーティスト名", "ゲスト名", "活動名", "応募者名", "お名前", "お名前 よみかた", "担当"]) || fallbackArtist;
+  const submitter = pick(row, ["ゲスト名", "活動名", "応募者名", "お名前", "お名前 よみかた", "パーソナリティ名", "回答者", "担当"]) || fallbackArtist;
+  const aiArtist = pick(row, [
+    "AIアーティスト名",
+    "AIアーティストの名前",
+    "AIアーティスト",
+    "AI artist",
+    "AI Artist",
+    "AI名義",
+    "AIアーティスト名 正式表記",
+    "AIアーティスト名（正式表記）",
+    "AIアーティスト名(正式表記)"
+  ]);
+  const artist = aiArtist || pick(row, ["アーティスト名", "ゲスト名", "活動名", "応募者名", "お名前", "お名前 よみかた", "担当"]) || fallbackArtist;
   const title = pick(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"]);
   const url = pick(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"]);
   const audioFile = pick(row, ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"]);
@@ -763,6 +766,8 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId
     slotNo: 0,
     source,
     artist,
+    aiArtist,
+    submitter,
     title: title || `${artist || source} 紹介曲`,
     urlType: detectUrlType(url),
     url,
@@ -808,7 +813,7 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
       const track = buildTrackFromRow(row, selectedEpisode.id, "ゲスト曲", response.respondent);
       if (track) {
         track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
-        nextTracks = upsertTrack(nextTracks, track);
+        nextTracks = appendTrack(nextTracks, track);
         trackCount += 1;
       }
     }
@@ -817,7 +822,7 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
       const track = buildTrackFromRow(row, selectedEpisode.id, "リスナー応募曲", "", periodId);
       if (track) {
         track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
-        nextTracks = upsertTrack(nextTracks, track);
+        nextTracks = appendTrack(nextTracks, track);
         trackCount += 1;
       }
     }
@@ -826,7 +831,7 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
       const track = buildTrackFromRow(row, selectedEpisode.id, "パーソナリティ曲");
       if (track) {
         track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
-        nextTracks = upsertTrack(nextTracks, track);
+        nextTracks = appendTrack(nextTracks, track);
         trackCount += 1;
       }
     }
@@ -841,9 +846,12 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
 const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "", respondent = "", periodId = "") => {
   const source =
     formId === "form_listener" ? "リスナー応募曲" : formId === "form_personality" ? "パーソナリティ曲" : "ゲスト曲";
+  const artistAnswer =
+    rawAnswers.find((answer) => /AIアーティスト|AI artist|AI名義|アーティスト名/.test(answer.label))?.answer ?? "";
   const ownerAnswer =
-    rawAnswers.find((answer) => /アーティスト|ゲスト名|活動名|応募者|担当|名前/.test(answer.label))?.answer ?? "";
-  const artist = ownerAnswer && ownerAnswer !== "-" ? ownerAnswer : respondent;
+    rawAnswers.find((answer) => /ゲスト名|活動名|応募者|担当|名前|パーソナリティ/.test(answer.label) && !/AIアーティスト|AI artist|AI名義|アーティスト名/.test(answer.label))?.answer ?? "";
+  const submitter = ownerAnswer && ownerAnswer !== "-" ? ownerAnswer : respondent;
+  const artist = artistAnswer && artistAnswer !== "-" ? artistAnswer : submitter;
 
   return rawAnswers
     .filter((answer) => answer.kind === "track" && answer.track)
@@ -851,6 +859,7 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
       const track = answer.track;
       if (!track.title && !track.url && !track.audio?.fileName) return null;
       const trackArtist = track.artist || artist;
+      const aiArtist = track.aiArtist || track.artist || (artistAnswer && artistAnswer !== "-" ? artistAnswer : "");
       return {
         id: newId("tr"),
         episodeId,
@@ -858,6 +867,8 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
         slotNo: 0,
         source,
         artist: trackArtist,
+        aiArtist,
+        submitter,
         title: track.title || `${trackArtist || source} 紹介曲`,
         urlType: detectUrlType(track.url),
         url: track.url || "",
@@ -1485,6 +1496,8 @@ function migrateData(input) {
       audioFile: "",
       audio: null,
       periodId: "",
+      aiArtist: "",
+      submitter: "",
       ...track,
       urlType: track.urlType || detectUrlType(track.url)
     }))
@@ -1603,6 +1616,8 @@ function App() {
         slotNo: episodeTracks.length + 1,
         source: "ゲスト曲",
         artist: "",
+        aiArtist: "",
+        submitter: "",
         title: "",
         urlType: "Suno",
         url: "",
@@ -1920,26 +1935,24 @@ function App() {
     const fetchedTitle = await fetchTrackTitleFromUrl(url);
 
     setData((current) => {
-      const existing = current.tracks.find(
-        (track) => track.episodeId === selectedEpisode.id && track.source === "パーソナリティ曲" && track.artist === "べるぼ☂"
-      );
-      const shouldReplaceTitle = !existing?.title || existing.url !== url || existing.title === "べるぼ☂ 紹介曲";
       const nextTrack = {
-        id: existing?.id ?? newId("tr"),
+        id: newId("tr"),
         episodeId: selectedEpisode.id,
-        slotNo: existing?.slotNo ?? nextSlotNo(current.tracks, selectedEpisode.id),
+        slotNo: nextSlotNo(current.tracks, selectedEpisode.id),
         source: "パーソナリティ曲",
         artist: "べるぼ☂",
-        title: shouldReplaceTitle ? fetchedTitle || existing?.title || "べるぼ☂ 紹介曲" : existing.title,
+        submitter: "べるぼ☂",
+        aiArtist: "",
+        title: fetchedTitle || "べるぼ☂ 紹介曲",
         urlType: detectUrlType(url),
         url,
-        audioFile: existing?.audioFile ?? "",
-        embedUrl: makeEmbedUrl(url) || existing?.embedUrl || "",
+        audioFile: "",
+        embedUrl: makeEmbedUrl(url),
         honorific: "さんなし",
-        articlePoint: existing?.articlePoint ?? "",
+        articlePoint: "",
         status: "URL反映済み"
       };
-      return { ...current, tracks: upsertTrack(current.tracks, nextTrack) };
+      return { ...current, tracks: appendTrack(current.tracks, nextTrack) };
     });
     appendImportLog(fetchedTitle ? `べるぼ☂曲「${fetchedTitle}」を今回の放送回に反映しました。` : "べるぼ☂曲URLを今回の放送回に反映しました。曲名は楽曲タブで修正できます。");
   };
@@ -1968,12 +1981,15 @@ ${response.constraints || "-"}`
       .join("\n\n");
 
     const trackRows = episodeTracks
-      .map(
-        (track) =>
+      .map((track) => {
+        const aiArtistNote = track.aiArtist ? ` / AIアーティスト名: ${track.aiArtist}` : "";
+        const submitterNote = track.submitter ? ` / 紹介者・回答者: ${track.submitter}` : "";
+        return (
           `${track.slotNo}. ${track.title || "曲名未入力"} / ${track.artist || "アーティスト未入力"}\n` +
-          `   種別: ${track.source} / 応募期間: ${track.periodId || "-"} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
+          `   種別: ${track.source} / 応募期間: ${track.periodId || "-"}${aiArtistNote}${submitterNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
           `   記事ポイント: ${track.articlePoint || "-"}`
-      )
+        );
+      })
       .join("\n");
 
     const assetRows = episodeAssets
@@ -2106,7 +2122,7 @@ ${assetRows || "-"}
         setData((current) => {
           let nextTracks = current.tracks;
           importedTracks.forEach((track) => {
-            nextTracks = upsertTrack(nextTracks, {
+            nextTracks = appendTrack(nextTracks, {
               ...track,
               slotNo: nextSlotNo(nextTracks, normalized.episodeId)
             });
@@ -3047,7 +3063,7 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
         />
         <SourceImportCard
           title="リスナー応募曲"
-          description="応募者名、曲名、楽曲URL、音源ファイル、表記注意を取り込みます。"
+          description="応募者名、AIアーティスト名、曲名、楽曲URL、音源ファイル、表記注意を取り込みます。"
           value={imports.listenerCsvUrl}
           onChange={(value) => updateImports({ listenerCsvUrl: value })}
           onImportUrl={() => importCsvUrl("listener", imports.listenerCsvUrl, "リスナー応募曲")}
@@ -3056,7 +3072,7 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
         />
         <SourceImportCard
           title="パーソナリティ曲シート"
-          description="かなめ🦐曲など、運営側で別シート管理している曲情報を取り込みます。"
+          description="かなめ🦐/べるぼ☂の紹介曲、AIアーティスト名、曲への想いを取り込みます。"
           value={imports.personalityCsvUrl}
           onChange={(value) => updateImports({ personalityCsvUrl: value })}
           onImportUrl={() => importCsvUrl("personality", imports.personalityCsvUrl, "パーソナリティ曲")}
@@ -3090,7 +3106,7 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
       <article className="panel">
         <h2>対応しやすい列名</h2>
         <p className="muted">
-          ゲスト名、活動紹介文、今回話したいこと、触れないでほしいこと、曲名、アーティスト名、楽曲URL、音源ファイル、記事で触れてほしいポイント、表記注意。
+          ゲスト名、活動紹介文、今回話したいこと、触れないでほしいこと、曲名、アーティスト名、AIアーティスト名、楽曲URL、音源ファイル、記事で触れてほしいポイント、表記注意。
         </p>
       </article>
     </div>
@@ -3578,6 +3594,8 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
                 <Field label="曲順" type="number" value={track.slotNo} onChange={(value) => patchItem("tracks", track.id, { slotNo: value })} />
                 <SelectField label="紹介枠" value={track.source} options={["ゲスト曲", "パーソナリティ曲", "リスナー応募曲"]} onChange={(value) => patchItem("tracks", track.id, { source: value })} />
                 <Field label="アーティスト名" value={track.artist} onChange={(value) => patchItem("tracks", track.id, { artist: value })} />
+                <Field label="AIアーティスト名" value={track.aiArtist} onChange={(value) => patchItem("tracks", track.id, { aiArtist: value })} />
+                <Field label="紹介者/回答者" value={track.submitter} onChange={(value) => patchItem("tracks", track.id, { submitter: value })} />
               </div>
               <div className="song-card">
                 <div className="song-card-title">
