@@ -1431,7 +1431,8 @@ const sampleData = {
       status: "公開済み",
       articleSlug: "sunopa-yui-silfira-guest",
       articleUrl: "https://ai-music.noiseinmysoul.com/sunopa-yui-silfira-guest/",
-      notes: "サンプル。実運用では放送後にstand.fm URLを入れる。"
+      notes: "AI音楽制作と作品に込めた想い",
+      extraInfo: "サンプル。実運用では放送後にstand.fm URLを入れる。"
     }
   ],
   forms: [
@@ -1707,6 +1708,8 @@ function migrateData(input) {
     return {
       ...episode,
       slot: episode.slot || getBroadcastSlot(episode.date),
+      notes: episode.notes || input.socialPromos?.[episode.id]?.talkTheme || "",
+      extraInfo: episode.extraInfo ?? "",
       articleSlug,
       articleUrl: episode.articleUrl || buildArticleUrl(settings.wordpressSite, articleSlug)
     };
@@ -1874,13 +1877,14 @@ function App() {
     () => episodeResponses.map((response) => extractXHandleFromText(response.publicInfo)).find(Boolean) || "",
     [episodeResponses]
   );
+  const currentStoredSocialPromo = selectedEpisode ? data.socialPromos?.[selectedEpisode.id] : null;
   const currentSocialPromo = selectedEpisode
     ? {
         ...defaultSocialPromo,
-        ...(data.socialPromos?.[selectedEpisode.id] ?? {}),
-        guestName: data.socialPromos?.[selectedEpisode.id]?.guestName || selectedEpisode.guestName || "",
-        guestXHandle: data.socialPromos?.[selectedEpisode.id]?.guestXHandle || inferredGuestXHandle,
-        talkTheme: data.socialPromos?.[selectedEpisode.id]?.talkTheme || episodeResponses[0]?.articleUse || ""
+        ...(currentStoredSocialPromo ?? {}),
+        guestName: currentStoredSocialPromo?.guestName || selectedEpisode.guestName || "",
+        guestXHandle: currentStoredSocialPromo?.guestXHandle || inferredGuestXHandle,
+        talkTheme: selectedEpisode.notes || currentStoredSocialPromo?.talkTheme || episodeResponses[0]?.articleUse || ""
       }
     : { ...defaultSocialPromo };
 
@@ -1899,6 +1903,29 @@ function App() {
           [selectedEpisode.id]: {
             ...currentPromo,
             ...patch
+          }
+        }
+      };
+    });
+  };
+
+  const updateEpisodeTalkTheme = (value) => {
+    if (!selectedEpisode) return;
+    setData((current) => {
+      const currentPromo = {
+        ...defaultSocialPromo,
+        ...(current.socialPromos?.[selectedEpisode.id] ?? {})
+      };
+      return {
+        ...current,
+        episodes: current.episodes.map((episode) =>
+          episode.id === selectedEpisode.id ? { ...episode, notes: value } : episode
+        ),
+        socialPromos: {
+          ...(current.socialPromos ?? {}),
+          [selectedEpisode.id]: {
+            ...currentPromo,
+            talkTheme: value
           }
         }
       };
@@ -1998,7 +2025,8 @@ function App() {
       status: "準備中",
       articleSlug: "",
       articleUrl: "",
-      notes: ""
+      notes: "",
+      extraInfo: ""
     };
     updateData("episodes", (episodes) => [episode, ...episodes]);
     setSelectedEpisodeId(episode.id);
@@ -2502,6 +2530,8 @@ ${data.settings.obsidianPath}
 - 開催枠: ${selectedEpisode.slot}
 - 種別: ${selectedEpisode.type}
 - ゲスト: ${selectedEpisode.guestName || "-"}
+- トークテーマ: ${selectedEpisode.notes || "-"}
+- その他の情報: ${selectedEpisode.extraInfo || "-"}
 - stand.fm URL: ${selectedEpisode.standfmUrl || "-"}
 - 記事スラッグ: ${selectedEpisode.articleSlug || "-"}
 - 記事URL: ${articleUrl || "-"}
@@ -2768,6 +2798,7 @@ ${socialRows || "-"}
               selectedEpisode={selectedEpisode}
               promo={currentSocialPromo}
               updatePromo={updateSocialPromo}
+              updateTalkTheme={updateEpisodeTalkTheme}
             />
           )}
           {active === "pack" && (
@@ -3470,6 +3501,8 @@ function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
               <div><dt>放送日</dt><dd>{selectedEpisode.date}</dd></div>
               <div><dt>種別</dt><dd>{selectedEpisode.type}</dd></div>
               <div><dt>ゲスト</dt><dd>{selectedEpisode.guestName || "-"}</dd></div>
+              <div><dt>トークテーマ</dt><dd>{selectedEpisode.notes || "-"}</dd></div>
+              <div><dt>その他の情報</dt><dd>{selectedEpisode.extraInfo || "-"}</dd></div>
               <div><dt>記事</dt><dd>{articleUrl || "未設定"}</dd></div>
             </dl>
           ) : (
@@ -3677,7 +3710,8 @@ function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem
               <Field label="記事スラッグ" value={episode.articleSlug} placeholder="例: yui / sunopa-yui-guest" onChange={(value) => patchArticleSlug(episode, value)} />
               <Field label="記事URL" value={episode.articleUrl || buildArticleUrl(wordpressSite, episode.articleSlug)} readOnly wide />
               <p className="hint-text wide">ゲスト回はゲスト名を入れると「〇〇さんゲスト回🌟」を自動入力します。スラッグはURL末尾になるため、基本はゲスト名の英語表記で入力してください。</p>
-              <TextArea label="メモ" value={episode.notes} onChange={(value) => patchItem("episodes", episode.id, { notes: value })} />
+              <TextArea label="トークテーマ" value={episode.notes} onChange={(value) => patchItem("episodes", episode.id, { notes: value })} />
+              <TextArea label="その他の情報" value={episode.extraInfo || ""} onChange={(value) => patchItem("episodes", episode.id, { extraInfo: value })} />
             </div>
           </article>
         ))}
@@ -5031,7 +5065,7 @@ function Assets({ thumbnailStudio, updateThumbnailStudio, guestName, episodeDate
   );
 }
 
-function SocialPromo({ selectedEpisode, promo, updatePromo }) {
+function SocialPromo({ selectedEpisode, promo, updatePromo, updateTalkTheme = () => {} }) {
   const [copiedTarget, setCopiedTarget] = useState("");
   const guestName = promo.guestName || selectedEpisode?.guestName || "";
   const guestXHandle = promo.guestXHandle || "";
@@ -5113,7 +5147,7 @@ function SocialPromo({ selectedEpisode, promo, updatePromo }) {
           <Field label="ゲスト名" value={guestName} onChange={(value) => updatePromo({ guestName: value })} />
           <Field label="Xアカウント" value={formatXHandle(guestXHandle)} onChange={(value) => updatePromo({ guestXHandle: normalizeXHandle(value) })} placeholder="@account" />
           <Field label="配信日" value={selectedEpisode?.date || ""} readOnly />
-          <TextArea label="トークテーマ" value={talkTheme} onChange={(value) => updatePromo({ talkTheme: value })} />
+          <TextArea label="トークテーマ" value={talkTheme} onChange={updateTalkTheme} />
         </div>
         <div className="button-row">
           <button className="primary" onClick={generateAll}><Share2 size={16} />告知素材をまとめて生成</button>
