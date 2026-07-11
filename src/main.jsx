@@ -460,6 +460,7 @@ const defaultThumbnailStudio = {
   guestIcons: [],
   activeLayoutPreset: "single",
   layoutPresetVersion: THUMBNAIL_LAYOUT_PRESET_VERSION,
+  layoutPresetOverrides: {},
   customLayoutPresets: [],
   generated: {},
   autoGenerateRequestedAt: "",
@@ -1699,7 +1700,9 @@ function migrateData(input) {
   });
   const rawThumbnailStudio = input.thumbnailStudio ?? {};
   const activeLayoutPresetId = rawThumbnailStudio.activeLayoutPreset ?? defaultThumbnailStudio.activeLayoutPreset;
+  const layoutPresetOverrides = rawThumbnailStudio.layoutPresetOverrides ?? {};
   const builtInLayoutPreset = THUMBNAIL_ICON_LAYOUT_PRESETS.find((preset) => preset.id === activeLayoutPresetId);
+  const hasBuiltInLayoutOverride = Boolean(layoutPresetOverrides[activeLayoutPresetId]);
   const normalizedThumbnailTemplates = Object.fromEntries(
     THUMBNAIL_PRESETS.map((preset) => [
       preset.key,
@@ -1710,7 +1713,7 @@ function migrateData(input) {
     ])
   );
   const shouldRefreshBuiltInLayout =
-    Boolean(builtInLayoutPreset) && rawThumbnailStudio.layoutPresetVersion !== THUMBNAIL_LAYOUT_PRESET_VERSION;
+    Boolean(builtInLayoutPreset) && !hasBuiltInLayoutOverride && rawThumbnailStudio.layoutPresetVersion !== THUMBNAIL_LAYOUT_PRESET_VERSION;
   const thumbnailTemplates = shouldRefreshBuiltInLayout
     ? applyIconLayoutPresetToTemplates(normalizedThumbnailTemplates, builtInLayoutPreset)
     : normalizedThumbnailTemplates;
@@ -1744,6 +1747,7 @@ function migrateData(input) {
       },
       guestIcons: normalizeGuestIconList(rawThumbnailStudio.guestIcon, rawThumbnailStudio.guestIcons),
       activeLayoutPreset: activeLayoutPresetId,
+      layoutPresetOverrides,
       customLayoutPresets: rawThumbnailStudio.customLayoutPresets ?? [],
       generated: shouldRefreshBuiltInLayout ? {} : rawThumbnailStudio.generated ?? {},
       autoGenerateRequestedAt: shouldRefreshBuiltInLayout ? "" : rawThumbnailStudio.autoGenerateRequestedAt ?? ""
@@ -4120,8 +4124,8 @@ function drawCover(ctx, image, width, height) {
   drawCoverAt(ctx, image, 0, 0, width, height);
 }
 
-const isCustomTemplate = (template) => template?.source === "custom" && Boolean(template?.dataUrl);
-const getTemplateSource = (template) => (isCustomTemplate(template) ? template.dataUrl : template?.assetUrl || "");
+const isCustomTemplate = (template) => template?.source === "custom";
+const getTemplateSource = (template) => (isCustomTemplate(template) ? template?.dataUrl || "" : template?.assetUrl || "");
 const getNormalizedThumbnailTemplate = (presetKey, template) => ({
   ...defaultThumbnailStudio.templates[presetKey],
   ...(template ?? {})
@@ -4319,27 +4323,44 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   const [message, setMessage] = useState("");
   const [layoutPresetName, setLayoutPresetName] = useState("");
   const [generatedImages, setGeneratedImages] = useState({});
+  const [templateBaseImages, setTemplateBaseImages] = useState({});
   const [livePreviewImages, setLivePreviewImages] = useState({});
   const [previewImage, setPreviewImage] = useState(null);
   const [generatingKey, setGeneratingKey] = useState("");
   const thumbnailDate = studio.date || episodeDate || "";
   const generated = studio.generated ?? {};
+  const layoutPresetOverrides = studio.layoutPresetOverrides ?? {};
   const customLayoutPresets = studio.customLayoutPresets ?? [];
-  const layoutPresets = [...THUMBNAIL_ICON_LAYOUT_PRESETS, ...customLayoutPresets];
+  const builtInLayoutPresets = THUMBNAIL_ICON_LAYOUT_PRESETS.map((preset) => ({
+    ...preset,
+    ...(layoutPresetOverrides[preset.id] ?? {}),
+    id: preset.id,
+    name: preset.name
+  }));
+  const layoutPresets = [...builtInLayoutPresets, ...customLayoutPresets];
   const activeLayoutPresetId = studio.activeLayoutPreset || THUMBNAIL_ICON_LAYOUT_PRESETS[0].id;
   const activeLayoutPreset = layoutPresets.find((preset) => preset.id === activeLayoutPresetId) ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0];
   const activeLayoutPresetIsDefault = THUMBNAIL_ICON_LAYOUT_PRESETS.some((preset) => preset.id === activeLayoutPresetId);
+  const activeLayoutPresetHasOverride = Boolean(layoutPresetOverrides[activeLayoutPresetId]);
   const guestIcons = normalizeGuestIconList(studio.guestIcon, studio.guestIcons);
   const guestIconPreviewKey = guestIcons.map((icon) => `${icon.name}:${icon.dataUrl.slice(0, 80)}`).join("|");
+  const getHydratedTemplate = (presetKey) => {
+    const template = getNormalizedThumbnailTemplate(presetKey, studio.templates?.[presetKey]);
+    if (!isCustomTemplate(template)) return template;
+    return {
+      ...template,
+      dataUrl: template.dataUrl || templateBaseImages[presetKey] || ""
+    };
+  };
   const thumbnailTemplatePreviewKey = useMemo(
     () =>
       JSON.stringify(
         THUMBNAIL_PRESETS.map((preset) => {
-          const template = getNormalizedThumbnailTemplate(preset.key, studio.templates?.[preset.key]);
-          return [preset.key, template.source, template.assetUrl, template.dataUrl, template.iconX, template.iconY, template.iconSize, template.iconSlots, template.guestNameVisible, template.guestNameX, template.guestNameY, template.guestNameSize, template.guestBadgeVisible, template.guestBadgeX, template.guestBadgeY, template.guestBadgeSize];
+          const template = getHydratedTemplate(preset.key);
+          return [preset.key, template.source, template.assetUrl, template.baseImageKey, template.dataUrl?.slice(0, 80), template.iconX, template.iconY, template.iconSize, template.iconSlots, template.guestNameVisible, template.guestNameX, template.guestNameY, template.guestNameSize, template.guestBadgeVisible, template.guestBadgeX, template.guestBadgeY, template.guestBadgeSize];
         })
       ),
-    [studio.templates]
+    [studio.templates, templateBaseImages]
   );
 
   const removeGeneratedRecords = (records, presetKeys) => {
@@ -4366,6 +4387,23 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     setPreviewImage((current) => (current?.presetKey && presetKeys.includes(current.presetKey) ? null : current));
   };
 
+  const forgetTemplateBaseImages = (presetKeysInput) => {
+    const presetKeys = Array.isArray(presetKeysInput) ? presetKeysInput : [presetKeysInput];
+    presetKeys.forEach((presetKey) => {
+      const savedKey = studio.templates?.[presetKey]?.baseImageKey;
+      if (savedKey) {
+        deleteGeneratedThumbnailImage(savedKey).catch(() => {
+          // The UI reference is removed even if IndexedDB cleanup fails.
+        });
+      }
+    });
+    setTemplateBaseImages((current) => {
+      const next = { ...current };
+      presetKeys.forEach((presetKey) => delete next[presetKey]);
+      return next;
+    });
+  };
+
   useEffect(() => {
     let active = true;
     Promise.all(
@@ -4390,13 +4428,46 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
 
   useEffect(() => {
     let active = true;
+    Promise.all(
+      THUMBNAIL_PRESETS.map(async (preset) => {
+        const template = getNormalizedThumbnailTemplate(preset.key, studio.templates?.[preset.key]);
+        if (!isCustomTemplate(template)) return [preset.key, ""];
+        if (template.dataUrl) return [preset.key, template.dataUrl];
+        if (!template.baseImageKey) return [preset.key, ""];
+        try {
+          return [preset.key, await loadGeneratedThumbnailImage(template.baseImageKey)];
+        } catch {
+          return [preset.key, ""];
+        }
+      })
+    ).then((entries) => {
+      if (!active) return;
+      setTemplateBaseImages(Object.fromEntries(entries.filter(([, dataUrl]) => dataUrl)));
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    studio.templates?.article16x9?.source,
+    studio.templates?.article16x9?.dataUrl,
+    studio.templates?.article16x9?.baseImageKey,
+    studio.templates?.standfm1x1?.source,
+    studio.templates?.standfm1x1?.dataUrl,
+    studio.templates?.standfm1x1?.baseImageKey,
+    studio.templates?.stream9x16?.source,
+    studio.templates?.stream9x16?.dataUrl,
+    studio.templates?.stream9x16?.baseImageKey
+  ]);
+
+  useEffect(() => {
+    let active = true;
     const timer = window.setTimeout(() => {
       Promise.all(
         THUMBNAIL_PRESETS.map(async (preset) => {
           try {
             const dataUrl = await renderThumbnail({
               preset,
-              template: studio.templates?.[preset.key],
+              template: getHydratedTemplate(preset.key),
               icon: studio.guestIcon,
               icons: guestIcons,
               date: thumbnailDate,
@@ -4422,7 +4493,17 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     const file = event.target.files?.[0];
     if (!file) return;
     const dataUrl = await fileToDataUrl(file);
+    const baseImageKey = `base-${presetKey}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    let savedBaseImageKey = "";
+    try {
+      await saveGeneratedThumbnailImage(baseImageKey, dataUrl);
+      savedBaseImageKey = baseImageKey;
+    } catch {
+      savedBaseImageKey = "";
+    }
+    forgetTemplateBaseImages(presetKey);
     forgetGeneratedImages(presetKey);
+    setTemplateBaseImages((current) => ({ ...current, [presetKey]: dataUrl }));
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
@@ -4435,7 +4516,10 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           ...current.templates?.[presetKey],
           name: file.name,
           source: "custom",
-          dataUrl
+          assetUrl: "",
+          dataUrl: savedBaseImageKey ? "" : dataUrl,
+          baseImageKey: savedBaseImageKey,
+          updatedAt: new Date().toISOString()
         }
       }
     }));
@@ -4571,22 +4655,50 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   };
 
   const overwriteActiveLayoutPreset = () => {
-    if (activeLayoutPresetIsDefault) {
-      setMessage("標準プリセットは上書きできません。新規プリセットとして保存してください。");
-      return;
-    }
     const preset = makeCurrentLayoutPreset(activeLayoutPreset.id, activeLayoutPreset.name);
-    updateStudio((current) => ({
-      ...defaultThumbnailStudio,
-      ...current,
-      customLayoutPresets: (current.customLayoutPresets ?? []).map((item) => (item.id === preset.id ? preset : item))
-    }));
+    updateStudio((current) => {
+      if (activeLayoutPresetIsDefault) {
+        return {
+          ...defaultThumbnailStudio,
+          ...current,
+          layoutPresetVersion: THUMBNAIL_LAYOUT_PRESET_VERSION,
+          layoutPresetOverrides: {
+            ...(current.layoutPresetOverrides ?? {}),
+            [preset.id]: preset
+          }
+        };
+      }
+
+      return {
+        ...defaultThumbnailStudio,
+        ...current,
+        customLayoutPresets: (current.customLayoutPresets ?? []).map((item) => (item.id === preset.id ? preset : item))
+      };
+    });
     setMessage(`${preset.name} を現在の配置で上書きしました。`);
   };
 
   const deleteActiveLayoutPreset = () => {
     if (activeLayoutPresetIsDefault) {
-      setMessage("標準プリセットは削除できません。保存したカスタムプリセットを選ぶと削除できます。");
+      if (!activeLayoutPresetHasOverride) {
+        setMessage("標準プリセットは削除できません。上書き済みの標準プリセットは標準値に戻せます。");
+        return;
+      }
+      const originalPreset = THUMBNAIL_ICON_LAYOUT_PRESETS.find((preset) => preset.id === activeLayoutPresetId) ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0];
+      const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
+      forgetGeneratedImages(presetKeys);
+      updateStudio((current) => {
+        const nextOverrides = { ...(current.layoutPresetOverrides ?? {}) };
+        delete nextOverrides[activeLayoutPresetId];
+        return {
+          ...defaultThumbnailStudio,
+          ...current,
+          layoutPresetOverrides: nextOverrides,
+          generated: removeGeneratedRecords(current.generated, presetKeys),
+          templates: applyIconLayoutPresetToTemplates(current.templates, originalPreset)
+        };
+      });
+      setMessage(`${originalPreset.name} を標準値に戻しました。`);
       return;
     }
     const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
@@ -4603,6 +4715,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   };
 
   const resetTemplate = (presetKey) => {
+    forgetTemplateBaseImages(presetKey);
     forgetGeneratedImages(presetKey);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
@@ -4639,7 +4752,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     try {
       const dataUrl = await renderThumbnail({
         preset,
-        template: studio.templates?.[preset.key],
+        template: getHydratedTemplate(preset.key),
         icon: studio.guestIcon,
         icons: guestIcons,
         date: thumbnailDate,
@@ -4755,7 +4868,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   };
 
   const modalPreset = previewImage ? THUMBNAIL_PRESETS.find((preset) => preset.key === previewImage.presetKey) : null;
-  const modalTemplate = modalPreset ? getNormalizedThumbnailTemplate(modalPreset.key, studio.templates?.[modalPreset.key]) : null;
+  const modalTemplate = modalPreset ? getHydratedTemplate(modalPreset.key) : null;
   const modalImageSrc = modalPreset ? livePreviewImages[modalPreset.key] || previewImage.src : previewImage?.src;
 
   return (
@@ -4786,11 +4899,11 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         />
         <Field label="新規プリセット名" value={layoutPresetName} onChange={setLayoutPresetName} placeholder="例: 2人用" />
         <button className="secondary" onClick={saveCurrentLayoutPreset}><Save size={16} />現在の配置を保存</button>
-        <button className="secondary" onClick={overwriteActiveLayoutPreset} disabled={activeLayoutPresetIsDefault}>
+        <button className="secondary" onClick={overwriteActiveLayoutPreset}>
           <Save size={16} />選択プリセットに上書き
         </button>
-        <button className="danger" onClick={deleteActiveLayoutPreset} disabled={activeLayoutPresetIsDefault}>
-          <Trash2 size={16} />選択プリセット削除
+        <button className="danger" onClick={deleteActiveLayoutPreset} disabled={activeLayoutPresetIsDefault && !activeLayoutPresetHasOverride}>
+          <Trash2 size={16} />{activeLayoutPresetIsDefault ? "標準値に戻す" : "選択プリセット削除"}
         </button>
       </div>
 
@@ -4809,7 +4922,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
 
       <div className="thumbnail-grid">
         {THUMBNAIL_PRESETS.map((preset) => {
-          const template = getNormalizedThumbnailTemplate(preset.key, studio.templates?.[preset.key]);
+          const template = getHydratedTemplate(preset.key);
           const templateSource = getTemplateSource(template);
           const templateLabel = isCustomTemplate(template) ? template.name : `${preset.baseName}（固定）`;
           const savedGenerated = generated[preset.key];
