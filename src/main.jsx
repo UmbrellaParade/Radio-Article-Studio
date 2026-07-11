@@ -577,18 +577,29 @@ const buildComicTemplateText = ({ guestName, guestXHandle, date, talkTheme }) =>
 サブコピー：Sunoパ！ ${dateLabel} 告知4コマ
 テーマ：${guestLabel}を迎えて、「${theme}」について語る配信告知
 狙い：ゲストの魅力とトークテーマの気になるポイントを、やわらかく伝えて配信への参加・アーカイブ視聴につなげる
-1コマ目：かなめとべるぼが配信準備をしている。テーブルにはマイク、ヘッドホン、Sunoパ！のロゴ、メモが置かれている。
-セリフ：かなめ「次回のSunoパ！は、${guestName || "ゲストさん"}をお迎えします＾＾」
+1コマ目：べるぼが配信準備をしている。テーブルにはマイク、ヘッドホン、Sunoパ！のロゴ、メモが置かれている。
+セリフ：べるぼ「次回のSunoパ！は、${guestName || "ゲストさん"}をお迎えします＾＾」
 2コマ目：ゲストの雰囲気を表す音符や光、作品イメージがふわっと広がる。Xアカウント${handle || "未設定"}の表示が小さく入っている。
 セリフ：べるぼ「今回は『${theme}』について、じっくり聞いていきます☂」
 3コマ目：トークテーマに関する象徴的な場面。制作メモ、音源波形、サムネ、歌詞の断片などが重なり、話が深まっていく。
 セリフ：ゲスト「そこは、作品を作る時にすごく大事にしているところなんです。」
-4コマ目：3人が配信画面の前で笑顔。背景にSunoパ！らしい夜景と花火、傘、音符がある。明るく楽しそうな締め。
-セリフ：かなめ「${dateLabel}、Sunoパ！で一緒に楽しみましょう＾＾」`;
+4コマ目：べるぼとゲストが配信画面の前で笑顔。背景にSunoパ！らしい夜景と花火、傘、音符がある。明るく楽しそうな締め。
+セリフ：べるぼ「${dateLabel}、Sunoパ！で一緒に楽しみましょう＾＾」`;
 };
+
+const sanitizeSnsComicTemplateText = (text = "") =>
+  String(text || "")
+    .replace(/かなめとべるぼ/g, "べるぼ")
+    .replace(/3人が配信画面の前で笑顔/g, "べるぼとゲストが配信画面の前で笑顔")
+    .replace(/かなめちゃん/g, "べるぼ")
+    .replace(/かなめ🦐/g, "べるぼ☂")
+    .replace(/かなめ「/g, "べるぼ「");
 
 const buildComicPromptText = ({ guestName, guestXHandle, date, talkTheme, comicTemplate }) => {
   const handle = formatXHandle(guestXHandle);
+  const safeComicTemplate = sanitizeSnsComicTemplateText(
+    comicTemplate || buildComicTemplateText({ guestName, guestXHandle, date, talkTheme })
+  );
   return `以下の4コマ漫画テンプレをもとに、SNS告知用の4コマ漫画画像を作ってください。
 
 条件：
@@ -598,12 +609,14 @@ const buildComicPromptText = ({ guestName, guestXHandle, date, talkTheme, comicT
 - Xアカウント: ${handle || "未設定"}
 - 配信日: ${formatJapaneseDate(date)}
 - トークテーマ: ${talkTheme || "未設定"}
+- かなめ🦐、かなめちゃんは漫画内に登場させない
+- 登場人物は基本的にべるぼ☂とゲストのみ
 - 文字は読みやすく、1コマあたり短め
 - 4コマの順番が分かるレイアウト
 - できればSunoパ！らしい音楽、ラジオ、夜景、傘、花火の雰囲気
 
 テンプレ：
-${comicTemplate || buildComicTemplateText({ guestName, guestXHandle, date, talkTheme })}`;
+${safeComicTemplate}`;
 };
 
 const newId = (prefix) => {
@@ -1724,17 +1737,23 @@ function migrateData(input) {
     settings,
     imports: { ...defaultImports, ...(input.imports ?? {}) },
     socialPromos: Object.fromEntries(
-      Object.entries(input.socialPromos ?? {}).map(([episodeId, promo]) => [
-        episodeId,
-        {
-          ...defaultSocialPromo,
-          ...(promo ?? {}),
-          comicImage: {
-            ...defaultSocialPromo.comicImage,
-            ...(promo?.comicImage ?? {})
+      Object.entries(input.socialPromos ?? {}).map(([episodeId, promo]) => {
+        const comicTemplate = sanitizeSnsComicTemplateText(promo?.comicTemplate ?? "");
+        const comicPrompt = /かなめ|kaname/i.test(promo?.comicPrompt ?? "") ? "" : promo?.comicPrompt ?? "";
+        return [
+          episodeId,
+          {
+            ...defaultSocialPromo,
+            ...(promo ?? {}),
+            comicTemplate,
+            comicPrompt,
+            comicImage: {
+              ...defaultSocialPromo.comicImage,
+              ...(promo?.comicImage ?? {})
+            }
           }
-        }
-      ])
+        ];
+      })
     ),
     thumbnailStudio: {
       ...defaultThumbnailStudio,
@@ -5047,7 +5066,11 @@ function SocialPromo({ selectedEpisode, promo, updatePromo }) {
   };
 
   const generateComicPrompt = () => {
-    updatePromo({ comicPrompt: buildComicPromptText({ ...context, comicTemplate: promo.comicTemplate }) });
+    const comicTemplate = sanitizeSnsComicTemplateText(promo.comicTemplate || buildComicTemplateText(context));
+    updatePromo({
+      comicTemplate,
+      comicPrompt: buildComicPromptText({ ...context, comicTemplate })
+    });
   };
 
   const generateAll = () => {
