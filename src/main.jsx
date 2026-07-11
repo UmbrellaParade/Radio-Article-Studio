@@ -4632,6 +4632,18 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       dataUrl: template.dataUrl || templateBaseImages[presetKey] || ""
     };
   };
+  const cacheHydratedTemplate = (presetKey, template) => {
+    if (!isCustomTemplate(template) || !template.dataUrl) return;
+    setTemplateBaseImages((current) => {
+      if (current[presetKey] === template.dataUrl) return current;
+      return { ...current, [presetKey]: template.dataUrl };
+    });
+  };
+  const hydrateTemplateForPreset = async (presetKey) => {
+    const template = await resolveThumbnailTemplateForRender(presetKey, getHydratedTemplate(presetKey));
+    cacheHydratedTemplate(presetKey, template);
+    return template;
+  };
   const thumbnailTemplatePreviewKey = useMemo(
     () =>
       JSON.stringify(
@@ -4745,22 +4757,34 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       Promise.all(
         THUMBNAIL_PRESETS.map(async (preset) => {
           try {
+            const template = await resolveThumbnailTemplateForRender(preset.key, getHydratedTemplate(preset.key));
             const dataUrl = await renderThumbnail({
               preset,
-              template: getHydratedTemplate(preset.key),
+              template,
               icon: studio.guestIcon,
               icons: guestIcons,
               date: thumbnailDate,
               guestName
             });
-            return [preset.key, dataUrl];
+            return [preset.key, dataUrl, template];
           } catch {
-            return [preset.key, ""];
+            return [preset.key, "", null];
           }
         })
       ).then((entries) => {
         if (!active) return;
-        setLivePreviewImages(Object.fromEntries(entries.filter(([, dataUrl]) => dataUrl)));
+        setTemplateBaseImages((current) => {
+          let changed = false;
+          const next = { ...current };
+          entries.forEach(([presetKey, , template]) => {
+            if (isCustomTemplate(template) && template.dataUrl && next[presetKey] !== template.dataUrl) {
+              next[presetKey] = template.dataUrl;
+              changed = true;
+            }
+          });
+          return changed ? next : current;
+        });
+        setLivePreviewImages(Object.fromEntries(entries.filter(([, dataUrl]) => dataUrl).map(([presetKey, dataUrl]) => [presetKey, dataUrl])));
       });
     }, 80);
     return () => {
@@ -5056,9 +5080,10 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     setGeneratingKey(preset.key);
     setMessage(`${preset.label} を生成しています。`);
     try {
+      const template = await hydrateTemplateForPreset(preset.key);
       const dataUrl = await renderThumbnail({
         preset,
-        template: getHydratedTemplate(preset.key),
+        template,
         icon: studio.guestIcon,
         icons: guestIcons,
         date: thumbnailDate,
@@ -5271,9 +5296,10 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         {THUMBNAIL_PRESETS.map((preset) => {
           const template = getHydratedTemplate(preset.key);
           const templateSource = getTemplateSource(template);
+          const isTemplateLoading = isCustomTemplate(template) && !templateSource && Boolean(template.baseImageKey);
           const templateLabel = isCustomTemplate(template) ? template.name : `${preset.baseName}（固定）`;
           const savedGenerated = generated[preset.key];
-          const savedGeneratedDataUrl = generatedImages[preset.key] || savedGenerated?.dataUrl;
+          const savedGeneratedDataUrl = isTemplateLoading ? "" : generatedImages[preset.key] || savedGenerated?.dataUrl;
           const livePreviewDataUrl = livePreviewImages[preset.key];
           return (
             <section className="thumbnail-card" key={preset.key}>
@@ -5292,6 +5318,8 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
                   <span>登録済みベース画像</span>
                   <img className="thumbnail-preview" src={templateSource} alt={`${preset.label} base`} />
                 </div>
+              ) : isTemplateLoading ? (
+                <div className="empty-preview">保存済みベース画像を読み込み中です</div>
               ) : (
                 <div className="empty-preview">ベース画像を登録するとここに表示されます</div>
               )}
