@@ -1150,6 +1150,11 @@ textarea {
   gap: 8px;
 }
 
+.slider-toggle {
+  justify-content: center;
+  width: 100%;
+}
+
 .thumbnail-preview {
   width: 100%;
   max-height: 220px;

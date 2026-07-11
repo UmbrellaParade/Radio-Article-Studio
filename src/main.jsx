@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import LZString from "lz-string";
 import {
   CalendarDays,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   Database,
   Download,
@@ -403,6 +405,8 @@ const THUMBNAIL_PRESETS = [
     dateBadge: { x: 50, y: 23.2, year: 42, date: 66, weekday: 42, offsets: [-62, 0, 72] }
   }
 ];
+const ARTICLE_THUMBNAIL_KEY = "article16x9";
+const CODEX_THUMBNAIL_PRESETS = THUMBNAIL_PRESETS.filter((preset) => preset.key === ARTICLE_THUMBNAIL_KEY);
 
 const THUMBNAIL_ICON_LAYOUT_PRESETS = [
   {
@@ -1011,6 +1015,21 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId
   const title = pick(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"]);
   const url = pick(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"]);
   const audioFile = pick(row, ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"]);
+  const ownerIconUrl = pick(row, [
+    "応募者アイコン画像",
+    "応募者アイコン",
+    "応募者さんのアイコン",
+    "ゲストアイコン画像",
+    "アイコン画像",
+    "プロフィール画像",
+    "サムネ用画像",
+    "見出しサムネ画像",
+    "画像URL",
+    "アイコンURL",
+    "icon",
+    "avatar",
+    "profile image"
+  ]);
   const articlePoint = pick(row, ["曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"]);
   const honorific = pick(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"]) || getDefaultOwnerHonorific(source);
 
@@ -1028,6 +1047,7 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId
     urlType: detectUrlType(url),
     url,
     audioFile,
+    ownerIconUrl,
     embedUrl: makeEmbedUrl(url),
     honorific,
     articlePoint,
@@ -1118,6 +1138,8 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
   const ownerAnswer =
     rawAnswers.find((answer) => /ゲスト名|活動名|応募者|担当|名前|パーソナリティ|アーティスト名/.test(answer.label) && !/AIアーティスト|AI artist|AI名義/.test(answer.label))?.answer ?? "";
   const artist = ownerAnswer && ownerAnswer !== "-" ? ownerAnswer : respondent;
+  const ownerIconAnswer = rawAnswers.find((answer) => answer.kind === "image" && /アイコン|プロフィール|画像|icon|avatar/i.test(answer.label))?.attachment;
+  const ownerIconUrl = ownerIconAnswer?.dataUrl || ownerIconAnswer?.sourceUrl || ownerIconAnswer?.url || "";
 
   return rawAnswers
     .filter((answer) => answer.kind === "track" && answer.track)
@@ -1139,6 +1161,7 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
         url: track.url || "",
         audioFile: track.audio?.fileName || "",
         audio: track.audio || null,
+        ownerIconUrl,
         embedUrl: makeEmbedUrl(track.url || ""),
         honorific: getDefaultOwnerHonorific(source),
         articlePoint: `${answer.label}から取り込み`,
@@ -1801,6 +1824,7 @@ function migrateData(input) {
       audio: null,
       periodId: "",
       aiArtist: "",
+      ownerIconUrl: "",
       ...track,
       honorific: track.honorific || getDefaultOwnerHonorific(track.source),
       urlType: track.urlType || detectUrlType(track.url)
@@ -2060,6 +2084,7 @@ function App() {
         url: "",
         audioFile: "",
         audio: null,
+        ownerIconUrl: "",
         embedUrl: "",
         honorific: getDefaultOwnerHonorific("ゲスト曲"),
         articlePoint: "",
@@ -2402,7 +2427,7 @@ function App() {
 
   const buildThumbnailBundle = async () => {
     const thumbnails = [];
-    for (const preset of THUMBNAIL_PRESETS) {
+    for (const preset of CODEX_THUMBNAIL_PRESETS) {
       const generated = data.thumbnailStudio?.generated?.[preset.key];
       if (!generated) continue;
       let dataUrl = generated.dataUrl || "";
@@ -2425,6 +2450,16 @@ function App() {
         dataUrl
       });
     }
+    const listenerHeadingThumbnails = episodeTracks
+      .filter((track) => track.source === "リスナー応募曲" && track.ownerIconUrl)
+      .map((track) => ({
+        trackId: track.id,
+        slotNo: track.slotNo,
+        trackTitle: track.title || "",
+        applicantName: track.artist || "",
+        ownerIconUrl: track.ownerIconUrl,
+        usage: "記事内でこの応募曲を紹介する見出し直下に置く応募者サムネ素材"
+      }));
 
     return {
       type: "radio-article-studio-thumbnail-bundle",
@@ -2438,11 +2473,13 @@ function App() {
           }
         : null,
       instructions: [
-        "このJSONのthumbnails[].dataUrlはPNG画像です。",
-        "Codex側ではdataUrlをPNGとして保存し、WordPressアイキャッチや記事内画像に使ってください。",
+        "このJSONのthumbnails[]は記事用16:9アイキャッチのみです。stand.fm 1:1 と配信背景9:16は含めません。",
+        "thumbnails[].dataUrlはPNG画像です。Codex側ではdataUrlをPNGとして保存し、WordPressアイキャッチに使ってください。",
+        "listenerHeadingThumbnails[]は、リスナー応募曲の見出し直下に置く応募者サムネ用素材です。ownerIconUrlを使ってください。",
         "PCへの手動ダウンロードを挟まないための受け渡しデータです。"
       ],
-      thumbnails
+      thumbnails,
+      listenerHeadingThumbnails
     };
   };
 
@@ -2461,7 +2498,7 @@ function App() {
 
   const copyFullPackWithThumbnails = async () => {
     const bundle = await buildThumbnailBundle();
-    const text = `${codexPack}\n\n---\n\n# サムネ画像データJSON\n\n${JSON.stringify(bundle, null, 2)}`;
+    const text = `${codexPack}\n\n---\n\n# 記事アイキャッチ16:9画像データJSON\n\n${JSON.stringify(bundle, null, 2)}`;
     setThumbnailTransferText(text);
     try {
       await navigator.clipboard.writeText(text);
@@ -2492,20 +2529,31 @@ ${response.constraints || "-"}`
       .map((track) => {
         const ownerHonorific = track.honorific || getDefaultOwnerHonorific(track.source);
         const aiArtistNote = track.aiArtist ? ` / AIアーティスト名: ${track.aiArtist}（敬称なし）` : "";
+        const ownerIconNote = track.ownerIconUrl ? ` / 本人アイコン: ${track.ownerIconUrl}` : "";
         return (
           `${track.slotNo}. ${track.title || "曲名未入力"} / ${track.artist || "アーティスト未入力"}\n` +
-          `   種別: ${track.source} / 本人名の敬称: ${ownerHonorific} / 応募期間: ${track.periodId || "-"}${aiArtistNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
+          `   種別: ${track.source} / 本人名の敬称: ${ownerHonorific} / 応募期間: ${track.periodId || "-"}${aiArtistNote}${ownerIconNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
           `   記事ポイント: ${track.articlePoint || "-"}`
         );
       })
       .join("\n");
 
-    const thumbnailRows = THUMBNAIL_PRESETS
+    const thumbnailRows = CODEX_THUMBNAIL_PRESETS
       .map((preset) => {
         const generated = data.thumbnailStudio?.generated?.[preset.key];
         const template = data.thumbnailStudio?.templates?.[preset.key] ?? defaultThumbnailStudio.templates[preset.key];
         return `- ${preset.label}: ${generated ? `生成済み / ${generated.fileName || preset.fileName}` : "未生成"} / ベース: ${template?.name || preset.baseName}`;
       })
+      .join("\n");
+    const listenerHeadingThumbnailRows = episodeTracks
+      .filter((track) => track.source === "リスナー応募曲")
+      .map((track) =>
+        compactLines([
+          `- ${track.slotNo}. ${track.title || "曲名未入力"} / 応募者: ${track.artist || "-"}`,
+          `  本人アイコン: ${track.ownerIconUrl || "未登録"}`,
+          "  用途: 記事内でこの応募曲を紹介する見出し直下に置く応募者サムネ素材"
+        ])
+      )
       .join("\n");
     const periodRows = episodePeriods
       .map(
@@ -2560,9 +2608,14 @@ ${periodRows || "-"}
 紹介楽曲:
 ${trackRows || "-"}
 
-サムネ/画像素材:
+記事アイキャッチ 16:9:
 ${thumbnailRows || "-"}
-※サムネPNGそのものは、この画面の「本文+サムネ画像データをコピー」または「サムネ画像JSONをコピー」で渡します。dataUrlをPNGとして保存して使ってください。
+※Codexパックへ渡す生成サムネは記事用16:9のみです。stand.fm 1:1 と配信背景9:16はstand.fm用なので記事作成パックには含めません。
+※16:9 PNGそのものは、この画面の「本文+記事画像データをコピー」または「記事画像JSONをコピー」で渡します。dataUrlをPNGとして保存してWordPressアイキャッチに使ってください。
+
+応募曲見出し下サムネ素材:
+${listenerHeadingThumbnailRows || "-"}
+※リスナー応募曲では、本人アイコンを使った応募者サムネを該当曲の見出し直下に配置してください。
 
 SNS告知/漫画素材:
 ${socialRows || "-"}
@@ -2815,7 +2868,7 @@ ${socialRows || "-"}
               thumbnailBundleCopied={thumbnailBundleCopied}
               copyFullPackWithThumbnails={copyFullPackWithThumbnails}
               fullPackCopied={fullPackCopied}
-              thumbnailCount={Object.keys(data.thumbnailStudio?.generated ?? {}).length}
+              thumbnailCount={CODEX_THUMBNAIL_PRESETS.filter((preset) => data.thumbnailStudio?.generated?.[preset.key]).length}
               thumbnailTransferText={thumbnailTransferText}
             />
           )}
@@ -4121,6 +4174,7 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
                   <Field label="楽曲名" value={track.title} onChange={(value) => patchItem("tracks", track.id, { title: value })} />
                   <Field label="楽曲URL（YouTube / Suno）" value={track.url} onChange={(value) => updateTrackUrl(track, value)} />
                   <Field label="音源ファイル（WAV / mp3）" value={track.audioFile} onChange={(value) => patchItem("tracks", track.id, { audioFile: value })} />
+                  <Field label="本人アイコンURL（応募曲見出し下サムネ用）" value={track.ownerIconUrl || ""} onChange={(value) => patchItem("tracks", track.id, { ownerIconUrl: value })} />
                   <Field label="埋め込みURL（必要なら）" value={track.embedUrl} onChange={(value) => patchItem("tracks", track.id, { embedUrl: value })} />
                   <Field label="本人名の敬称ルール" value={track.honorific || getDefaultOwnerHonorific(track.source)} onChange={(value) => patchItem("tracks", track.id, { honorific: value })} />
                   <TextArea label="記事で触れるポイント" value={track.articlePoint} onChange={(value) => patchItem("tracks", track.id, { articlePoint: value })} />
@@ -4392,6 +4446,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   const [templateBaseImages, setTemplateBaseImages] = useState({});
   const [livePreviewImages, setLivePreviewImages] = useState({});
   const [previewImage, setPreviewImage] = useState(null);
+  const [collapsedSliderKeys, setCollapsedSliderKeys] = useState({ standfm1x1: true, stream9x16: true });
   const [generatingKey, setGeneratingKey] = useState("");
   const thumbnailDate = studio.date || episodeDate || "";
   const generated = studio.generated ?? {};
@@ -4933,6 +4988,10 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     );
   };
 
+  const togglePlacementControls = (presetKey) => {
+    setCollapsedSliderKeys((current) => ({ ...current, [presetKey]: !current[presetKey] }));
+  };
+
   const modalPreset = previewImage ? THUMBNAIL_PRESETS.find((preset) => preset.key === previewImage.presetKey) : null;
   const modalTemplate = modalPreset ? getHydratedTemplate(modalPreset.key) : null;
   const modalImageSrc = modalPreset ? livePreviewImages[modalPreset.key] || previewImage.src : previewImage?.src;
@@ -5020,7 +5079,11 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
                   <img className="thumbnail-preview" src={livePreviewDataUrl} alt={`${preset.label} live preview`} />
                 </div>
               )}
-              {renderPlacementControls(preset, template)}
+              <button className="secondary slider-toggle" onClick={() => togglePlacementControls(preset.key)}>
+                {collapsedSliderKeys[preset.key] ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                配置スライダーを{collapsedSliderKeys[preset.key] ? "開く" : "閉じる"}
+              </button>
+              {!collapsedSliderKeys[preset.key] && renderPlacementControls(preset, template)}
               <div className="button-row">
                 <button className="primary" onClick={() => generateOne(preset)} disabled={generatingKey === preset.key}>
                   {generatingKey === preset.key ? "生成中" : "生成"}
@@ -5245,13 +5308,13 @@ function CodexPack({ codexPack, copyPack, copied, selectedEpisode, copyThumbnail
         <h2>{selectedEpisode?.title || "放送回未選択"}</h2>
         <div className="button-row">
           <button className="primary" onClick={copyFullPackWithThumbnails} disabled={!thumbnailCount}>
-            <ClipboardCopy size={16} />{fullPackCopied ? "画像込みコピー済み" : "本文+サムネ画像データをコピー"}
+            <ClipboardCopy size={16} />{fullPackCopied ? "画像込みコピー済み" : "本文+記事画像データをコピー"}
           </button>
           <button className="secondary" onClick={copyThumbnailBundle} disabled={!thumbnailCount}>
-            <ClipboardCopy size={16} />{thumbnailBundleCopied ? "画像JSONコピー済み" : "サムネ画像JSONをコピー"}
+            <ClipboardCopy size={16} />{thumbnailBundleCopied ? "記事画像JSONコピー済み" : "記事画像JSONをコピー"}
           </button>
         </div>
-        <p className="hint-text">生成済みサムネ: {thumbnailCount}件。画像込みコピーは大きめですが、PNGをPCに保存せずCodexへ渡せます。</p>
+        <p className="hint-text">Codexへ送る記事アイキャッチ16:9: {thumbnailCount}件。stand.fm 1:1 と配信背景9:16は記事作成パックには含めません。</p>
         {thumbnailTransferText && (
           <textarea className="pack-output thumbnail-transfer-output" value={thumbnailTransferText} readOnly />
         )}
