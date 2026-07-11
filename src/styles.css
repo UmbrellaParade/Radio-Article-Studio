@@ -349,6 +349,12 @@ h1 {
   font-weight: 700;
 }
 
+.field small {
+  color: #8b8293;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 input,
 select,
 textarea {
@@ -380,8 +386,93 @@ textarea {
 
 .question-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 120px 160px;
+  grid-template-columns: minmax(220px, 1fr) 120px minmax(220px, 260px) 86px;
   gap: 8px;
+  align-items: center;
+}
+
+.mini-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fff;
+  color: #51495f;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.mini-check input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+}
+
+.share-box,
+.result-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #f7f2e9;
+}
+
+.share-box strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #241f2f;
+}
+
+.share-box span,
+.muted {
+  display: block;
+  margin-top: 4px;
+  color: #665d70;
+  line-height: 1.7;
+}
+
+.inline-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.public-shell {
+  max-width: 920px;
+}
+
+.public-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.public-head h2 {
+  margin-top: 10px;
+}
+
+.public-form {
+  display: grid;
+  gap: 14px;
+}
+
+.eyebrow.slim {
+  margin: 0;
+  font-size: 11px;
+}
+
+.pack-output.compact {
+  min-height: 260px;
 }
 
 .primary,

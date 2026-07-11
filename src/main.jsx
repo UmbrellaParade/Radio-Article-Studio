@@ -16,6 +16,7 @@ import {
   Save,
   Send,
   Settings,
+  Share2,
   Trash2,
   Upload
 } from "lucide-react";
@@ -23,9 +24,62 @@ import "./styles.css";
 
 const STORAGE_KEY = "radio-article-studio:v1";
 
+const QUESTION_USE_OPTIONS = [
+  ["public", "公開してOKなプロフィール"],
+  ["article", "記事で紹介してほしい内容"],
+  ["constraint", "記事/SNSで触れないこと・表記ルール"],
+  ["internal", "制作側だけに共有するメモ"],
+  ["sns", "SNS投稿に使ってOK"],
+  ["manga", "漫画/画像案に使ってOK"]
+];
+
+const QUESTION_USE_LABELS = Object.fromEntries(QUESTION_USE_OPTIONS);
+
 const newId = (prefix) => {
   if (crypto?.randomUUID) return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+};
+
+const encodeSharePayload = (payload) => {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+};
+
+const decodeSharePayload = (value) => {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+};
+
+const readSharedFormPayload = () => {
+  const match = window.location.hash.match(/^#\/submit\/(.+)$/);
+  if (!match) return null;
+  try {
+    return decodeSharePayload(match[1]);
+  } catch {
+    return { error: true };
+  }
+};
+
+const makeShareUrl = (form) => {
+  const payload = {
+    version: 1,
+    type: "radio-article-studio-form",
+    form: {
+      id: form.id,
+      name: form.name,
+      type: form.type,
+      description: form.description,
+      questions: form.questions
+    }
+  };
+  return `${window.location.origin}${window.location.pathname}#/submit/${encodeSharePayload(payload)}`;
 };
 
 const sampleData = {
@@ -57,9 +111,9 @@ const sampleData = {
       status: "受付中",
       description: "ゲスト紹介、紹介楽曲、NG/注意事項を集めるフォーム。",
       questions: [
-        { id: "q_guest_name", label: "ゲスト名 正式表記", kind: "short", required: true, use: "article" },
-        { id: "q_guest_x", label: "X URL", kind: "url", required: true, use: "article" },
-        { id: "q_profile", label: "活動紹介文", kind: "long", required: true, use: "article" },
+        { id: "q_guest_name", label: "ゲスト名 正式表記", kind: "short", required: true, use: "public" },
+        { id: "q_guest_x", label: "X URL", kind: "url", required: true, use: "public" },
+        { id: "q_profile", label: "活動紹介文", kind: "long", required: true, use: "public" },
         { id: "q_topics", label: "今回話したいこと", kind: "long", required: false, use: "article" },
         { id: "q_ng", label: "触れないでほしいこと/NG質問", kind: "long", required: false, use: "constraint" }
       ]
@@ -207,10 +261,18 @@ function App() {
   const [active, setActive] = useState("dashboard");
   const [selectedEpisodeId, setSelectedEpisodeId] = useState(data.episodes[0]?.id ?? "");
   const [copied, setCopied] = useState(false);
+  const [sharedPayload, setSharedPayload] = useState(readSharedFormPayload);
 
   useEffect(() => {
+    if (sharedPayload) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
+  }, [data, sharedPayload]);
+
+  useEffect(() => {
+    const onHashChange = () => setSharedPayload(readSharedFormPayload());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   const selectedEpisode = useMemo(
     () => data.episodes.find((episode) => episode.id === selectedEpisodeId) ?? data.episodes[0],
@@ -375,13 +437,13 @@ function App() {
     const responseBlocks = episodeResponses
       .map(
         (response) => `### ${response.respondent || "回答者未入力"}
-公開情報:
+公開してOKなプロフィール:
 ${response.publicInfo || "-"}
 
-記事に使う内容:
+記事で紹介してほしい内容:
 ${response.articleUse || "-"}
 
-制約/注意:
+記事/SNSで触れないこと・表記ルール:
 ${response.constraints || "-"}`
       )
       .join("\n\n");
@@ -474,11 +536,45 @@ ${assetRows || "-"}
     reader.readAsText(file, "utf-8");
   };
 
+  const importResponseJson = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const response = parsed.response ?? parsed;
+        const normalized = {
+          id: response.id || newId("res"),
+          episodeId: response.episodeId || selectedEpisode?.id || data.episodes[0]?.id || "",
+          formId: response.formId || data.forms[0]?.id || "",
+          respondent: response.respondent || "",
+          status: response.status || "未確認",
+          publicInfo: response.publicInfo || "",
+          articleUse: response.articleUse || "",
+          internalOnly: response.internalOnly || "",
+          constraints: response.constraints || ""
+        };
+        updateData("responses", (responses) => [normalized, ...responses]);
+        setActive("responses");
+      } catch {
+        alert("回答JSONを読み込めませんでした。");
+      } finally {
+        event.target.value = "";
+      }
+    };
+    reader.readAsText(file, "utf-8");
+  };
+
   const resetSample = () => {
     if (!confirm("サンプルデータに戻しますか？現在のブラウザ内データは上書きされます。")) return;
     setData(sampleData);
     setSelectedEpisodeId(sampleData.episodes[0].id);
   };
+
+  if (sharedPayload) {
+    return <PublicSubmissionForm logoSrc={logoSrc} payload={sharedPayload} />;
+  }
 
   return (
     <main className="app-shell">
@@ -562,6 +658,7 @@ ${assetRows || "-"}
               patchItem={patchItem}
               removeItem={removeItem}
               addResponse={addResponse}
+              importResponseJson={importResponseJson}
             />
           )}
           {active === "tracks" && (
@@ -584,6 +681,142 @@ ${assetRows || "-"}
           )}
         </section>
       </div>
+    </main>
+  );
+}
+
+function PublicSubmissionForm({ logoSrc, payload }) {
+  const form = payload?.form;
+  const [answers, setAnswers] = useState({});
+  const [result, setResult] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  if (payload?.error || !form) {
+    return (
+      <main className="app-shell public-shell">
+        <Header logoSrc={logoSrc} />
+        <article className="panel">
+          <h2>共有フォームを開けませんでした</h2>
+          <p className="muted">URLが途中で切れている可能性があります。管理画面から共有リンクを作り直してください。</p>
+          <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
+        </article>
+      </main>
+    );
+  }
+
+  const updateAnswer = (questionId, value) => {
+    setAnswers((current) => ({ ...current, [questionId]: value }));
+  };
+
+  const formatAnswers = (uses) =>
+    form.questions
+      .filter((question) => uses.includes(question.use))
+      .map((question) => `${question.label}: ${answers[question.id] || "-"}`)
+      .join("\n");
+
+  const inferRespondent = () => {
+    const nameQuestion = form.questions.find((question) => /名前|名|アーティスト|ゲスト/i.test(question.label));
+    return (nameQuestion && answers[nameQuestion.id]) || "";
+  };
+
+  const buildResponsePayload = () => ({
+    version: 1,
+    type: "radio-article-studio-response",
+    exportedAt: new Date().toISOString(),
+    response: {
+      id: newId("res"),
+      episodeId: "",
+      formId: form.id,
+      respondent: inferRespondent(),
+      status: "未確認",
+      publicInfo: formatAnswers(["public"]),
+      articleUse: formatAnswers(["article", "sns", "manga"]),
+      internalOnly: formatAnswers(["internal"]),
+      constraints: formatAnswers(["constraint"])
+    },
+    rawAnswers: form.questions.map((question) => ({
+      id: question.id,
+      label: question.label,
+      use: question.use,
+      useLabel: QUESTION_USE_LABELS[question.use] ?? question.use,
+      answer: answers[question.id] || ""
+    }))
+  });
+
+  const submit = (event) => {
+    event.preventDefault();
+    setResult(JSON.stringify(buildResponsePayload(), null, 2));
+  };
+
+  const copyResult = async () => {
+    if (!result) return;
+    await navigator.clipboard.writeText(result);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  const downloadResult = () => {
+    if (!result) return;
+    const blob = new Blob([result], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${form.id}-response.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <main className="app-shell public-shell">
+      <Header logoSrc={logoSrc} />
+      <article className="panel">
+        <div className="public-head">
+          <div>
+            <p className="eyebrow slim">Shared Form</p>
+            <h2>{form.name}</h2>
+            {form.description && <p className="muted">{form.description}</p>}
+          </div>
+          <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
+        </div>
+
+        <form className="public-form" onSubmit={submit}>
+          {form.questions.map((question) => (
+            <label className="field wide" key={question.id}>
+              <span>{question.label}{question.required ? " *" : ""}</span>
+              <small>{QUESTION_USE_LABELS[question.use] ?? question.use}</small>
+              {question.kind === "long" ? (
+                <textarea
+                  required={Boolean(question.required)}
+                  value={answers[question.id] ?? ""}
+                  onChange={(event) => updateAnswer(question.id, event.target.value)}
+                />
+              ) : (
+                <input
+                  type={question.kind === "url" ? "url" : "text"}
+                  required={Boolean(question.required)}
+                  placeholder={question.kind === "file" ? "Drive URLなど、ファイルを受け取れる共有URL" : ""}
+                  value={answers[question.id] ?? ""}
+                  onChange={(event) => updateAnswer(question.id, event.target.value)}
+                />
+              )}
+            </label>
+          ))}
+          <button className="primary" type="submit"><Send size={16} />回答データを作成</button>
+        </form>
+
+        {result && (
+          <div className="result-box">
+            <div className="record-head">
+              <strong>回答JSON</strong>
+              <div className="inline-actions">
+                <button className="secondary" onClick={copyResult}><ClipboardCopy size={16} />{copied ? "コピー済み" : "コピー"}</button>
+                <button className="secondary" onClick={downloadResult}><Download size={16} />ダウンロード</button>
+              </div>
+            </div>
+            <textarea className="pack-output compact" value={result} readOnly />
+          </div>
+        )}
+      </article>
     </main>
   );
 }
@@ -697,9 +930,17 @@ function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem
 }
 
 function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuestion }) {
+  const [copiedFormId, setCopiedFormId] = useState("");
+
+  const copyShareUrl = async (form) => {
+    await navigator.clipboard.writeText(makeShareUrl(form));
+    setCopiedFormId(form.id);
+    window.setTimeout(() => setCopiedFormId(""), 1800);
+  };
+
   return (
     <div className="view-stack">
-      <SectionTitle title="フォーム管理" subtitle="ゲストアンケート、リスナー応募、パーソナリティ曲入力などを複数作れます。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
+      <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、共有フォームURLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
       <div className="records">
         {forms.map((form) => (
           <article className="record" key={form.id}>
@@ -712,6 +953,16 @@ function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuesti
               <SelectField label="用途" value={form.type} options={["ゲスト", "リスナー", "運営", "自由フォーム"]} onChange={(value) => patchItem("forms", form.id, { type: value })} />
               <SelectField label="状態" value={form.status} options={["準備中", "受付中", "停止中", "運用中"]} onChange={(value) => patchItem("forms", form.id, { status: value })} />
               <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
+            </div>
+            <div className="share-box">
+              <div>
+                <strong><Share2 size={16} />共有フォーム</strong>
+                <span>回答者は入力後、回答JSONをコピーまたはダウンロードします。自動回収はGoogle Sheets/Drive連携で追加予定。</span>
+              </div>
+              <input readOnly value={makeShareUrl(form)} onFocus={(event) => event.target.select()} />
+              <button className="secondary" onClick={() => copyShareUrl(form)}>
+                <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "リンクをコピー"}
+              </button>
             </div>
             <div className="question-list">
               <div className="subhead">質問項目</div>
@@ -726,12 +977,14 @@ function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuesti
                     <option>file</option>
                   </select>
                   <select value={question.use} onChange={(event) => patchQuestion(form.id, question.id, { use: event.target.value })}>
-                    <option value="article">記事に使う</option>
-                    <option value="constraint">制約/NG</option>
-                    <option value="internal">内部確認のみ</option>
-                    <option value="sns">SNS</option>
-                    <option value="manga">漫画</option>
+                    {QUESTION_USE_OPTIONS.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
                   </select>
+                  <label className="mini-check">
+                    <input type="checkbox" checked={Boolean(question.required)} onChange={(event) => patchQuestion(form.id, question.id, { required: event.target.checked })} />
+                    必須
+                  </label>
                 </div>
               ))}
               <button className="secondary" onClick={() => addQuestion(form.id)}><Plus size={16} />質問追加</button>
@@ -743,10 +996,22 @@ function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuesti
   );
 }
 
-function Responses({ forms, responses, patchItem, removeItem, addResponse }) {
+function Responses({ forms, responses, patchItem, removeItem, addResponse, importResponseJson }) {
   return (
     <div className="view-stack">
-      <SectionTitle title="回答管理" subtitle="記事に使う情報、内部確認のみ、NG/制約を分けて保持します。" action={<button className="primary" onClick={addResponse}><Plus size={16} />回答追加</button>} />
+      <SectionTitle
+        title="回答管理"
+        subtitle="公開できる情報、記事に使う内容、制作メモ、掲載NG/表記ルールを分けて保持します。"
+        action={
+          <div className="inline-actions">
+            <label className="secondary file-button">
+              <Upload size={16} />回答JSONを読み込み
+              <input type="file" accept="application/json" onChange={importResponseJson} />
+            </label>
+            <button className="primary" onClick={addResponse}><Plus size={16} />回答追加</button>
+          </div>
+        }
+      />
       <div className="records">
         {responses.map((response) => (
           <article className="record" key={response.id}>
@@ -758,10 +1023,10 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse }) {
               <Field label="回答者" value={response.respondent} onChange={(value) => patchItem("responses", response.id, { respondent: value })} />
               <SelectField label="フォーム" value={response.formId} options={forms.map((form) => form.id)} labels={Object.fromEntries(forms.map((form) => [form.id, form.name]))} onChange={(value) => patchItem("responses", response.id, { formId: value })} />
               <SelectField label="状態" value={response.status} options={["未確認", "確認済み", "要確認"]} onChange={(value) => patchItem("responses", response.id, { status: value })} />
-              <TextArea label="公開OK情報" value={response.publicInfo} onChange={(value) => patchItem("responses", response.id, { publicInfo: value })} />
-              <TextArea label="記事に使う内容" value={response.articleUse} onChange={(value) => patchItem("responses", response.id, { articleUse: value })} />
-              <TextArea label="内部確認のみ" value={response.internalOnly} onChange={(value) => patchItem("responses", response.id, { internalOnly: value })} />
-              <TextArea label="制約/NG/注意事項" value={response.constraints} onChange={(value) => patchItem("responses", response.id, { constraints: value })} />
+              <TextArea label="公開してOKなプロフィール" value={response.publicInfo} onChange={(value) => patchItem("responses", response.id, { publicInfo: value })} />
+              <TextArea label="記事で紹介してほしい内容" value={response.articleUse} onChange={(value) => patchItem("responses", response.id, { articleUse: value })} />
+              <TextArea label="制作側だけに共有するメモ" value={response.internalOnly} onChange={(value) => patchItem("responses", response.id, { internalOnly: value })} />
+              <TextArea label="記事/SNSで触れないこと・表記ルール" value={response.constraints} onChange={(value) => patchItem("responses", response.id, { constraints: value })} />
             </div>
           </article>
         ))}

@@ -46,13 +46,15 @@ Implemented:
 1. Dashboard.
 2. Broadcast episode management.
 3. Form template management.
-4. Response management with public/internal/constraint separation.
-5. Track and audio metadata management.
-6. Thumbnail and production asset management.
-7. Codex request pack generation.
-8. JSON export/import backup.
+4. Shareable form URL prototype.
+5. Response JSON creation/import.
+6. Response management with public/article/internal/constraint separation.
+7. Track and audio metadata management.
+8. Thumbnail and production asset management.
+9. Codex request pack generation.
+10. JSON export/import backup.
 
-External integrations such as Google Drive, WordPress, and SE_Pon are planned for later phases.
+The shareable form prototype does not automatically collect submissions yet. Respondents create or download a response JSON, then the operator imports it into the response screen. External integrations such as Google Drive, Google Sheets, WordPress, and SE_Pon are planned for later phases.
 
 ## Development
 
