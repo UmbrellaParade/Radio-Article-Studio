@@ -380,9 +380,9 @@ const THUMBNAIL_ICON_LAYOUT_PRESETS = [
     id: "single",
     name: "1人用",
     templates: {
-      article16x9: { iconX: 50, iconY: 77, iconSize: 28 },
-      standfm1x1: { iconX: 50, iconY: 82, iconSize: 23 },
-      stream9x16: { iconX: 50, iconY: 78, iconSize: 30 }
+      article16x9: { iconX: 50, iconY: 77, iconSize: 28, guestNameVisible: true, guestNameX: 50, guestNameY: 91, guestNameSize: 6, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 77, guestBadgeSize: 12 },
+      standfm1x1: { iconX: 50, iconY: 82, iconSize: 23, guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 82, guestBadgeSize: 10 },
+      stream9x16: { iconX: 50, iconY: 78, iconSize: 30, guestNameVisible: true, guestNameX: 50, guestNameY: 88, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 39, guestBadgeY: 78, guestBadgeSize: 9 }
     }
   }
 ];
@@ -3705,6 +3705,10 @@ function drawCover(ctx, image, width, height) {
 
 const isCustomTemplate = (template) => template?.source === "custom" && Boolean(template?.dataUrl);
 const getTemplateSource = (template) => (isCustomTemplate(template) ? template.dataUrl : template?.assetUrl || "");
+const getNormalizedThumbnailTemplate = (presetKey, template) => ({
+  ...defaultThumbnailStudio.templates[presetKey],
+  ...(template ?? {})
+});
 
 function drawDateBadge(ctx, preset, dateString) {
   const lines = formatThumbnailDateLines(dateString);
@@ -3739,8 +3743,89 @@ function drawDateBadge(ctx, preset, dateString) {
   ctx.restore();
 }
 
-async function renderThumbnail({ preset, template, icon, date }) {
-  const templateSource = getTemplateSource(template);
+function drawGuestName(ctx, preset, template, guestName) {
+  const name = String(guestName || "").trim();
+  if (!name || template.guestNameVisible === false) return;
+
+  const minSide = Math.min(preset.width, preset.height);
+  const x = (preset.width * Number(template.guestNameX ?? 50)) / 100;
+  const y = (preset.height * Number(template.guestNameY ?? 90)) / 100;
+  const baseSize = Math.max(18, (minSide * Number(template.guestNameSize ?? 6)) / 100);
+  const fontFamily = '"Yu Gothic", "Hiragino Sans", "Noto Sans JP", Arial, sans-serif';
+  const lines = name.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 3);
+  const maxWidth = preset.width * 0.72;
+  const longestLine = lines.reduce((longest, line) => (line.length > longest.length ? line : longest), lines[0] ?? name);
+  let fontSize = baseSize;
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  while (fontSize > 14) {
+    ctx.font = `900 ${fontSize}px ${fontFamily}`;
+    if (ctx.measureText(longestLine).width <= maxWidth) break;
+    fontSize -= 2;
+  }
+
+  const lineHeight = fontSize * 1.12;
+  const startY = y - ((lines.length - 1) * lineHeight) / 2;
+  ctx.shadowColor = "rgba(0, 0, 0, .55)";
+  ctx.shadowBlur = Math.round(fontSize * 0.28);
+  ctx.strokeStyle = "rgba(42, 31, 19, .72)";
+  ctx.lineWidth = Math.max(3, fontSize * 0.12);
+  ctx.fillStyle = "#fff3b8";
+  lines.forEach((line, index) => {
+    const lineY = startY + index * lineHeight;
+    ctx.strokeText(line, x, lineY);
+    ctx.fillText(line, x, lineY);
+  });
+  ctx.restore();
+}
+
+function drawGuestBadge(ctx, preset, template, hasGuestContent) {
+  if (!hasGuestContent || template.guestBadgeVisible === false) return;
+
+  const minSide = Math.min(preset.width, preset.height);
+  const diameter = Math.max(42, (minSide * Number(template.guestBadgeSize ?? 10)) / 100);
+  const radius = diameter / 2;
+  const centerX = (preset.width * Number(template.guestBadgeX ?? 40)) / 100;
+  const centerY = (preset.height * Number(template.guestBadgeY ?? 78)) / 100;
+  const points = 24;
+
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate((-12 * Math.PI) / 180);
+  ctx.beginPath();
+  for (let index = 0; index < points; index += 1) {
+    const angle = (Math.PI * 2 * index) / points - Math.PI / 2;
+    const pointRadius = index % 2 === 0 ? radius : radius * 0.74;
+    const x = Math.cos(angle) * pointRadius;
+    const y = Math.sin(angle) * pointRadius;
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.shadowColor = "rgba(0, 0, 0, .32)";
+  ctx.shadowBlur = Math.max(5, radius * 0.16);
+  ctx.fillStyle = "#ffd829";
+  ctx.strokeStyle = "#f3b400";
+  ctx.lineWidth = Math.max(3, radius * 0.08);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#163040";
+  ctx.font = `900 ${Math.max(10, radius * 0.42)}px "Arial Black", "Yu Gothic", sans-serif`;
+  ctx.fillText("GUEST", 0, -radius * 0.14);
+  ctx.fillText("IN!!!", 0, radius * 0.24);
+  ctx.restore();
+}
+
+async function renderThumbnail({ preset, template, icon, date, guestName }) {
+  const normalizedTemplate = getNormalizedThumbnailTemplate(preset.key, template);
+  const templateSource = getTemplateSource(normalizedTemplate);
   if (!templateSource) throw new Error("template-missing");
   const canvas = document.createElement("canvas");
   canvas.width = preset.width;
@@ -3754,28 +3839,31 @@ async function renderThumbnail({ preset, template, icon, date }) {
   drawCover(ctx, baseImage, preset.width, preset.height);
   drawDateBadge(ctx, preset, date);
 
-  if (!iconImage) return canvas.toDataURL("image/png");
+  if (iconImage) {
+    const diameter = Math.round((Math.min(preset.width, preset.height) * Number(normalizedTemplate.iconSize || 28)) / 100);
+    const centerX = Math.round((preset.width * Number(normalizedTemplate.iconX || 50)) / 100);
+    const centerY = Math.round((preset.height * Number(normalizedTemplate.iconY || 50)) / 100);
+    const x = centerX - diameter / 2;
+    const y = centerY - diameter / 2;
 
-  const diameter = Math.round((Math.min(preset.width, preset.height) * Number(template.iconSize || 28)) / 100);
-  const centerX = Math.round((preset.width * Number(template.iconX || 50)) / 100);
-  const centerY = Math.round((preset.height * Number(template.iconY || 50)) / 100);
-  const x = centerX - diameter / 2;
-  const y = centerY - diameter / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, diameter / 2, 0, Math.PI * 2);
+    ctx.clip();
+    drawCoverAt(ctx, iconImage, x, y, diameter, diameter);
+    ctx.restore();
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, diameter / 2, 0, Math.PI * 2);
-  ctx.clip();
-  drawCoverAt(ctx, iconImage, x, y, diameter, diameter);
-  ctx.restore();
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, diameter / 2, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(6, Math.round(diameter * 0.035));
+    ctx.strokeStyle = "rgba(255,255,255,.94)";
+    ctx.stroke();
+    ctx.restore();
+  }
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, diameter / 2, 0, Math.PI * 2);
-  ctx.lineWidth = Math.max(6, Math.round(diameter * 0.035));
-  ctx.strokeStyle = "rgba(255,255,255,.94)";
-  ctx.stroke();
-  ctx.restore();
+  drawGuestBadge(ctx, preset, normalizedTemplate, Boolean(iconImage || guestName));
+  drawGuestName(ctx, preset, normalizedTemplate, guestName);
 
   return canvas.toDataURL("image/png");
 }
@@ -3784,6 +3872,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   const [message, setMessage] = useState("");
   const [layoutPresetName, setLayoutPresetName] = useState("");
   const [generatedImages, setGeneratedImages] = useState({});
+  const [livePreviewImages, setLivePreviewImages] = useState({});
   const [previewImage, setPreviewImage] = useState(null);
   const [generatingKey, setGeneratingKey] = useState("");
   const thumbnailDate = studio.date || episodeDate || "";
@@ -3791,6 +3880,40 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   const customLayoutPresets = studio.customLayoutPresets ?? [];
   const layoutPresets = [...THUMBNAIL_ICON_LAYOUT_PRESETS, ...customLayoutPresets];
   const activeLayoutPresetId = studio.activeLayoutPreset || THUMBNAIL_ICON_LAYOUT_PRESETS[0].id;
+  const thumbnailTemplatePreviewKey = useMemo(
+    () =>
+      JSON.stringify(
+        THUMBNAIL_PRESETS.map((preset) => {
+          const template = getNormalizedThumbnailTemplate(preset.key, studio.templates?.[preset.key]);
+          return [preset.key, template.source, template.assetUrl, template.dataUrl, template.iconX, template.iconY, template.iconSize, template.guestNameVisible, template.guestNameX, template.guestNameY, template.guestNameSize, template.guestBadgeVisible, template.guestBadgeX, template.guestBadgeY, template.guestBadgeSize];
+        })
+      ),
+    [studio.templates]
+  );
+
+  const removeGeneratedRecords = (records, presetKeys) => {
+    const nextGenerated = { ...(records ?? {}) };
+    presetKeys.forEach((key) => delete nextGenerated[key]);
+    return nextGenerated;
+  };
+
+  const forgetGeneratedImages = (presetKeysInput) => {
+    const presetKeys = Array.isArray(presetKeysInput) ? presetKeysInput : [presetKeysInput];
+    presetKeys.forEach((presetKey) => {
+      const saved = generated[presetKey];
+      if (saved?.imageKey) {
+        deleteGeneratedThumbnailImage(saved.imageKey).catch(() => {
+          // Removing the UI reference is enough if IndexedDB cleanup fails.
+        });
+      }
+    });
+    setGeneratedImages((current) => {
+      const next = { ...current };
+      presetKeys.forEach((presetKey) => delete next[presetKey]);
+      return next;
+    });
+    setPreviewImage((current) => (current?.presetKey && presetKeys.includes(current.presetKey) ? null : current));
+  };
 
   useEffect(() => {
     let active = true;
@@ -3814,13 +3937,44 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     };
   }, [generated.article16x9?.imageKey, generated.article16x9?.dataUrl, generated.standfm1x1?.imageKey, generated.standfm1x1?.dataUrl, generated.stream9x16?.imageKey, generated.stream9x16?.dataUrl]);
 
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      Promise.all(
+        THUMBNAIL_PRESETS.map(async (preset) => {
+          try {
+            const dataUrl = await renderThumbnail({
+              preset,
+              template: studio.templates?.[preset.key],
+              icon: studio.guestIcon,
+              date: thumbnailDate,
+              guestName
+            });
+            return [preset.key, dataUrl];
+          } catch {
+            return [preset.key, ""];
+          }
+        })
+      ).then((entries) => {
+        if (!active) return;
+        setLivePreviewImages(Object.fromEntries(entries.filter(([, dataUrl]) => dataUrl)));
+      });
+    }, 80);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [thumbnailDate, guestName, studio.guestIcon?.dataUrl, thumbnailTemplatePreviewKey]);
+
   const handleTemplateFile = async (presetKey, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const dataUrl = await fileToDataUrl(file);
+    forgetGeneratedImages(presetKey);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
+      generated: removeGeneratedRecords(current.generated, [presetKey]),
       templates: {
         ...defaultThumbnailStudio.templates,
         ...current.templates,
@@ -3833,6 +3987,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         }
       }
     }));
+    setMessage("ベース画像を変更しました。古い生成画像は解除しました。");
     event.target.value = "";
   };
 
@@ -3840,19 +3995,36 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     const file = event.target.files?.[0];
     if (!file) return;
     const dataUrl = await fileToDataUrl(file);
-    updateStudio((current) => ({ ...defaultThumbnailStudio, ...current, guestIcon: { name: file.name, dataUrl } }));
+    const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
+    forgetGeneratedImages(presetKeys);
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      generated: removeGeneratedRecords(current.generated, presetKeys),
+      guestIcon: { name: file.name, dataUrl }
+    }));
+    setMessage("ゲストアイコンを変更しました。古い生成画像は解除しました。");
     event.target.value = "";
   };
 
   const clearGuestIcon = () => {
-    updateStudio((current) => ({ ...defaultThumbnailStudio, ...current, guestIcon: { ...defaultThumbnailStudio.guestIcon } }));
+    const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
+    forgetGeneratedImages(presetKeys);
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      generated: removeGeneratedRecords(current.generated, presetKeys),
+      guestIcon: { ...defaultThumbnailStudio.guestIcon }
+    }));
     setMessage("ゲストアイコンを解除しました。");
   };
 
   const patchTemplate = (presetKey, patch) => {
+    forgetGeneratedImages(presetKey);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
+      generated: removeGeneratedRecords(current.generated, [presetKey]),
       templates: {
         ...defaultThumbnailStudio.templates,
         ...current.templates,
@@ -3866,19 +4038,25 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   };
 
   const patchDate = (date) => {
+    const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
+    forgetGeneratedImages(presetKeys);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
+      generated: removeGeneratedRecords(current.generated, presetKeys),
       date
     }));
   };
 
   const applyLayoutPreset = (presetId) => {
     const preset = layoutPresets.find((item) => item.id === presetId) ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0];
+    const presetKeys = THUMBNAIL_PRESETS.map((presetItem) => presetItem.key);
+    forgetGeneratedImages(presetKeys);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
       activeLayoutPreset: preset.id,
+      generated: removeGeneratedRecords(current.generated, presetKeys),
       templates: applyIconLayoutPresetToTemplates(current.templates, preset)
     }));
     setMessage(`${preset.name} の配置を適用しました。`);
@@ -3901,7 +4079,15 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
             {
               iconX: Number(template.iconX || 50),
               iconY: Number(template.iconY || 50),
-              iconSize: Number(template.iconSize || 28)
+              iconSize: Number(template.iconSize || 28),
+              guestNameVisible: template.guestNameVisible !== false,
+              guestNameX: Number(template.guestNameX ?? 50),
+              guestNameY: Number(template.guestNameY ?? 90),
+              guestNameSize: Number(template.guestNameSize ?? 6),
+              guestBadgeVisible: template.guestBadgeVisible !== false,
+              guestBadgeX: Number(template.guestBadgeX ?? 40),
+              guestBadgeY: Number(template.guestBadgeY ?? 78),
+              guestBadgeSize: Number(template.guestBadgeSize ?? 10)
             }
           ];
         })
@@ -3919,10 +4105,13 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
 
   const deleteActiveLayoutPreset = () => {
     if (THUMBNAIL_ICON_LAYOUT_PRESETS.some((preset) => preset.id === activeLayoutPresetId)) return;
+    const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
+    forgetGeneratedImages(presetKeys);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
       activeLayoutPreset: THUMBNAIL_ICON_LAYOUT_PRESETS[0].id,
+      generated: removeGeneratedRecords(current.generated, presetKeys),
       templates: applyIconLayoutPresetToTemplates(current.templates, THUMBNAIL_ICON_LAYOUT_PRESETS[0]),
       customLayoutPresets: (current.customLayoutPresets ?? []).filter((preset) => preset.id !== activeLayoutPresetId)
     }));
@@ -3930,9 +4119,11 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   };
 
   const resetTemplate = (presetKey) => {
+    forgetGeneratedImages(presetKey);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
+      generated: removeGeneratedRecords(current.generated, [presetKey]),
       templates: {
         ...defaultThumbnailStudio.templates,
         ...current.templates,
@@ -3941,6 +4132,14 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           iconX: current.templates?.[presetKey]?.iconX ?? defaultThumbnailStudio.templates[presetKey].iconX,
           iconY: current.templates?.[presetKey]?.iconY ?? defaultThumbnailStudio.templates[presetKey].iconY,
           iconSize: current.templates?.[presetKey]?.iconSize ?? defaultThumbnailStudio.templates[presetKey].iconSize,
+          guestNameVisible: current.templates?.[presetKey]?.guestNameVisible ?? defaultThumbnailStudio.templates[presetKey].guestNameVisible,
+          guestNameX: current.templates?.[presetKey]?.guestNameX ?? defaultThumbnailStudio.templates[presetKey].guestNameX,
+          guestNameY: current.templates?.[presetKey]?.guestNameY ?? defaultThumbnailStudio.templates[presetKey].guestNameY,
+          guestNameSize: current.templates?.[presetKey]?.guestNameSize ?? defaultThumbnailStudio.templates[presetKey].guestNameSize,
+          guestBadgeVisible: current.templates?.[presetKey]?.guestBadgeVisible ?? defaultThumbnailStudio.templates[presetKey].guestBadgeVisible,
+          guestBadgeX: current.templates?.[presetKey]?.guestBadgeX ?? defaultThumbnailStudio.templates[presetKey].guestBadgeX,
+          guestBadgeY: current.templates?.[presetKey]?.guestBadgeY ?? defaultThumbnailStudio.templates[presetKey].guestBadgeY,
+          guestBadgeSize: current.templates?.[presetKey]?.guestBadgeSize ?? defaultThumbnailStudio.templates[presetKey].guestBadgeSize,
           source: "fixed",
           dataUrl: ""
         }
@@ -3957,7 +4156,8 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         preset,
         template: studio.templates?.[preset.key],
         icon: studio.guestIcon,
-        date: thumbnailDate
+        date: thumbnailDate,
+        guestName
       });
       const fileName = `${guestName || "guest"}-${preset.fileName}`;
       const generatedAt = new Date().toISOString();
@@ -3982,7 +4182,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           [preset.key]: generatedRecord
         }
       }));
-      setPreviewImage({ src: dataUrl, label: preset.label, width: preset.width, height: preset.height, fileName });
+      setPreviewImage({ presetKey: preset.key, src: dataUrl, label: preset.label, width: preset.width, height: preset.height, fileName });
       setMessage(`${preset.label} を生成して保存しました。`);
     } catch {
       setMessage("ベース画像を読み込めませんでした。固定ベースに戻すか、画像を登録し直してください。");
@@ -4011,7 +4211,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       delete nextGenerated[preset.key];
       return { ...defaultThumbnailStudio, ...current, generated: nextGenerated };
     });
-    setPreviewImage((current) => (current?.label === preset.label ? null : current));
+    setPreviewImage((current) => (current?.presetKey === preset.key || current?.label === preset.label ? null : current));
     setMessage(`${preset.label} の生成画像を解除しました。`);
   };
 
@@ -4029,6 +4229,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     if (!dataUrl) return;
     setPreviewImage({
       src: dataUrl,
+      presetKey: preset.key,
       label: preset.label,
       width: preset.width,
       height: preset.height,
@@ -4080,11 +4281,12 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
 
       <div className="thumbnail-grid">
         {THUMBNAIL_PRESETS.map((preset) => {
-          const template = studio.templates?.[preset.key] ?? defaultThumbnailStudio.templates[preset.key];
+          const template = getNormalizedThumbnailTemplate(preset.key, studio.templates?.[preset.key]);
           const templateSource = getTemplateSource(template);
           const templateLabel = isCustomTemplate(template) ? template.name : `${preset.baseName}（固定）`;
           const savedGenerated = generated[preset.key];
           const savedGeneratedDataUrl = generatedImages[preset.key] || savedGenerated?.dataUrl;
+          const livePreviewDataUrl = livePreviewImages[preset.key];
           return (
             <section className="thumbnail-card" key={preset.key}>
               <div className="thumbnail-card-head">
@@ -4105,17 +4307,37 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
               ) : (
                 <div className="empty-preview">ベース画像を登録するとここに表示されます</div>
               )}
+              {livePreviewDataUrl && (
+                <div className="registered-template live-thumbnail-preview">
+                  <span>調整中プレビュー</span>
+                  <img className="thumbnail-preview" src={livePreviewDataUrl} alt={`${preset.label} live preview`} />
+                </div>
+              )}
               <div className="slider-grid">
-                <SliderField label="横位置" value={template.iconX} onChange={(value) => patchTemplate(preset.key, { iconX: value })} />
-                <SliderField label="縦位置" value={template.iconY} onChange={(value) => patchTemplate(preset.key, { iconY: value })} />
-                <SliderField label="サイズ" value={template.iconSize} onChange={(value) => patchTemplate(preset.key, { iconSize: value })} min="10" max="60" />
+                <SliderField label="アイコン 横位置" value={template.iconX} onChange={(value) => patchTemplate(preset.key, { iconX: value })} />
+                <SliderField label="アイコン 縦位置" value={template.iconY} onChange={(value) => patchTemplate(preset.key, { iconY: value })} />
+                <SliderField label="アイコン サイズ" value={template.iconSize} onChange={(value) => patchTemplate(preset.key, { iconSize: value })} min="10" max="60" />
+                <label className="inline-check thumbnail-check">
+                  <input type="checkbox" checked={template.guestNameVisible !== false} onChange={(event) => patchTemplate(preset.key, { guestNameVisible: event.target.checked })} />
+                  ゲスト名を載せる（{guestName || "名前未設定"}）
+                </label>
+                <SliderField label="ゲスト名 横位置" value={template.guestNameX} onChange={(value) => patchTemplate(preset.key, { guestNameX: value })} />
+                <SliderField label="ゲスト名 縦位置" value={template.guestNameY} onChange={(value) => patchTemplate(preset.key, { guestNameY: value })} />
+                <SliderField label="ゲスト名 サイズ" value={template.guestNameSize} onChange={(value) => patchTemplate(preset.key, { guestNameSize: value })} min="2" max="14" />
+                <label className="inline-check thumbnail-check">
+                  <input type="checkbox" checked={template.guestBadgeVisible !== false} onChange={(event) => patchTemplate(preset.key, { guestBadgeVisible: event.target.checked })} />
+                  GUEST INを載せる
+                </label>
+                <SliderField label="GUEST IN 横位置" value={template.guestBadgeX} onChange={(value) => patchTemplate(preset.key, { guestBadgeX: value })} />
+                <SliderField label="GUEST IN 縦位置" value={template.guestBadgeY} onChange={(value) => patchTemplate(preset.key, { guestBadgeY: value })} />
+                <SliderField label="GUEST IN サイズ" value={template.guestBadgeSize} onChange={(value) => patchTemplate(preset.key, { guestBadgeSize: value })} min="4" max="22" />
               </div>
               <div className="button-row">
                 <button className="primary" onClick={() => generateOne(preset)} disabled={generatingKey === preset.key}>
                   {generatingKey === preset.key ? "生成中" : "生成"}
                 </button>
                 <button className="secondary" onClick={() => downloadOne(preset)} disabled={!savedGeneratedDataUrl}>PNG保存</button>
-                <button className="secondary" onClick={() => openLargePreview(preset, savedGeneratedDataUrl, savedGenerated)} disabled={!savedGeneratedDataUrl}>
+                <button className="secondary" onClick={() => openLargePreview(preset, livePreviewDataUrl || savedGeneratedDataUrl, savedGenerated)} disabled={!livePreviewDataUrl && !savedGeneratedDataUrl}>
                   <ZoomIn size={16} />大きく確認
                 </button>
                 <button className="secondary" onClick={() => clearGeneratedOne(preset)} disabled={!savedGenerated}>

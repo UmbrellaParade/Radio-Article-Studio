@@ -1113,6 +1113,17 @@ textarea {
   font-weight: 900;
 }
 
+.live-thumbnail-preview {
+  padding: 8px;
+  border: 1px solid #14b6c8;
+  border-radius: 8px;
+  background: #f1fcff;
+}
+
+.thumbnail-check {
+  padding: 4px 0;
+}
+
 .empty-preview {
   display: grid;
   min-height: 110px;
