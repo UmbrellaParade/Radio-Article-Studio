@@ -81,6 +81,23 @@ const saveGeneratedThumbnailImage = async (id, dataUrl) => {
   });
 };
 
+const deleteGeneratedThumbnailImage = async (id) => {
+  if (!id) return;
+  const db = await openThumbnailImageDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(THUMBNAIL_IMAGE_STORE, "readwrite");
+    transaction.objectStore(THUMBNAIL_IMAGE_STORE).delete(id);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error);
+    };
+  });
+};
+
 const loadGeneratedThumbnailImage = async (id) => {
   if (!id) return "";
   const db = await openThumbnailImageDb();
@@ -491,6 +508,103 @@ const parseCsv = (text) => {
   );
 };
 
+const GOOGLE_SHEETS_JSONP_TIMEOUT_MS = 12000;
+
+const getUrlParam = (url, key, { preferHash = false } = {}) => {
+  const trimmed = String(url).trim();
+  try {
+    const parsed = new URL(trimmed);
+    const searchValue = parsed.searchParams.get(key) || "";
+    const hashValue = new URLSearchParams(parsed.hash.replace(/^#/, "")).get(key) || "";
+    return preferHash ? hashValue || searchValue : searchValue || hashValue;
+  } catch {
+    return trimmed.match(new RegExp(`[?&#]${key}=([^&#]+)`))?.[1] ?? "";
+  }
+};
+
+const makeGoogleSheetExportUrl = (spreadsheetId, gid = "0") =>
+  `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
+
+const makeGoogleSheetPublishedCsvUrl = (publishedId, gid = "0") =>
+  `https://docs.google.com/spreadsheets/d/e/${publishedId}/pub?gid=${gid}&single=true&output=csv`;
+
+const makeGoogleSheetJsonpUrl = (spreadsheetId, gid, callbackName) => {
+  const params = new URLSearchParams({
+    gid: gid || "0",
+    headers: "1",
+    tqx: `out:json;responseHandler:${callbackName}`
+  });
+  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/gviz/tq?${params.toString()}`;
+};
+
+const gvizCellToText = (cell) => {
+  if (!cell) return "";
+  const value = cell.f ?? cell.v;
+  if (value == null) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).trim();
+};
+
+const gvizResponseToRows = (response) => {
+  if (!response || response.status !== "ok") {
+    const detail = response?.errors?.map((error) => error.detailed_message || error.message || error.reason).filter(Boolean).join(" / ");
+    throw new Error(detail || "GVIZ_RESPONSE_ERROR");
+  }
+
+  const columns = response.table?.cols ?? [];
+  const headers = columns.map((column, index) => String(column?.label || "").trim() || `column_${index + 1}`);
+  return (response.table?.rows ?? [])
+    .map((row) =>
+      Object.fromEntries(headers.map((header, index) => [header, gvizCellToText(row.c?.[index])]))
+    )
+    .filter((row) => Object.values(row).some((value) => String(value).trim() !== ""));
+};
+
+const fetchGoogleSheetRowsWithJsonp = ({ spreadsheetId, gid }) => {
+  if (!spreadsheetId || typeof window === "undefined" || typeof document === "undefined") {
+    return Promise.reject(new Error("JSONP_UNAVAILABLE"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const callbackName = `__radioArticleStudioSheet_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    let settled = false;
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      delete window[callbackName];
+      script.remove();
+    };
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const timeoutId = window.setTimeout(() => fail(new Error("JSONP_TIMEOUT")), GOOGLE_SHEETS_JSONP_TIMEOUT_MS);
+
+    window[callbackName] = (response) => {
+      if (settled) return;
+      settled = true;
+      try {
+        const rows = gvizResponseToRows(response);
+        cleanup();
+        resolve(rows);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+
+    script.async = true;
+    script.src = makeGoogleSheetJsonpUrl(spreadsheetId, gid, callbackName);
+    script.onerror = () => fail(new Error("JSONP_LOAD_ERROR"));
+    document.head.appendChild(script);
+  });
+};
+
 const getCsvImportTarget = (url = "") => {
   const trimmed = String(url).trim();
   if (!trimmed) return { url: "", error: "URLが未入力です。" };
@@ -498,20 +612,21 @@ const getCsvImportTarget = (url = "") => {
     return { url: "", error: "GoogleフォームURLではなく、回答先のGoogleスプレッドシートURLを入れてください。" };
   }
 
-  const publishedSpreadsheetMatch = trimmed.match(/\/spreadsheets\/d\/e\/([^/]+)/);
+  const gid = getUrlParam(trimmed, "gid", { preferHash: true }) || "0";
+  const publishedSpreadsheetMatch = trimmed.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/e\/([^/?#]+)/);
   if (publishedSpreadsheetMatch) {
-    const gid = trimmed.match(/[?&#]gid=([^&#]+)/)?.[1] ?? "0";
     return {
-      url: `https://docs.google.com/spreadsheets/d/e/${publishedSpreadsheetMatch[1]}/pub?gid=${gid}&single=true&output=csv`,
+      url: makeGoogleSheetPublishedCsvUrl(publishedSpreadsheetMatch[1], gid),
       error: ""
     };
   }
 
-  const spreadsheetMatch = trimmed.match(/\/spreadsheets\/d\/([^/]+)/);
-  if (spreadsheetMatch) {
-    const gid = trimmed.match(/[?&#]gid=([^&#]+)/)?.[1] ?? "0";
+  const spreadsheetId = trimmed.match(/\/spreadsheets(?:\/u\/\d+)?\/d\/([^/?#]+)/)?.[1] || getUrlParam(trimmed, "key");
+  if (spreadsheetId) {
     return {
-      url: `https://docs.google.com/spreadsheets/d/${spreadsheetMatch[1]}/export?format=csv&gid=${gid}`,
+      url: makeGoogleSheetExportUrl(spreadsheetId, gid),
+      spreadsheetId,
+      gid,
       error: ""
     };
   }
@@ -522,6 +637,10 @@ const getCsvImportTarget = (url = "") => {
 const toGoogleCsvUrl = (url) => getCsvImportTarget(url).url;
 
 const looksLikeHtml = (text = "") => /^\s*<!doctype html|^\s*<html[\s>]/i.test(text);
+const makeImportFailureMessage = (label, error) =>
+  error?.message === "EMPTY_CSV"
+    ? `${label}: CSVが空でした。フォームに回答があるか、入力URLのgidが「フォームの回答」タブか確認してください。`
+    : `${label}: 読み込みに失敗しました。回答先スプレッドシートを「リンクを知っている全員が閲覧可」にするか、CSVファイルで取り込んでください。`;
 
 const makeEmbedUrl = (url = "") => {
   const playableEmbedUrl = makePlayableEmbedUrl(url);
@@ -1390,6 +1509,7 @@ function App() {
   const [transferCopied, setTransferCopied] = useState(false);
   const [sharedPayload, setSharedPayload] = useState(readSharedFormPayload);
   const [restorePayload, setRestorePayload] = useState(readRestorePayload);
+  const [importingSource, setImportingSource] = useState("");
 
   useEffect(() => {
     if (sharedPayload || restorePayload) return;
@@ -1667,25 +1787,45 @@ function App() {
     importCsvRows(rows, kind, label);
   };
 
+  const fetchCsvRows = async (url) => {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    if (looksLikeHtml(text)) throw new Error("HTML_RESPONSE");
+    if (!text.trim()) throw new Error("EMPTY_CSV");
+    return parseCsv(text);
+  };
+
+  const fetchRowsFromImportTarget = async (target) => {
+    try {
+      return await fetchCsvRows(target.url);
+    } catch (csvError) {
+      if (csvError?.message === "EMPTY_CSV") throw csvError;
+      if (!target.spreadsheetId) throw csvError;
+      console.debug("Google Sheets CSV import failed; trying JSONP fallback.", csvError);
+      return fetchGoogleSheetRowsWithJsonp(target);
+    }
+  };
+
   const importCsvUrl = async (kind, url, label) => {
     const target = getCsvImportTarget(url);
-    const csvUrl = target.url;
     if (target.error) {
       appendImportLog(`${label}: ${target.error}`);
       return;
     }
-    if (!csvUrl) {
+    if (!target.url) {
       appendImportLog(`${label}: URLが未入力です。`);
       return;
     }
+    setImportingSource(kind);
+    appendImportLog(`${label}: 読み込みを開始しました。`);
     try {
-      const response = await fetch(csvUrl, { cache: "no-store" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const text = await response.text();
-      if (looksLikeHtml(text)) throw new Error("HTML_RESPONSE");
-      importCsvText(text, kind, label);
+      const rows = await fetchRowsFromImportTarget(target);
+      importCsvRows(rows, kind, label);
     } catch (error) {
-      appendImportLog(`${label}: 読み込みに失敗しました。回答先スプレッドシートの共有設定、または公開CSV URLか確認してください。`);
+      appendImportLog(makeImportFailureMessage(label, error));
+    } finally {
+      setImportingSource((current) => (current === kind ? "" : current));
     }
   };
 
@@ -1722,23 +1862,39 @@ function App() {
 
   const importPeriodCsvUrl = async (period) => {
     const target = getCsvImportTarget(period.csvUrl);
-    const csvUrl = target.url;
+    const sourceKey = `period:${period.id}`;
     if (target.error) {
       appendImportLog(`応募期間「${period.title || period.id}」: ${target.error}`);
       return;
     }
-    if (!csvUrl) {
+    if (!target.url) {
       appendImportLog(`応募期間「${period.title || period.id}」: URLが未入力です。`);
       return;
     }
+    setImportingSource(sourceKey);
+    appendImportLog(`応募期間「${period.title || period.id}」: 読み込みを開始しました。`);
     try {
-      const response = await fetch(csvUrl, { cache: "no-store" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const text = await response.text();
-      if (looksLikeHtml(text)) throw new Error("HTML_RESPONSE");
-      importPeriodCsvText(period, text, `応募期間「${period.title || period.id}」`);
-    } catch {
-      appendImportLog(`応募期間「${period.title || period.id}」: 読み込みに失敗しました。回答先スプレッドシートの共有設定、または公開CSV URLか確認してください。`);
+      const rows = await fetchRowsFromImportTarget(target);
+      if (!rows.length) {
+        appendImportLog(`応募期間「${period.title || period.id}」: CSVの回答行が見つかりませんでした。1行目に見出し、2行目以降に回答があるか確認してください。`);
+        return;
+      }
+
+      setData((current) => {
+        const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
+        const { data: next } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
+        const nextWithPeriod = {
+          ...next,
+          applicationPeriods: next.applicationPeriods.map((item) =>
+            item.id === period.id ? { ...item, status: "取り込み済み" } : item
+          )
+        };
+        return appendImportLogToData(nextWithPeriod, `応募期間「${period.title || period.id}」: ${rows.length}行を読み込みました。`);
+      });
+    } catch (error) {
+      appendImportLog(makeImportFailureMessage(`応募期間「${period.title || period.id}」`, error));
+    } finally {
+      setImportingSource((current) => (current === sourceKey ? "" : current));
     }
   };
 
@@ -2073,6 +2229,7 @@ ${assetRows || "-"}
               importCsvUrl={importCsvUrl}
               importCsvFile={importCsvFile}
               applyBellboTrackUrl={applyBellboTrackUrl}
+              importingSource={importingSource}
             />
           )}
           {active === "episodes" && (
@@ -2097,6 +2254,7 @@ ${assetRows || "-"}
               addPeriod={addApplicationPeriod}
               importPeriodCsvUrl={importPeriodCsvUrl}
               importPeriodCsvFile={importPeriodCsvFile}
+              importingSource={importingSource}
             />
           )}
           {active === "forms" && (
@@ -2860,7 +3018,7 @@ function StatusLine({ done, label }) {
   );
 }
 
-function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, importCsvFile, applyBellboTrackUrl }) {
+function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, importCsvFile, applyBellboTrackUrl, importingSource }) {
   return (
     <div className="view-stack">
       <SectionTitle
@@ -2885,6 +3043,7 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
           onChange={(value) => updateImports({ guestCsvUrl: value })}
           onImportUrl={() => importCsvUrl("guest", imports.guestCsvUrl, "ゲストアンケート")}
           onImportFile={(event) => importCsvFile(event, "guest", "ゲストアンケート")}
+          loading={importingSource === "guest"}
         />
         <SourceImportCard
           title="リスナー応募曲"
@@ -2893,6 +3052,7 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
           onChange={(value) => updateImports({ listenerCsvUrl: value })}
           onImportUrl={() => importCsvUrl("listener", imports.listenerCsvUrl, "リスナー応募曲")}
           onImportFile={(event) => importCsvFile(event, "listener", "リスナー応募曲")}
+          loading={importingSource === "listener"}
         />
         <SourceImportCard
           title="パーソナリティ曲シート"
@@ -2901,6 +3061,7 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
           onChange={(value) => updateImports({ personalityCsvUrl: value })}
           onImportUrl={() => importCsvUrl("personality", imports.personalityCsvUrl, "パーソナリティ曲")}
           onImportFile={(event) => importCsvFile(event, "personality", "パーソナリティ曲")}
+          loading={importingSource === "personality"}
         />
       </div>
 
@@ -2936,14 +3097,20 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
   );
 }
 
-function SourceImportCard({ title, description, value, onChange, onImportUrl, onImportFile }) {
+function SourceImportCard({ title, description, value, onChange, onImportUrl, onImportFile, loading = false }) {
   return (
     <article className="record import-card">
       <h2>{title}</h2>
       <p className="muted">{description}</p>
-      <Field label="Google Sheets / CSV URL" value={value} onChange={onChange} />
+      <Field
+        label="Google Sheets / CSV URL"
+        value={value}
+        onChange={onChange}
+        placeholder="https://docs.google.com/spreadsheets/d/..."
+      />
+      <p className="hint-text">GoogleフォームURLではなく、回答先スプレッドシートURLを入れてください。共有は「リンクを知っている全員が閲覧者」にします。</p>
       <div className="button-row">
-        <button className="primary" onClick={onImportUrl}><Upload size={16} />URLから取り込み</button>
+        <button className="primary" onClick={onImportUrl} disabled={loading}><Upload size={16} />{loading ? "取り込み中" : "URLから取り込み"}</button>
         <label className="secondary file-button">
           <Upload size={16} />CSVファイル
           <input type="file" accept=".csv,text/csv" onChange={onImportFile} />
@@ -3046,7 +3213,8 @@ function ApplicationPeriods({
   removeItem,
   addPeriod,
   importPeriodCsvUrl,
-  importPeriodCsvFile
+  importPeriodCsvFile,
+  importingSource
 }) {
   const [copiedPeriodId, setCopiedPeriodId] = useState("");
   const episodeLabels = Object.fromEntries(episodes.map((episode) => [episode.id, `${episode.date} ${episode.title}`]));
@@ -3141,7 +3309,13 @@ function ApplicationPeriods({
                 <Field label="受付終了" type="date" value={period.endDate} onChange={(value) => patchItem("applicationPeriods", period.id, { endDate: value })} />
                 <SelectField label="状態" value={period.status} options={["準備中", "受付中", "受付終了", "取り込み済み", "保留"]} onChange={(value) => patchItem("applicationPeriods", period.id, { status: value })} />
                 <Field label="短縮ID" value={period.shareSlug} onChange={(value) => patchItem("applicationPeriods", period.id, { shareSlug: value })} placeholder="例: yui-20260723" />
-                <Field label="Google Sheets / CSV URL" value={period.csvUrl} onChange={(value) => patchItem("applicationPeriods", period.id, { csvUrl: value })} />
+                <Field
+                  label="Google Sheets / CSV URL"
+                  value={period.csvUrl}
+                  onChange={(value) => patchItem("applicationPeriods", period.id, { csvUrl: value })}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                />
+                <p className="hint-text wide">GoogleフォームURLではなく、回答先スプレッドシートURLを入れてください。共有は「リンクを知っている全員が閲覧者」にします。</p>
                 <TextArea label="メモ" value={period.notes} onChange={(value) => patchItem("applicationPeriods", period.id, { notes: value })} />
               </div>
               <div className="share-box short-share">
@@ -3178,8 +3352,8 @@ function ApplicationPeriods({
                   <button className="secondary" onClick={() => copyShortPeriodShareUrl(period)} disabled={!shareUrl}>
                     <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:short` ? "コピー済み" : "管理端末用URLをコピー"}
                   </button>
-                  <button className="primary" onClick={() => importPeriodCsvUrl(period)}>
-                    <Upload size={16} />この期間のCSVを取り込み
+                  <button className="primary" onClick={() => importPeriodCsvUrl(period)} disabled={importingSource === `period:${period.id}`}>
+                    <Upload size={16} />{importingSource === `period:${period.id}` ? "取り込み中" : "この期間のCSVを取り込み"}
                   </button>
                   <label className="secondary file-button">
                     <Upload size={16} />CSVファイル
@@ -3612,6 +3786,11 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     event.target.value = "";
   };
 
+  const clearGuestIcon = () => {
+    updateStudio((current) => ({ ...defaultThumbnailStudio, ...current, guestIcon: { ...defaultThumbnailStudio.guestIcon } }));
+    setMessage("ゲストアイコンを解除しました。");
+  };
+
   const patchTemplate = (presetKey, patch) => {
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
@@ -3754,6 +3933,30 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     }
   };
 
+  const clearGeneratedOne = async (preset) => {
+    const saved = generated[preset.key];
+    if (saved?.imageKey) {
+      try {
+        await deleteGeneratedThumbnailImage(saved.imageKey);
+      } catch {
+        // The UI state below still removes the generated image reference.
+      }
+    }
+
+    setGeneratedImages((current) => {
+      const next = { ...current };
+      delete next[preset.key];
+      return next;
+    });
+    updateStudio((current) => {
+      const nextGenerated = { ...(current.generated ?? {}) };
+      delete nextGenerated[preset.key];
+      return { ...defaultThumbnailStudio, ...current, generated: nextGenerated };
+    });
+    setPreviewImage((current) => (current?.label === preset.label ? null : current));
+    setMessage(`${preset.label} の生成画像を解除しました。`);
+  };
+
   const downloadOne = (preset) => {
     const saved = generated[preset.key];
     const dataUrl = generatedImages[preset.key] || saved?.dataUrl;
@@ -3812,6 +4015,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         <div className="registered-image-row">
           <img src={studio.guestIcon.dataUrl} alt="登録済みゲストアイコン" />
           <p className="muted">ゲストアイコン: {studio.guestIcon.name}</p>
+          <button className="secondary" onClick={clearGuestIcon}><X size={16} />アイコン解除</button>
         </div>
       )}
       {message && <p className="hint-text">{message}</p>}
@@ -3855,6 +4059,9 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
                 <button className="secondary" onClick={() => downloadOne(preset)} disabled={!savedGeneratedDataUrl}>PNG保存</button>
                 <button className="secondary" onClick={() => openLargePreview(preset, savedGeneratedDataUrl, savedGenerated)} disabled={!savedGeneratedDataUrl}>
                   <ZoomIn size={16} />大きく確認
+                </button>
+                <button className="secondary" onClick={() => clearGeneratedOne(preset)} disabled={!savedGenerated}>
+                  <X size={16} />生成画像解除
                 </button>
               </div>
               {savedGeneratedDataUrl && (
