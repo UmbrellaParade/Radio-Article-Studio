@@ -2508,17 +2508,17 @@ function ApplicationPeriods({
     const form = forms.find((item) => item.id === period.formId);
     if (!form) return;
     const episode = episodes.find((item) => item.id === period.episodeId);
-    await navigator.clipboard.writeText(makeShareUrl(form, settings, { period, episode }));
+    await navigator.clipboard.writeText(makePortableShareUrl(form, settings, { period, episode }));
     setCopiedPeriodId(period.id);
     window.setTimeout(() => setCopiedPeriodId(""), 1800);
   };
 
-  const copyPortablePeriodShareUrl = async (period) => {
+  const copyShortPeriodShareUrl = async (period) => {
     const form = forms.find((item) => item.id === period.formId);
     if (!form) return;
     const episode = episodes.find((item) => item.id === period.episodeId);
-    await navigator.clipboard.writeText(makePortableShareUrl(form, settings, { period, episode }));
-    setCopiedPeriodId(`${period.id}:portable`);
+    await navigator.clipboard.writeText(makeShareUrl(form, settings, { period, episode }));
+    setCopiedPeriodId(`${period.id}:short`);
     window.setTimeout(() => setCopiedPeriodId(""), 1800);
   };
 
@@ -2533,7 +2533,7 @@ function ApplicationPeriods({
         {periods.map((period) => {
           const form = forms.find((item) => item.id === period.formId);
           const episode = episodes.find((item) => item.id === period.episodeId);
-          const shareUrl = form ? makeShareUrl(form, settings, { period, episode }) : "";
+          const shareUrl = form ? makePortableShareUrl(form, settings, { period, episode }) : "";
           return (
             <article className="record" key={period.id}>
               <div className="record-head">
@@ -2558,16 +2558,16 @@ function ApplicationPeriods({
               </div>
               <div className="share-box">
                 <div>
-                  <strong><Share2 size={16} />応募フォームURL</strong>
-                  <span>通常はこの短いURLを使います。相手の端末にまだない作りたてのカスタムフォームは、フォーム内容込みの予備URLが確実です。</span>
+                  <strong><Share2 size={16} />外部共有用 応募フォームURL</strong>
+                  <span>外部の人に渡すURLです。フォーム内容をURLに含めるので、相手の端末にこのツールのデータがなくても開けます。</span>
                 </div>
                 <input readOnly value={shareUrl} onFocus={(event) => event.target.select()} />
                 <div className="inline-actions">
                   <button className="secondary" onClick={() => copyPeriodShareUrl(period)} disabled={!shareUrl}>
-                    <ClipboardCopy size={16} />{copiedPeriodId === period.id ? "コピー済み" : "リンクをコピー"}
+                    <ClipboardCopy size={16} />{copiedPeriodId === period.id ? "コピー済み" : "外部URLをコピー"}
                   </button>
-                  <button className="secondary" onClick={() => copyPortablePeriodShareUrl(period)} disabled={!shareUrl}>
-                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:portable` ? "コピー済み" : "予備URLをコピー"}
+                  <button className="secondary" onClick={() => copyShortPeriodShareUrl(period)} disabled={!shareUrl}>
+                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:short` ? "コピー済み" : "短い管理用URLをコピー"}
                   </button>
                   <button className="primary" onClick={() => importPeriodCsvUrl(period)}>
                     <Upload size={16} />この期間のCSVを取り込み
@@ -2590,20 +2590,20 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
   const [copiedFormId, setCopiedFormId] = useState("");
 
   const copyShareUrl = async (form) => {
-    await navigator.clipboard.writeText(makeShareUrl(form, settings));
+    await navigator.clipboard.writeText(makePortableShareUrl(form, settings));
     setCopiedFormId(form.id);
     window.setTimeout(() => setCopiedFormId(""), 1800);
   };
 
-  const copyPortableShareUrl = async (form) => {
-    await navigator.clipboard.writeText(makePortableShareUrl(form, settings));
-    setCopiedFormId(`${form.id}:portable`);
+  const copyShortShareUrl = async (form) => {
+    await navigator.clipboard.writeText(makeShareUrl(form, settings));
+    setCopiedFormId(`${form.id}:short`);
     window.setTimeout(() => setCopiedFormId(""), 1800);
   };
 
   return (
     <div className="view-stack">
-      <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、短縮共有フォームURLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
+      <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、外部共有URLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
       <div className="records">
         {forms.map((form) => (
           <article className="record" key={form.id}>
@@ -2617,16 +2617,16 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
             </div>
             <div className="share-box">
               <div>
-                <strong><Share2 size={16} />共有フォーム</strong>
-                <span>通常はこの短いURLを使います。期間を指定する場合は「応募期間管理」のURLを使います。相手の端末にまだない作りたてのカスタムフォームは予備URLが確実です。</span>
+                <strong><Share2 size={16} />外部共有用フォームURL</strong>
+                <span>外部の人に渡すURLです。フォーム内容をURLに含めるので、相手の端末にこのツールのデータがなくても開けます。期間を指定する場合は「応募期間管理」のURLを使います。</span>
               </div>
-              <input readOnly value={makeShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
+              <input readOnly value={makePortableShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
               <div className="inline-actions">
                 <button className="secondary" onClick={() => copyShareUrl(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "リンクをコピー"}
+                  <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "外部URLをコピー"}
                 </button>
-                <button className="secondary" onClick={() => copyPortableShareUrl(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:portable` ? "コピー済み" : "予備URLをコピー"}
+                <button className="secondary" onClick={() => copyShortShareUrl(form)}>
+                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:short` ? "コピー済み" : "短い管理用URLをコピー"}
                 </button>
               </div>
             </div>
