@@ -49,6 +49,9 @@ const QUESTION_KIND_OPTIONS = [
   ["file", "ファイル単体"]
 ];
 
+const TRACK_URL_ERROR_MESSAGE = "楽曲URLはYouTubeまたはSunoのURLを入力してください。";
+const TRACK_URL_PATTERN = "https?://([A-Za-z0-9-]+\\.)?(youtube\\.com|suno\\.com)(/.*)?|https?://youtu\\.be(/.*)?";
+
 const detectUrlType = (url = "") => {
   const normalized = url.toLowerCase();
   if (normalized.includes("suno.com")) return "Suno";
@@ -90,6 +93,17 @@ const formatXHandle = (value = "") => {
 };
 
 const isWebUrl = (url = "") => /^https?:\/\//i.test(String(url).trim());
+
+const isSupportedTrackUrl = (url = "") => {
+  const trimmed = String(url).trim();
+  if (!trimmed) return true;
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase().replace(/^www\./, "");
+    return host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com") || host === "suno.com" || host.endsWith(".suno.com");
+  } catch {
+    return false;
+  }
+};
 
 const makePlayableEmbedUrl = (url = "") => {
   const trimmed = String(url).trim();
@@ -1424,6 +1438,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState("");
   const [copied, setCopied] = useState(false);
+  const [formError, setFormError] = useState("");
 
   if (payload?.error || !form) {
     return (
@@ -1453,6 +1468,14 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         ...patch
       }
     }));
+  };
+
+  const updateTrackUrlAnswer = (questionId, event) => {
+    const url = event.target.value;
+    const isSupported = isSupportedTrackUrl(url);
+    event.target.setCustomValidity(isSupported ? "" : TRACK_URL_ERROR_MESSAGE);
+    setFormError("");
+    updateTrackAnswer(questionId, { url });
   };
 
   const updateXContactAnswer = (questionId, patch) => {
@@ -1580,6 +1603,15 @@ function PublicSubmissionForm({ logoSrc, payload }) {
 
   const submit = (event) => {
     event.preventDefault();
+    const invalidTrackUrlQuestion = form.questions.find(
+      (question) => question.kind === "track" && answers[question.id]?.url && !isSupportedTrackUrl(answers[question.id].url)
+    );
+    if (invalidTrackUrlQuestion) {
+      setFormError(`${invalidTrackUrlQuestion.label}: ${TRACK_URL_ERROR_MESSAGE}`);
+      event.currentTarget.reportValidity();
+      return;
+    }
+    setFormError("");
     setResult(JSON.stringify(buildResponsePayload(), null, 2));
   };
 
@@ -1614,6 +1646,8 @@ function PublicSubmissionForm({ logoSrc, payload }) {
           <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
         </div>
 
+        {formError && <p className="form-error">{formError}</p>}
+
         <form className="public-form" onSubmit={submit}>
           {form.questions.map((question) => (
             <div className="field wide" key={question.id}>
@@ -1644,9 +1678,15 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                     <input
                       type="url"
                       required={Boolean(question.required)}
+                      pattern={TRACK_URL_PATTERN}
+                      title={TRACK_URL_ERROR_MESSAGE}
+                      placeholder="https://youtu.be/... または https://suno.com/..."
                       value={answers[question.id]?.url ?? ""}
-                      onChange={(event) => updateTrackAnswer(question.id, { url: event.target.value })}
+                      onChange={(event) => updateTrackUrlAnswer(question.id, event)}
+                      onInvalid={(event) => event.target.setCustomValidity(event.target.value ? TRACK_URL_ERROR_MESSAGE : "")}
+                      onInput={(event) => event.target.setCustomValidity(isSupportedTrackUrl(event.target.value) ? "" : TRACK_URL_ERROR_MESSAGE)}
                     />
+                    <small>YouTubeまたはSunoの共有URLだけ受け付けます。</small>
                   </label>
                   <label>
                     <span>楽曲をWAVかMP3でアップロード</span>
@@ -1764,11 +1804,20 @@ function PublicSubmissionForm({ logoSrc, payload }) {
 function TrackPreview({ track }) {
   const audio = track?.audio;
   const url = String(track?.url ?? "").trim();
+  const isSupportedUrl = isSupportedTrackUrl(url);
   const playableEmbedUrl = makePlayableEmbedUrl(url);
-  const directAudioUrl = isWebUrl(url) && detectUrlType(url) === "Audio" ? url : "";
-  const showExternalLink = isWebUrl(url);
+  const showExternalLink = isWebUrl(url) && isSupportedUrl;
 
-  if (!audio?.dataUrl && !playableEmbedUrl && !directAudioUrl && !showExternalLink) {
+  if (url && !isSupportedUrl) {
+    return (
+      <div className="track-preview invalid">
+        <strong><Music size={16} />プレビュー確認</strong>
+        <span>{TRACK_URL_ERROR_MESSAGE}</span>
+      </div>
+    );
+  }
+
+  if (!audio?.dataUrl && !playableEmbedUrl && !showExternalLink) {
     return (
       <div className="track-preview empty">
         <strong><Music size={16} />プレビュー確認</strong>
@@ -1792,13 +1841,6 @@ function TrackPreview({ track }) {
         <div className="preview-player">
           <span>アップロード音源</span>
           <audio controls preload="metadata" src={audio.dataUrl} />
-        </div>
-      )}
-
-      {directAudioUrl && (
-        <div className="preview-player">
-          <span>URL音源</span>
-          <audio controls preload="metadata" src={directAudioUrl} />
         </div>
       )}
 

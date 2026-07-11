@@ -57,7 +57,7 @@ Implemented:
 12. Codex request pack generation.
 13. JSON export/import backup.
 
-The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Shared forms can use a song field that groups title, URL, WAV/MP3 upload, and a preview player in one block. They can also use an internal X contact block that normalizes handles into profile URLs and links respondents to the Bellbo/Kaname operating accounts before DM contact. The operator can import the response JSON, preview/download attached audio, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
+The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Shared forms can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. They can also use an internal X contact block that normalizes handles into profile URLs and links respondents to the Bellbo/Kaname operating accounts before DM contact. The operator can import the response JSON, preview/download attached audio, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
 
 ## Development
 

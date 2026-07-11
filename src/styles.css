@@ -503,6 +503,22 @@ textarea {
   color: #665d70;
 }
 
+.track-preview.invalid,
+.form-error {
+  border-color: #df6a71;
+  background: #fff0f0;
+  color: #9d2731;
+}
+
+.form-error {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #df6a71;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .track-preview-head {
   display: flex;
   flex-wrap: wrap;
@@ -525,6 +541,12 @@ textarea {
   color: #665d70;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.track-preview.invalid span {
+  color: #9d2731;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .preview-player {
