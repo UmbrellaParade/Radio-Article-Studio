@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import LZString from "lz-string";
 import {
@@ -39,6 +39,7 @@ const DEFAULT_RESPONSE_ENDPOINT_URL = "";
 const DEFAULT_RESPONSE_DRIVE_FOLDER_URL = "";
 const DEFAULT_AUDIO_SAVE_MEMO = "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー";
 const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
+const GUEST_BADGE_ASSET_URL = publicAsset("thumbnail-overlays/guest-in-badge.png");
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
@@ -193,6 +194,17 @@ const makeGuestIconFromAttachment = (attachment, fallbackName = "guest-icon") =>
         updatedAt: new Date().toISOString()
       }
     : null;
+
+const mergeGuestIcons = (currentStudio = defaultThumbnailStudio, incomingIcon) => {
+  const existingIcons = normalizeGuestIconList(currentStudio.guestIcon, currentStudio.guestIcons);
+  const nextIcons = normalizeGuestIconList(incomingIcon, incomingIcon ? [...existingIcons, incomingIcon] : existingIcons);
+  return {
+    ...defaultThumbnailStudio,
+    ...currentStudio,
+    guestIcon: nextIcons[0] ?? { ...defaultThumbnailStudio.guestIcon },
+    guestIcons: nextIcons
+  };
+};
 
 const normalizeXHandle = (value = "") =>
   String(value)
@@ -380,9 +392,27 @@ const THUMBNAIL_ICON_LAYOUT_PRESETS = [
     id: "single",
     name: "1人用",
     templates: {
-      article16x9: { iconX: 50, iconY: 77, iconSize: 28, guestNameVisible: true, guestNameX: 50, guestNameY: 91, guestNameSize: 6, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 77, guestBadgeSize: 12 },
-      standfm1x1: { iconX: 50, iconY: 82, iconSize: 23, guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 82, guestBadgeSize: 10 },
-      stream9x16: { iconX: 50, iconY: 78, iconSize: 30, guestNameVisible: true, guestNameX: 50, guestNameY: 88, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 39, guestBadgeY: 78, guestBadgeSize: 9 }
+      article16x9: { iconX: 50, iconY: 77, iconSize: 28, iconSlots: [{ x: 50, y: 77, size: 28 }], guestNameVisible: true, guestNameX: 50, guestNameY: 91, guestNameSize: 6, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 77, guestBadgeSize: 12 },
+      standfm1x1: { iconX: 50, iconY: 82, iconSize: 23, iconSlots: [{ x: 50, y: 82, size: 23 }], guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 82, guestBadgeSize: 10 },
+      stream9x16: { iconX: 50, iconY: 78, iconSize: 30, iconSlots: [{ x: 50, y: 78, size: 30 }], guestNameVisible: true, guestNameX: 50, guestNameY: 88, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 39, guestBadgeY: 78, guestBadgeSize: 9 }
+    }
+  },
+  {
+    id: "dual",
+    name: "2人用",
+    templates: {
+      article16x9: { iconX: 43, iconY: 77, iconSize: 23, iconSlots: [{ x: 43, y: 77, size: 23 }, { x: 57, y: 77, size: 23 }], guestNameVisible: true, guestNameX: 50, guestNameY: 91, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 35, guestBadgeY: 78, guestBadgeSize: 10 },
+      standfm1x1: { iconX: 42, iconY: 82, iconSize: 20, iconSlots: [{ x: 42, y: 82, size: 20 }, { x: 58, y: 82, size: 20 }], guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 34, guestBadgeY: 82, guestBadgeSize: 9 },
+      stream9x16: { iconX: 42, iconY: 78, iconSize: 24, iconSlots: [{ x: 42, y: 78, size: 24 }, { x: 58, y: 78, size: 24 }], guestNameVisible: true, guestNameX: 50, guestNameY: 88, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 34, guestBadgeY: 79, guestBadgeSize: 8 }
+    }
+  },
+  {
+    id: "triple",
+    name: "3人用",
+    templates: {
+      article16x9: { iconX: 38, iconY: 78, iconSize: 20, iconSlots: [{ x: 38, y: 78, size: 20 }, { x: 50, y: 75, size: 20 }, { x: 62, y: 78, size: 20 }], guestNameVisible: true, guestNameX: 50, guestNameY: 91, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 31, guestBadgeY: 79, guestBadgeSize: 9 },
+      standfm1x1: { iconX: 38, iconY: 82, iconSize: 17, iconSlots: [{ x: 38, y: 82, size: 17 }, { x: 50, y: 79, size: 17 }, { x: 62, y: 82, size: 17 }], guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 4, guestBadgeVisible: true, guestBadgeX: 31, guestBadgeY: 83, guestBadgeSize: 8 },
+      stream9x16: { iconX: 38, iconY: 78, iconSize: 20, iconSlots: [{ x: 38, y: 78, size: 20 }, { x: 50, y: 75, size: 20 }, { x: 62, y: 78, size: 20 }], guestNameVisible: true, guestNameX: 50, guestNameY: 88, guestNameSize: 4, guestBadgeVisible: true, guestBadgeX: 31, guestBadgeY: 79, guestBadgeSize: 7 }
     }
   }
 ];
@@ -409,9 +439,11 @@ const applyIconLayoutPresetToTemplates = (templates = defaultThumbnailStudio.tem
 const defaultThumbnailStudio = {
   date: "",
   guestIcon: { name: "", dataUrl: "" },
+  guestIcons: [],
   activeLayoutPreset: "single",
   customLayoutPresets: [],
   generated: {},
+  autoGenerateRequestedAt: "",
   templates: Object.fromEntries(
     THUMBNAIL_PRESETS.map((preset) => [
       preset.key,
@@ -424,6 +456,57 @@ const defaultThumbnailStudio = {
       }
     ])
   )
+};
+
+const normalizeGuestIconList = (guestIcon = defaultThumbnailStudio.guestIcon, guestIcons = []) => {
+  const sourceIcons = Array.isArray(guestIcons) && guestIcons.length ? guestIcons : guestIcon?.dataUrl ? [guestIcon] : [];
+  const seen = new Set();
+  return sourceIcons
+    .filter((icon) => icon?.dataUrl)
+    .map((icon, index) => ({
+      id: icon.id || `guest_icon_${index}`,
+      name: icon.name || `guest-icon-${index + 1}`,
+      dataUrl: icon.dataUrl
+    }))
+    .filter((icon) => {
+      const key = `${icon.name}:${icon.dataUrl.slice(0, 80)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+
+const getThumbnailIconSlots = (template = {}) => {
+  const slots = Array.isArray(template.iconSlots) ? template.iconSlots : [];
+  if (slots.length) {
+    return slots.map((slot, index) => ({
+      x: Number(slot.x ?? (index === 0 ? template.iconX : 50)),
+      y: Number(slot.y ?? (index === 0 ? template.iconY : 50)),
+      size: Number(slot.size ?? (index === 0 ? template.iconSize : 28))
+    }));
+  }
+  return [
+    {
+      x: Number(template.iconX ?? 50),
+      y: Number(template.iconY ?? 50),
+      size: Number(template.iconSize ?? 28)
+    }
+  ];
+};
+
+const countGuestsFromText = (guestName = "") => {
+  const names = String(guestName || "")
+    .replace(/さん/g, "")
+    .split(/[,、，/&＆＋+・]|と| and /i)
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return names.length || 1;
+};
+
+const getLayoutPresetForGuestCount = (count = 1) => {
+  if (count >= 3) return THUMBNAIL_ICON_LAYOUT_PRESETS.find((preset) => preset.id === "triple") ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0];
+  if (count === 2) return THUMBNAIL_ICON_LAYOUT_PRESETS.find((preset) => preset.id === "dual") ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0];
+  return THUMBNAIL_ICON_LAYOUT_PRESETS[0];
 };
 
 const defaultImports = {
@@ -858,6 +941,7 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
   let nextThumbnailStudio = current.thumbnailStudio ?? defaultThumbnailStudio;
   let responseCount = 0;
   let trackCount = 0;
+  const importedGuestNames = [];
 
   rows.forEach((row) => {
     if (kind === "guest") {
@@ -865,12 +949,9 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
       if (response.respondent || response.publicInfo || response.articleUse || response.constraints || response.attachments?.length) {
         const guestIcon = makeGuestIconFromAttachment(findGuestIconAttachment(response.attachments), `${response.respondent || "guest"}-icon`);
         if (guestIcon) {
-          nextThumbnailStudio = {
-            ...defaultThumbnailStudio,
-            ...nextThumbnailStudio,
-            guestIcon
-          };
+          nextThumbnailStudio = mergeGuestIcons(nextThumbnailStudio, guestIcon);
         }
+        if (response.respondent) importedGuestNames.push(response.respondent);
         nextResponses = [
           response,
           ...nextResponses.filter(
@@ -905,6 +986,19 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
       }
     }
   });
+
+  if (kind === "guest" && responseCount > 0) {
+    const guestCount = Math.max(importedGuestNames.length, countGuestsFromText(selectedEpisode.guestName), normalizeGuestIconList(nextThumbnailStudio.guestIcon, nextThumbnailStudio.guestIcons).length, 1);
+    const preset = getLayoutPresetForGuestCount(guestCount);
+    nextThumbnailStudio = {
+      ...defaultThumbnailStudio,
+      ...nextThumbnailStudio,
+      activeLayoutPreset: preset.id,
+      templates: applyIconLayoutPresetToTemplates(nextThumbnailStudio.templates, preset),
+      generated: {},
+      autoGenerateRequestedAt: new Date().toISOString()
+    };
+  }
 
   return {
     data: { ...current, responses: nextResponses, tracks: nextTracks, thumbnailStudio: nextThumbnailStudio },
@@ -1536,9 +1630,11 @@ function migrateData(input) {
         ...defaultThumbnailStudio.guestIcon,
         ...(input.thumbnailStudio?.guestIcon ?? {})
       },
+      guestIcons: normalizeGuestIconList(input.thumbnailStudio?.guestIcon, input.thumbnailStudio?.guestIcons),
       activeLayoutPreset: input.thumbnailStudio?.activeLayoutPreset ?? defaultThumbnailStudio.activeLayoutPreset,
       customLayoutPresets: input.thumbnailStudio?.customLayoutPresets ?? [],
-      generated: input.thumbnailStudio?.generated ?? {}
+      generated: input.thumbnailStudio?.generated ?? {},
+      autoGenerateRequestedAt: input.thumbnailStudio?.autoGenerateRequestedAt ?? ""
     },
     episodes,
     forms,
@@ -1586,10 +1682,14 @@ function App() {
   const [active, setActive] = useState("dashboard");
   const [selectedEpisodeId, setSelectedEpisodeId] = useState(data.episodes[0]?.id ?? "");
   const [copied, setCopied] = useState(false);
+  const [thumbnailBundleCopied, setThumbnailBundleCopied] = useState(false);
+  const [fullPackCopied, setFullPackCopied] = useState(false);
+  const [thumbnailTransferText, setThumbnailTransferText] = useState("");
   const [transferCopied, setTransferCopied] = useState(false);
   const [sharedPayload, setSharedPayload] = useState(readSharedFormPayload);
   const [restorePayload, setRestorePayload] = useState(readRestorePayload);
   const [importingSource, setImportingSource] = useState("");
+  const autoThumbnailGenerationRef = useRef("");
 
   useEffect(() => {
     if (sharedPayload || restorePayload) return;
@@ -1635,6 +1735,78 @@ function App() {
 
   const episodeResponses = data.responses.filter((response) => response.episodeId === selectedEpisode?.id);
   const episodePeriods = data.applicationPeriods.filter((period) => period.episodeId === selectedEpisode?.id);
+
+  useEffect(() => {
+    const requestId = data.thumbnailStudio?.autoGenerateRequestedAt;
+    if (!requestId || !selectedEpisode || autoThumbnailGenerationRef.current === requestId) return undefined;
+    autoThumbnailGenerationRef.current = requestId;
+    let cancelled = false;
+    const studio = data.thumbnailStudio ?? defaultThumbnailStudio;
+    const guestIcons = normalizeGuestIconList(studio.guestIcon, studio.guestIcons);
+    const thumbnailDate = studio.date || selectedEpisode.date || "";
+    const currentGuestName = selectedEpisode.guestName || "";
+
+    Promise.all(
+      THUMBNAIL_PRESETS.map(async (preset) => {
+        const dataUrl = await renderThumbnail({
+          preset,
+          template: studio.templates?.[preset.key],
+          icon: studio.guestIcon,
+          icons: guestIcons,
+          date: thumbnailDate,
+          guestName: currentGuestName
+        });
+        const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, currentGuestName);
+        return [preset.key, generatedRecord];
+      })
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        setData((current) => {
+          if (current.thumbnailStudio?.autoGenerateRequestedAt !== requestId) return current;
+          return {
+            ...current,
+            thumbnailStudio: {
+              ...defaultThumbnailStudio,
+              ...(current.thumbnailStudio ?? {}),
+              generated: {
+                ...(current.thumbnailStudio?.generated ?? {}),
+                ...Object.fromEntries(entries)
+              },
+              autoGenerateRequestedAt: ""
+            },
+            imports: {
+              ...defaultImports,
+              ...current.imports,
+              lastLog: [`${new Date().toLocaleString("ja-JP")} サムネ: 取り込み内容から自動生成しました。`, ...(current.imports?.lastLog ?? [])].slice(0, 8)
+            }
+          };
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setData((current) => {
+          if (current.thumbnailStudio?.autoGenerateRequestedAt !== requestId) return current;
+          return {
+            ...current,
+            thumbnailStudio: {
+              ...defaultThumbnailStudio,
+              ...(current.thumbnailStudio ?? {}),
+              autoGenerateRequestedAt: ""
+            },
+            imports: {
+              ...defaultImports,
+              ...current.imports,
+              lastLog: [`${new Date().toLocaleString("ja-JP")} サムネ: 自動生成に失敗しました。素材画面で生成してください。`, ...(current.imports?.lastLog ?? [])].slice(0, 8)
+            }
+          };
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data.thumbnailStudio?.autoGenerateRequestedAt, selectedEpisode]);
 
   const updateData = (key, updater) => {
     setData((current) => ({
@@ -2028,6 +2200,78 @@ function App() {
     }));
   };
 
+  const buildThumbnailBundle = async () => {
+    const thumbnails = [];
+    for (const preset of THUMBNAIL_PRESETS) {
+      const generated = data.thumbnailStudio?.generated?.[preset.key];
+      if (!generated) continue;
+      let dataUrl = generated.dataUrl || "";
+      if (!dataUrl && generated.imageKey) {
+        try {
+          dataUrl = await loadGeneratedThumbnailImage(generated.imageKey);
+        } catch {
+          dataUrl = "";
+        }
+      }
+      if (!dataUrl) continue;
+      thumbnails.push({
+        key: preset.key,
+        label: preset.label,
+        fileName: generated.fileName || preset.fileName,
+        width: preset.width,
+        height: preset.height,
+        mimeType: "image/png",
+        generatedAt: generated.generatedAt || "",
+        dataUrl
+      });
+    }
+
+    return {
+      type: "radio-article-studio-thumbnail-bundle",
+      version: 1,
+      episode: selectedEpisode
+        ? {
+            id: selectedEpisode.id,
+            title: selectedEpisode.title,
+            date: selectedEpisode.date,
+            guestName: selectedEpisode.guestName || ""
+          }
+        : null,
+      instructions: [
+        "このJSONのthumbnails[].dataUrlはPNG画像です。",
+        "Codex側ではdataUrlをPNGとして保存し、WordPressアイキャッチや記事内画像に使ってください。",
+        "PCへの手動ダウンロードを挟まないための受け渡しデータです。"
+      ],
+      thumbnails
+    };
+  };
+
+  const copyThumbnailBundle = async () => {
+    const bundle = await buildThumbnailBundle();
+    const text = JSON.stringify(bundle, null, 2);
+    setThumbnailTransferText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // The textarea below still exposes the transfer data when clipboard access is blocked.
+    }
+    setThumbnailBundleCopied(true);
+    window.setTimeout(() => setThumbnailBundleCopied(false), 1800);
+  };
+
+  const copyFullPackWithThumbnails = async () => {
+    const bundle = await buildThumbnailBundle();
+    const text = `${codexPack}\n\n---\n\n# サムネ画像データJSON\n\n${JSON.stringify(bundle, null, 2)}`;
+    setThumbnailTransferText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // The textarea below still exposes the transfer data when clipboard access is blocked.
+    }
+    setFullPackCopied(true);
+    window.setTimeout(() => setFullPackCopied(false), 1800);
+  };
+
   const codexPack = useMemo(() => {
     if (!selectedEpisode) return "";
     const responseBlocks = episodeResponses
@@ -2107,6 +2351,7 @@ ${trackRows || "-"}
 
 サムネ/画像素材:
 ${thumbnailRows || "-"}
+※サムネPNGそのものは、この画面の「本文+サムネ画像データをコピー」または「サムネ画像JSONをコピー」で渡します。dataUrlをPNGとして保存して使ってください。
 
 厳守ルール:
 - かなめ🦐、べるぼ☂はパーソナリティなので原則「さん」なし。
@@ -2196,11 +2441,7 @@ ${thumbnailRows || "-"}
             responses: [normalized, ...current.responses],
             tracks: nextTracks,
             thumbnailStudio: guestIcon
-              ? {
-                  ...defaultThumbnailStudio,
-                  ...(current.thumbnailStudio ?? {}),
-                  guestIcon
-                }
+              ? mergeGuestIcons(current.thumbnailStudio ?? defaultThumbnailStudio, guestIcon)
               : current.thumbnailStudio
           };
         });
@@ -2342,7 +2583,18 @@ ${thumbnailRows || "-"}
             />
           )}
           {active === "pack" && (
-            <CodexPack codexPack={codexPack} copyPack={copyPack} copied={copied} selectedEpisode={selectedEpisode} />
+            <CodexPack
+              codexPack={codexPack}
+              copyPack={copyPack}
+              copied={copied}
+              selectedEpisode={selectedEpisode}
+              copyThumbnailBundle={copyThumbnailBundle}
+              thumbnailBundleCopied={thumbnailBundleCopied}
+              copyFullPackWithThumbnails={copyFullPackWithThumbnails}
+              fullPackCopied={fullPackCopied}
+              thumbnailCount={Object.keys(data.thumbnailStudio?.generated ?? {}).length}
+              thumbnailTransferText={thumbnailTransferText}
+            />
           )}
           {active === "settings" && (
             <SettingsPanel
@@ -3782,7 +4034,7 @@ function drawGuestName(ctx, preset, template, guestName) {
   ctx.restore();
 }
 
-function drawGuestBadge(ctx, preset, template, hasGuestContent) {
+function drawGuestBadge(ctx, preset, template, hasGuestContent, badgeImage) {
   if (!hasGuestContent || template.guestBadgeVisible === false) return;
 
   const minSide = Math.min(preset.width, preset.height);
@@ -3791,6 +4043,14 @@ function drawGuestBadge(ctx, preset, template, hasGuestContent) {
   const centerX = (preset.width * Number(template.guestBadgeX ?? 40)) / 100;
   const centerY = (preset.height * Number(template.guestBadgeY ?? 78)) / 100;
   const points = 24;
+
+  if (badgeImage) {
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.drawImage(badgeImage, -diameter / 2, -diameter / 2, diameter, diameter);
+    ctx.restore();
+    return;
+  }
 
   ctx.save();
   ctx.translate(centerX, centerY);
@@ -3823,7 +4083,7 @@ function drawGuestBadge(ctx, preset, template, hasGuestContent) {
   ctx.restore();
 }
 
-async function renderThumbnail({ preset, template, icon, date, guestName }) {
+async function renderThumbnail({ preset, template, icon, icons = [], date, guestName }) {
   const normalizedTemplate = getNormalizedThumbnailTemplate(preset.key, template);
   const templateSource = getTemplateSource(normalizedTemplate);
   if (!templateSource) throw new Error("template-missing");
@@ -3831,18 +4091,22 @@ async function renderThumbnail({ preset, template, icon, date, guestName }) {
   canvas.width = preset.width;
   canvas.height = preset.height;
   const ctx = canvas.getContext("2d");
-  const [baseImage, iconImage] = await Promise.all([
+  const guestIcons = normalizeGuestIconList(icon, icons);
+  const [baseImage, iconImages, badgeImage] = await Promise.all([
     loadCanvasImage(templateSource),
-    icon?.dataUrl ? loadCanvasImage(icon.dataUrl) : Promise.resolve(null)
+    Promise.all(guestIcons.map((guestIcon) => loadCanvasImage(guestIcon.dataUrl).catch(() => null))),
+    loadCanvasImage(GUEST_BADGE_ASSET_URL).catch(() => null)
   ]);
 
   drawCover(ctx, baseImage, preset.width, preset.height);
   drawDateBadge(ctx, preset, date);
 
-  if (iconImage) {
-    const diameter = Math.round((Math.min(preset.width, preset.height) * Number(normalizedTemplate.iconSize || 28)) / 100);
-    const centerX = Math.round((preset.width * Number(normalizedTemplate.iconX || 50)) / 100);
-    const centerY = Math.round((preset.height * Number(normalizedTemplate.iconY || 50)) / 100);
+  const iconSlots = getThumbnailIconSlots(normalizedTemplate);
+  iconImages.filter(Boolean).slice(0, iconSlots.length).forEach((iconImage, index) => {
+    const slot = iconSlots[index] ?? iconSlots[0];
+    const diameter = Math.round((Math.min(preset.width, preset.height) * Number(slot.size || 28)) / 100);
+    const centerX = Math.round((preset.width * Number(slot.x || 50)) / 100);
+    const centerY = Math.round((preset.height * Number(slot.y || 50)) / 100);
     const x = centerX - diameter / 2;
     const y = centerY - diameter / 2;
 
@@ -3860,12 +4124,30 @@ async function renderThumbnail({ preset, template, icon, date, guestName }) {
     ctx.strokeStyle = "rgba(255,255,255,.94)";
     ctx.stroke();
     ctx.restore();
-  }
+  });
 
-  drawGuestBadge(ctx, preset, normalizedTemplate, Boolean(iconImage || guestName));
+  drawGuestBadge(ctx, preset, normalizedTemplate, Boolean(iconImages.some(Boolean) || guestName), badgeImage);
   drawGuestName(ctx, preset, normalizedTemplate, guestName);
 
   return canvas.toDataURL("image/png");
+}
+
+async function saveThumbnailDataUrl(preset, dataUrl, guestName) {
+  const fileName = `${guestName || "guest"}-${preset.fileName}`;
+  const generatedAt = new Date().toISOString();
+  const imageKey = `${preset.key}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  let generatedRecord = {
+    imageKey,
+    fileName,
+    label: preset.label,
+    generatedAt
+  };
+  try {
+    await saveGeneratedThumbnailImage(imageKey, dataUrl);
+  } catch {
+    generatedRecord = { ...generatedRecord, dataUrl };
+  }
+  return { fileName, generatedRecord };
 }
 
 function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
@@ -3880,12 +4162,16 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   const customLayoutPresets = studio.customLayoutPresets ?? [];
   const layoutPresets = [...THUMBNAIL_ICON_LAYOUT_PRESETS, ...customLayoutPresets];
   const activeLayoutPresetId = studio.activeLayoutPreset || THUMBNAIL_ICON_LAYOUT_PRESETS[0].id;
+  const activeLayoutPreset = layoutPresets.find((preset) => preset.id === activeLayoutPresetId) ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0];
+  const activeLayoutPresetIsDefault = THUMBNAIL_ICON_LAYOUT_PRESETS.some((preset) => preset.id === activeLayoutPresetId);
+  const guestIcons = normalizeGuestIconList(studio.guestIcon, studio.guestIcons);
+  const guestIconPreviewKey = guestIcons.map((icon) => `${icon.name}:${icon.dataUrl.slice(0, 80)}`).join("|");
   const thumbnailTemplatePreviewKey = useMemo(
     () =>
       JSON.stringify(
         THUMBNAIL_PRESETS.map((preset) => {
           const template = getNormalizedThumbnailTemplate(preset.key, studio.templates?.[preset.key]);
-          return [preset.key, template.source, template.assetUrl, template.dataUrl, template.iconX, template.iconY, template.iconSize, template.guestNameVisible, template.guestNameX, template.guestNameY, template.guestNameSize, template.guestBadgeVisible, template.guestBadgeX, template.guestBadgeY, template.guestBadgeSize];
+          return [preset.key, template.source, template.assetUrl, template.dataUrl, template.iconX, template.iconY, template.iconSize, template.iconSlots, template.guestNameVisible, template.guestNameX, template.guestNameY, template.guestNameSize, template.guestBadgeVisible, template.guestBadgeX, template.guestBadgeY, template.guestBadgeSize];
         })
       ),
     [studio.templates]
@@ -3947,6 +4233,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
               preset,
               template: studio.templates?.[preset.key],
               icon: studio.guestIcon,
+              icons: guestIcons,
               date: thumbnailDate,
               guestName
             });
@@ -3964,7 +4251,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [thumbnailDate, guestName, studio.guestIcon?.dataUrl, thumbnailTemplatePreviewKey]);
+  }, [thumbnailDate, guestName, guestIconPreviewKey, thumbnailTemplatePreviewKey]);
 
   const handleTemplateFile = async (presetKey, event) => {
     const file = event.target.files?.[0];
@@ -3992,18 +4279,28 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   };
 
   const handleIconFile = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const dataUrl = await fileToDataUrl(file);
+    const files = Array.from(event.target.files ?? []).filter(Boolean);
+    if (!files.length) return;
+    const nextGuestIcons = await Promise.all(
+      files.map(async (file, index) => ({
+        id: newId("guest_icon"),
+        name: file.name || `guest-icon-${index + 1}`,
+        dataUrl: await fileToDataUrl(file),
+        source: "manual",
+        updatedAt: new Date().toISOString()
+      }))
+    );
+    const normalizedNextGuestIcons = normalizeGuestIconList(nextGuestIcons[0], nextGuestIcons);
     const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
     forgetGeneratedImages(presetKeys);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
       generated: removeGeneratedRecords(current.generated, presetKeys),
-      guestIcon: { name: file.name, dataUrl }
+      guestIcon: normalizedNextGuestIcons[0] ?? { ...defaultThumbnailStudio.guestIcon },
+      guestIcons: normalizedNextGuestIcons
     }));
-    setMessage("ゲストアイコンを変更しました。古い生成画像は解除しました。");
+    setMessage(`ゲストアイコンを${normalizedNextGuestIcons.length}枚に変更しました。古い生成画像は解除しました。`);
     event.target.value = "";
   };
 
@@ -4014,7 +4311,8 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       ...defaultThumbnailStudio,
       ...current,
       generated: removeGeneratedRecords(current.generated, presetKeys),
-      guestIcon: { ...defaultThumbnailStudio.guestIcon }
+      guestIcon: { ...defaultThumbnailStudio.guestIcon },
+      guestIcons: []
     }));
     setMessage("ゲストアイコンを解除しました。");
   };
@@ -4062,37 +4360,41 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     setMessage(`${preset.name} の配置を適用しました。`);
   };
 
+  const makeCurrentLayoutPreset = (id, name) => ({
+    id,
+    name,
+    templates: Object.fromEntries(
+      THUMBNAIL_PRESETS.map((presetItem) => {
+        const template = getNormalizedThumbnailTemplate(presetItem.key, studio.templates?.[presetItem.key]);
+        const iconSlots = getThumbnailIconSlots(template);
+        return [
+          presetItem.key,
+          {
+            iconX: Number(iconSlots[0]?.x ?? template.iconX ?? 50),
+            iconY: Number(iconSlots[0]?.y ?? template.iconY ?? 50),
+            iconSize: Number(iconSlots[0]?.size ?? template.iconSize ?? 28),
+            iconSlots,
+            guestNameVisible: template.guestNameVisible !== false,
+            guestNameX: Number(template.guestNameX ?? 50),
+            guestNameY: Number(template.guestNameY ?? 90),
+            guestNameSize: Number(template.guestNameSize ?? 6),
+            guestBadgeVisible: template.guestBadgeVisible !== false,
+            guestBadgeX: Number(template.guestBadgeX ?? 40),
+            guestBadgeY: Number(template.guestBadgeY ?? 78),
+            guestBadgeSize: Number(template.guestBadgeSize ?? 10)
+          }
+        ];
+      })
+    )
+  });
+
   const saveCurrentLayoutPreset = () => {
     const name = layoutPresetName.trim();
     if (!name) {
       setMessage("プリセット名を入力してください。");
       return;
     }
-    const preset = {
-      id: newId("layout"),
-      name,
-      templates: Object.fromEntries(
-        THUMBNAIL_PRESETS.map((presetItem) => {
-          const template = studio.templates?.[presetItem.key] ?? defaultThumbnailStudio.templates[presetItem.key];
-          return [
-            presetItem.key,
-            {
-              iconX: Number(template.iconX || 50),
-              iconY: Number(template.iconY || 50),
-              iconSize: Number(template.iconSize || 28),
-              guestNameVisible: template.guestNameVisible !== false,
-              guestNameX: Number(template.guestNameX ?? 50),
-              guestNameY: Number(template.guestNameY ?? 90),
-              guestNameSize: Number(template.guestNameSize ?? 6),
-              guestBadgeVisible: template.guestBadgeVisible !== false,
-              guestBadgeX: Number(template.guestBadgeX ?? 40),
-              guestBadgeY: Number(template.guestBadgeY ?? 78),
-              guestBadgeSize: Number(template.guestBadgeSize ?? 10)
-            }
-          ];
-        })
-      )
-    };
+    const preset = makeCurrentLayoutPreset(newId("layout"), name);
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
       ...current,
@@ -4103,8 +4405,25 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     setMessage(`${name} を配置プリセットに保存しました。`);
   };
 
+  const overwriteActiveLayoutPreset = () => {
+    if (activeLayoutPresetIsDefault) {
+      setMessage("標準プリセットは上書きできません。新規プリセットとして保存してください。");
+      return;
+    }
+    const preset = makeCurrentLayoutPreset(activeLayoutPreset.id, activeLayoutPreset.name);
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      customLayoutPresets: (current.customLayoutPresets ?? []).map((item) => (item.id === preset.id ? preset : item))
+    }));
+    setMessage(`${preset.name} を現在の配置で上書きしました。`);
+  };
+
   const deleteActiveLayoutPreset = () => {
-    if (THUMBNAIL_ICON_LAYOUT_PRESETS.some((preset) => preset.id === activeLayoutPresetId)) return;
+    if (activeLayoutPresetIsDefault) {
+      setMessage("標準プリセットは削除できません。保存したカスタムプリセットを選ぶと削除できます。");
+      return;
+    }
     const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
     forgetGeneratedImages(presetKeys);
     updateStudio((current) => ({
@@ -4132,6 +4451,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           iconX: current.templates?.[presetKey]?.iconX ?? defaultThumbnailStudio.templates[presetKey].iconX,
           iconY: current.templates?.[presetKey]?.iconY ?? defaultThumbnailStudio.templates[presetKey].iconY,
           iconSize: current.templates?.[presetKey]?.iconSize ?? defaultThumbnailStudio.templates[presetKey].iconSize,
+          iconSlots: current.templates?.[presetKey]?.iconSlots ?? defaultThumbnailStudio.templates[presetKey].iconSlots,
           guestNameVisible: current.templates?.[presetKey]?.guestNameVisible ?? defaultThumbnailStudio.templates[presetKey].guestNameVisible,
           guestNameX: current.templates?.[presetKey]?.guestNameX ?? defaultThumbnailStudio.templates[presetKey].guestNameX,
           guestNameY: current.templates?.[presetKey]?.guestNameY ?? defaultThumbnailStudio.templates[presetKey].guestNameY,
@@ -4156,23 +4476,11 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         preset,
         template: studio.templates?.[preset.key],
         icon: studio.guestIcon,
+        icons: guestIcons,
         date: thumbnailDate,
         guestName
       });
-      const fileName = `${guestName || "guest"}-${preset.fileName}`;
-      const generatedAt = new Date().toISOString();
-      const imageKey = `${preset.key}-${Date.now()}`;
-      let generatedRecord = {
-        imageKey,
-        fileName,
-        label: preset.label,
-        generatedAt
-      };
-      try {
-        await saveGeneratedThumbnailImage(imageKey, dataUrl);
-      } catch {
-        generatedRecord = { ...generatedRecord, dataUrl };
-      }
+      const { fileName, generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, guestName);
       setGeneratedImages((current) => ({ ...current, [preset.key]: dataUrl }));
       updateStudio((current) => ({
         ...defaultThumbnailStudio,
@@ -4237,6 +4545,54 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     });
   };
 
+  const patchIconSlot = (presetKey, index, patch) => {
+    const currentTemplate = getNormalizedThumbnailTemplate(presetKey, studio.templates?.[presetKey]);
+    const nextSlots = getThumbnailIconSlots(currentTemplate).map((slot, slotIndex) => (slotIndex === index ? { ...slot, ...patch } : slot));
+    patchTemplate(presetKey, {
+      iconSlots: nextSlots,
+      ...(index === 0
+        ? {
+            iconX: nextSlots[0].x,
+            iconY: nextSlots[0].y,
+            iconSize: nextSlots[0].size
+          }
+        : {})
+    });
+  };
+
+  const renderPlacementControls = (preset, template, mode = "card") => {
+    const iconSlots = getThumbnailIconSlots(template);
+    return (
+      <div className={`slider-grid ${mode === "modal" ? "modal-slider-grid" : ""}`}>
+        {iconSlots.map((slot, index) => (
+          <React.Fragment key={`${preset.key}-slot-${index}`}>
+            <SliderField label={iconSlots.length > 1 ? `アイコン${index + 1} 横位置` : "アイコン 横位置"} value={slot.x} onChange={(value) => patchIconSlot(preset.key, index, { x: value })} />
+            <SliderField label={iconSlots.length > 1 ? `アイコン${index + 1} 縦位置` : "アイコン 縦位置"} value={slot.y} onChange={(value) => patchIconSlot(preset.key, index, { y: value })} />
+            <SliderField label={iconSlots.length > 1 ? `アイコン${index + 1} サイズ` : "アイコン サイズ"} value={slot.size} onChange={(value) => patchIconSlot(preset.key, index, { size: value })} min="10" max="60" />
+          </React.Fragment>
+        ))}
+        <label className="inline-check thumbnail-check">
+          <input type="checkbox" checked={template.guestNameVisible !== false} onChange={(event) => patchTemplate(preset.key, { guestNameVisible: event.target.checked })} />
+          ゲスト名を載せる（{guestName || "名前未設定"}）
+        </label>
+        <SliderField label="ゲスト名 横位置" value={template.guestNameX} onChange={(value) => patchTemplate(preset.key, { guestNameX: value })} />
+        <SliderField label="ゲスト名 縦位置" value={template.guestNameY} onChange={(value) => patchTemplate(preset.key, { guestNameY: value })} />
+        <SliderField label="ゲスト名 サイズ" value={template.guestNameSize} onChange={(value) => patchTemplate(preset.key, { guestNameSize: value })} min="2" max="14" />
+        <label className="inline-check thumbnail-check">
+          <input type="checkbox" checked={template.guestBadgeVisible !== false} onChange={(event) => patchTemplate(preset.key, { guestBadgeVisible: event.target.checked })} />
+          GUEST INを載せる
+        </label>
+        <SliderField label="GUEST IN 横位置" value={template.guestBadgeX} onChange={(value) => patchTemplate(preset.key, { guestBadgeX: value })} />
+        <SliderField label="GUEST IN 縦位置" value={template.guestBadgeY} onChange={(value) => patchTemplate(preset.key, { guestBadgeY: value })} />
+        <SliderField label="GUEST IN サイズ" value={template.guestBadgeSize} onChange={(value) => patchTemplate(preset.key, { guestBadgeSize: value })} min="4" max="22" />
+      </div>
+    );
+  };
+
+  const modalPreset = previewImage ? THUMBNAIL_PRESETS.find((preset) => preset.key === previewImage.presetKey) : null;
+  const modalTemplate = modalPreset ? getNormalizedThumbnailTemplate(modalPreset.key, studio.templates?.[modalPreset.key]) : null;
+  const modalImageSrc = modalPreset ? livePreviewImages[modalPreset.key] || previewImage.src : previewImage?.src;
+
   return (
     <article className="panel thumbnail-studio">
       <div className="record-head">
@@ -4246,7 +4602,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         </div>
         <label className="secondary file-button">
           <Upload size={16} />ゲストアイコン
-          <input type="file" accept="image/*" onChange={handleIconFile} />
+          <input type="file" accept="image/*" multiple onChange={handleIconFile} />
         </label>
       </div>
 
@@ -4265,15 +4621,22 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         />
         <Field label="新規プリセット名" value={layoutPresetName} onChange={setLayoutPresetName} placeholder="例: 2人用" />
         <button className="secondary" onClick={saveCurrentLayoutPreset}><Save size={16} />現在の配置を保存</button>
-        <button className="danger" onClick={deleteActiveLayoutPreset} disabled={THUMBNAIL_ICON_LAYOUT_PRESETS.some((preset) => preset.id === activeLayoutPresetId)}>
-          <Trash2 size={16} />プリセット削除
+        <button className="secondary" onClick={overwriteActiveLayoutPreset} disabled={activeLayoutPresetIsDefault}>
+          <Save size={16} />選択プリセットに上書き
+        </button>
+        <button className="danger" onClick={deleteActiveLayoutPreset} disabled={activeLayoutPresetIsDefault}>
+          <Trash2 size={16} />選択プリセット削除
         </button>
       </div>
 
-      {studio.guestIcon?.name && (
+      {guestIcons.length > 0 && (
         <div className="registered-image-row">
-          <img src={studio.guestIcon.dataUrl} alt="登録済みゲストアイコン" />
-          <p className="muted">ゲストアイコン: {studio.guestIcon.name}</p>
+          <div className="registered-icon-stack">
+            {guestIcons.map((icon, index) => (
+              <img src={icon.dataUrl} alt={`登録済みゲストアイコン ${index + 1}`} key={`${icon.name}-${index}`} />
+            ))}
+          </div>
+          <p className="muted">ゲストアイコン: {guestIcons.map((icon) => icon.name).join(" / ")}</p>
           <button className="secondary" onClick={clearGuestIcon}><X size={16} />アイコン解除</button>
         </div>
       )}
@@ -4313,25 +4676,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
                   <img className="thumbnail-preview" src={livePreviewDataUrl} alt={`${preset.label} live preview`} />
                 </div>
               )}
-              <div className="slider-grid">
-                <SliderField label="アイコン 横位置" value={template.iconX} onChange={(value) => patchTemplate(preset.key, { iconX: value })} />
-                <SliderField label="アイコン 縦位置" value={template.iconY} onChange={(value) => patchTemplate(preset.key, { iconY: value })} />
-                <SliderField label="アイコン サイズ" value={template.iconSize} onChange={(value) => patchTemplate(preset.key, { iconSize: value })} min="10" max="60" />
-                <label className="inline-check thumbnail-check">
-                  <input type="checkbox" checked={template.guestNameVisible !== false} onChange={(event) => patchTemplate(preset.key, { guestNameVisible: event.target.checked })} />
-                  ゲスト名を載せる（{guestName || "名前未設定"}）
-                </label>
-                <SliderField label="ゲスト名 横位置" value={template.guestNameX} onChange={(value) => patchTemplate(preset.key, { guestNameX: value })} />
-                <SliderField label="ゲスト名 縦位置" value={template.guestNameY} onChange={(value) => patchTemplate(preset.key, { guestNameY: value })} />
-                <SliderField label="ゲスト名 サイズ" value={template.guestNameSize} onChange={(value) => patchTemplate(preset.key, { guestNameSize: value })} min="2" max="14" />
-                <label className="inline-check thumbnail-check">
-                  <input type="checkbox" checked={template.guestBadgeVisible !== false} onChange={(event) => patchTemplate(preset.key, { guestBadgeVisible: event.target.checked })} />
-                  GUEST INを載せる
-                </label>
-                <SliderField label="GUEST IN 横位置" value={template.guestBadgeX} onChange={(value) => patchTemplate(preset.key, { guestBadgeX: value })} />
-                <SliderField label="GUEST IN 縦位置" value={template.guestBadgeY} onChange={(value) => patchTemplate(preset.key, { guestBadgeY: value })} />
-                <SliderField label="GUEST IN サイズ" value={template.guestBadgeSize} onChange={(value) => patchTemplate(preset.key, { guestBadgeSize: value })} min="4" max="22" />
-              </div>
+              {renderPlacementControls(preset, template)}
               <div className="button-row">
                 <button className="primary" onClick={() => generateOne(preset)} disabled={generatingKey === preset.key}>
                   {generatingKey === preset.key ? "生成中" : "生成"}
@@ -4364,7 +4709,15 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
               </div>
               <button className="icon-danger" onClick={() => setPreviewImage(null)} aria-label="閉じる"><X size={18} /></button>
             </div>
-            <img src={previewImage.src} alt={`${previewImage.label} large preview`} />
+            <div className="image-modal-body">
+              <img src={modalImageSrc} alt={`${previewImage.label} large preview`} />
+              {modalPreset && modalTemplate && (
+                <div className="image-modal-controls">
+                  <strong>大きく見ながら調整</strong>
+                  {renderPlacementControls(modalPreset, modalTemplate, "modal")}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -4381,12 +4734,24 @@ function Assets({ thumbnailStudio, updateThumbnailStudio, guestName, episodeDate
   );
 }
 
-function CodexPack({ codexPack, copyPack, copied, selectedEpisode }) {
+function CodexPack({ codexPack, copyPack, copied, selectedEpisode, copyThumbnailBundle, thumbnailBundleCopied, copyFullPackWithThumbnails, fullPackCopied, thumbnailCount, thumbnailTransferText }) {
   return (
     <div className="view-stack">
       <SectionTitle title="Codex記事作成パック" subtitle="ここをコピーしてCodexへ渡せば、記事化に必要な情報がまとまります。" action={<button className="primary" onClick={copyPack}><ClipboardCopy size={16} />{copied ? "コピー済み" : "コピー"}</button>} />
       <article className="panel">
         <h2>{selectedEpisode?.title || "放送回未選択"}</h2>
+        <div className="button-row">
+          <button className="primary" onClick={copyFullPackWithThumbnails} disabled={!thumbnailCount}>
+            <ClipboardCopy size={16} />{fullPackCopied ? "画像込みコピー済み" : "本文+サムネ画像データをコピー"}
+          </button>
+          <button className="secondary" onClick={copyThumbnailBundle} disabled={!thumbnailCount}>
+            <ClipboardCopy size={16} />{thumbnailBundleCopied ? "画像JSONコピー済み" : "サムネ画像JSONをコピー"}
+          </button>
+        </div>
+        <p className="hint-text">生成済みサムネ: {thumbnailCount}件。画像込みコピーは大きめですが、PNGをPCに保存せずCodexへ渡せます。</p>
+        {thumbnailTransferText && (
+          <textarea className="pack-output thumbnail-transfer-output" value={thumbnailTransferText} readOnly />
+        )}
         <textarea className="pack-output" value={codexPack} readOnly />
       </article>
     </div>
