@@ -35,6 +35,9 @@ const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
 const DEFAULT_KANAME_X_HANDLE = "kaname_mbembe";
 const DEFAULT_X_CONTACT_MESSAGE =
   "Xでご連絡するため、べるぼ☂とかなめ🦐のアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。";
+const DEFAULT_RESPONSE_ENDPOINT_URL = "";
+const DEFAULT_RESPONSE_DRIVE_FOLDER_URL = "";
+const DEFAULT_AUDIO_SAVE_MEMO = "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー";
 const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
@@ -190,6 +193,35 @@ const makeXUrl = (value = "") => {
 const formatXHandle = (value = "") => {
   const handle = normalizeXHandle(value);
   return handle ? `@${handle}` : "";
+};
+
+const normalizeAdditionalXAccounts = (accounts = []) =>
+  accounts
+    .map((account, index) => {
+      const handle = normalizeXHandle(account?.handle || account?.xHandle || account?.url || "");
+      const label = String(account?.label || account?.name || handle || `追加アカウント${index + 1}`).trim();
+      return handle
+        ? {
+            id: account?.id || `x_extra_${index}_${handle}`,
+            label,
+            handle
+          }
+        : null;
+    })
+    .filter(Boolean);
+
+const getContactAccountList = (source = {}) => {
+  const accounts = [];
+  const bellbo = normalizeXHandle(source.bellboXHandle || source.contactAccounts?.bellbo || DEFAULT_BELLBO_X_HANDLE);
+  const kaname = normalizeXHandle(source.kanameXHandle || source.contactAccounts?.kaname || DEFAULT_KANAME_X_HANDLE);
+  if (bellbo) accounts.push({ id: "bellbo", label: "べるぼ☂", handle: bellbo });
+  if (kaname) accounts.push({ id: "kaname", label: "かなめ🦐", handle: kaname });
+  normalizeAdditionalXAccounts(source.additionalXAccounts || source.contactAccounts?.additional || []).forEach((account) => {
+    if (!accounts.some((item) => item.handle.toLowerCase() === account.handle.toLowerCase())) {
+      accounts.push(account);
+    }
+  });
+  return accounts;
 };
 
 const isWebUrl = (url = "") => /^https?:\/\//i.test(String(url).trim());
@@ -771,6 +803,28 @@ const downloadTextFile = (content, fileName, type = "text/plain") => {
   URL.revokeObjectURL(url);
 };
 
+const downloadDataUrlFile = (dataUrl, fileName = "download") => {
+  if (!dataUrl) return;
+  const anchor = document.createElement("a");
+  anchor.href = dataUrl;
+  anchor.download = fileName;
+  anchor.click();
+};
+
+const saveDataUrlWithPicker = async (dataUrl, fileName = "download") => {
+  if (!dataUrl) return false;
+  if (!window.showSaveFilePicker) {
+    downloadDataUrlFile(dataUrl, fileName);
+    return false;
+  }
+  const blob = await fetch(dataUrl).then((response) => response.blob());
+  const handle = await window.showSaveFilePicker({ suggestedName: fileName });
+  const writable = await handle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+  return true;
+};
+
 const getRawStoredDataForShare = () => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -855,9 +909,15 @@ const makeSharePayload = (form, settings = sampleData.settings, context = {}) =>
     type: "radio-article-studio-form",
     contactAccounts: {
       bellbo: normalizeXHandle(settings.bellboXHandle || DEFAULT_BELLBO_X_HANDLE),
-      kaname: normalizeXHandle(settings.kanameXHandle || "")
+      kaname: normalizeXHandle(settings.kanameXHandle || ""),
+      additional: normalizeAdditionalXAccounts(settings.additionalXAccounts || [])
     },
     xContactMessage: settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE,
+    submission: {
+      endpointUrl: settings.responseEndpointUrl || "",
+      driveFolderUrl: settings.responseDriveFolderUrl || "",
+      audioSaveMemo: settings.audioSaveMemo || ""
+    },
     form: {
       id: form.id,
       name: form.name,
@@ -923,7 +983,11 @@ const sampleData = {
     sePonUrl: "https://umbrellaparade.github.io/SE_Pon/",
     bellboXHandle: DEFAULT_BELLBO_X_HANDLE,
     kanameXHandle: DEFAULT_KANAME_X_HANDLE,
-    xContactMessage: DEFAULT_X_CONTACT_MESSAGE
+    additionalXAccounts: [],
+    xContactMessage: DEFAULT_X_CONTACT_MESSAGE,
+    responseEndpointUrl: DEFAULT_RESPONSE_ENDPOINT_URL,
+    responseDriveFolderUrl: DEFAULT_RESPONSE_DRIVE_FOLDER_URL,
+    audioSaveMemo: DEFAULT_AUDIO_SAVE_MEMO
   },
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
@@ -1205,7 +1269,11 @@ function migrateData(input) {
   const settings = { ...sampleData.settings, ...(input.settings ?? {}) };
   if (!settings.bellboXHandle) settings.bellboXHandle = DEFAULT_BELLBO_X_HANDLE;
   if (!settings.kanameXHandle) settings.kanameXHandle = DEFAULT_KANAME_X_HANDLE;
+  settings.additionalXAccounts = normalizeAdditionalXAccounts(settings.additionalXAccounts || []);
   if (!settings.xContactMessage) settings.xContactMessage = DEFAULT_X_CONTACT_MESSAGE;
+  if (!("responseEndpointUrl" in settings)) settings.responseEndpointUrl = DEFAULT_RESPONSE_ENDPOINT_URL;
+  if (!("responseDriveFolderUrl" in settings)) settings.responseDriveFolderUrl = DEFAULT_RESPONSE_DRIVE_FOLDER_URL;
+  if (!settings.audioSaveMemo) settings.audioSaveMemo = DEFAULT_AUDIO_SAVE_MEMO;
   const episodes = (input.episodes ?? sampleData.episodes).map((episode) => {
     const articleSlug = episode.articleSlug || extractSlugFromUrl(episode.articleUrl);
     return {
@@ -2073,13 +2141,27 @@ function PublicSubmissionForm({ logoSrc, payload }) {
   const episode = payload?.episode;
   const contactAccounts = {
     bellbo: normalizeXHandle(payload?.contactAccounts?.bellbo || DEFAULT_BELLBO_X_HANDLE),
-    kaname: normalizeXHandle(payload?.contactAccounts?.kaname || DEFAULT_KANAME_X_HANDLE)
+    kaname: normalizeXHandle(payload?.contactAccounts?.kaname || DEFAULT_KANAME_X_HANDLE),
+    additional: normalizeAdditionalXAccounts(payload?.contactAccounts?.additional || [])
   };
+  const contactAccountList = getContactAccountList({ contactAccounts });
   const xContactMessage = payload?.xContactMessage || DEFAULT_X_CONTACT_MESSAGE;
+  const submission = payload?.submission || {};
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState("");
   const [copied, setCopied] = useState(false);
   const [formError, setFormError] = useState("");
+  const [submitStatus, setSubmitStatus] = useState("");
+  const [submitBusy, setSubmitBusy] = useState(false);
+
+  useEffect(() => {
+    setAnswers({});
+    setResult("");
+    setCopied(false);
+    setFormError("");
+    setSubmitStatus("");
+    setSubmitBusy(false);
+  }, [form?.id, period?.id, episode?.id]);
 
   if (payload?.loading) {
     return (
@@ -2144,6 +2226,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         xUrl: "",
         followedBellbo: false,
         followedKaname: false,
+        followedAccounts: {},
         dmOk: false,
         ...previous,
         ...patch
@@ -2153,6 +2236,30 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         next.xUrl = makeXUrl(patch.rawX);
       }
       return { ...current, [questionId]: next };
+    });
+  };
+
+  const updateXFollowAnswer = (questionId, accountId, checked) => {
+    setAnswers((current) => {
+      const previous = current[questionId] ?? {};
+      return {
+        ...current,
+        [questionId]: {
+          rawX: "",
+          xHandle: "",
+          xUrl: "",
+          followedBellbo: false,
+          followedKaname: false,
+          dmOk: false,
+          ...previous,
+          followedAccounts: {
+            ...(previous.followedAccounts ?? {}),
+            [accountId]: checked
+          },
+          ...(accountId === "bellbo" ? { followedBellbo: checked } : {}),
+          ...(accountId === "kaname" ? { followedKaname: checked } : {})
+        }
+      };
     });
   };
 
@@ -2290,7 +2397,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     };
   };
 
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault();
     const invalidTrackUrlQuestion = form.questions.find(
       (question) => question.kind === "track" && answers[question.id]?.url && !isSupportedTrackUrl(answers[question.id].url)
@@ -2301,7 +2408,29 @@ function PublicSubmissionForm({ logoSrc, payload }) {
       return;
     }
     setFormError("");
-    setResult(JSON.stringify(buildResponsePayload(), null, 2));
+    setSubmitStatus("");
+    const responsePayload = buildResponsePayload();
+    const json = JSON.stringify(responsePayload, null, 2);
+    setResult(json);
+    const endpointUrl = String(submission.endpointUrl || "").trim();
+    if (!endpointUrl) {
+      setSubmitStatus("送信先URLが未設定です。回答JSONをコピーまたはダウンロードして運営側で取り込んでください。");
+      return;
+    }
+    setSubmitBusy(true);
+    try {
+      await fetch(endpointUrl, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: json
+      });
+      setSubmitStatus("回答データを送信しました。受信結果は運営側の保存先で確認してください。");
+    } catch {
+      setSubmitStatus("送信できませんでした。回答JSONをダウンロードして運営側へ送ってください。");
+    } finally {
+      setSubmitBusy(false);
+    }
   };
 
   const copyResult = async () => {
@@ -2320,6 +2449,24 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     anchor.download = `${form.id}-response.json`;
     anchor.click();
     URL.revokeObjectURL(url);
+  };
+
+  const saveAudioAnswer = async (audio) => {
+    if (!audio?.dataUrl) return;
+    try {
+      const usedPicker = await saveDataUrlWithPicker(audio.dataUrl, audio.fileName || "audio-file");
+      setSubmitStatus(usedPicker ? "保存先を選んで音源を保存しました。" : "ブラウザの通常ダウンロードで音源を保存しました。");
+    } catch {
+      setSubmitStatus("音源保存をキャンセルしました。");
+    }
+  };
+
+  const scrollToQuestion = (questionId) => {
+    document.getElementById(`question-${questionId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   return (
@@ -2342,10 +2489,22 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         </div>
 
         {formError && <p className="form-error">{formError}</p>}
+        {submitStatus && <p className="submit-status">{submitStatus}</p>}
+
+        <nav className="form-toc" aria-label="フォーム目次">
+          <strong>目次</strong>
+          <div>
+            {form.questions.map((question, index) => (
+              <button type="button" key={question.id} onClick={() => scrollToQuestion(question.id)}>
+                {index + 1}. {question.label}
+              </button>
+            ))}
+          </div>
+        </nav>
 
         <form className="public-form" onSubmit={submit}>
           {form.questions.map((question) => (
-            <div className="field wide" key={question.id}>
+            <div className="field wide" key={question.id} id={`question-${question.id}`}>
               <span>{question.label}{question.required ? " *" : ""}</span>
               <small>{QUESTION_USE_LABELS[question.use] ?? question.use}</small>
               {question.kind === "file" ? (
@@ -2406,6 +2565,16 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                     />
                     <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : "WAVまたはMP3をアップロード"}</small>
                   </label>
+                  {answers[question.id]?.audio?.dataUrl && (
+                    <div className="track-save-actions">
+                      <button type="button" className="secondary" onClick={() => downloadDataUrlFile(answers[question.id].audio.dataUrl, answers[question.id].audio.fileName || "audio-file")}>
+                        <Download size={16} />音源をダウンロード
+                      </button>
+                      <button type="button" className="secondary" onClick={() => saveAudioAnswer(answers[question.id].audio)}>
+                        <FolderOpen size={16} />保存先を選んで保存
+                      </button>
+                    </div>
+                  )}
                   <TrackPreview track={answers[question.id]} />
                 </div>
               ) : question.kind === "x_contact" ? (
@@ -2430,37 +2599,38 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                   </label>
                   <p className="hint-text x-contact-message">{xContactMessage}</p>
                   <div className="follow-actions">
-                    {contactAccounts.bellbo ? (
-                      <a className="secondary" href={makeXUrl(contactAccounts.bellbo)} target="_blank" rel="noreferrer">
-                        べるぼ☂をフォロー
+                    {contactAccountList.map((account) => (
+                      <a className="secondary" href={makeXUrl(account.handle)} target="_blank" rel="noreferrer" key={account.id}>
+                        {account.label}をフォロー
                       </a>
-                    ) : null}
-                    {contactAccounts.kaname ? (
-                      <a className="secondary" href={makeXUrl(contactAccounts.kaname)} target="_blank" rel="noreferrer">
-                        かなめ🦐をフォロー
-                      </a>
-                    ) : (
-                      <span className="muted small">かなめ🦐のXアカウントは運営側で未設定です。</span>
-                    )}
+                    ))}
+                    {contactAccountList.length === 0 && <span className="muted small">運営側のXアカウントが未設定です。</span>}
                   </div>
-                  <label className="inline-check">
-                    <input
-                      type="checkbox"
-                      required={Boolean(question.required && contactAccounts.bellbo)}
-                      checked={Boolean(answers[question.id]?.followedBellbo)}
-                      onChange={(event) => updateXContactAnswer(question.id, { followedBellbo: event.target.checked })}
-                    />
-                    べるぼ☂をフォローしました
-                  </label>
-                  {contactAccounts.kaname && (
+                  {contactAccountList.map((account) => {
+                    const checked =
+                      answers[question.id]?.followedAccounts?.[account.id] ??
+                      (account.id === "bellbo" ? answers[question.id]?.followedBellbo : account.id === "kaname" ? answers[question.id]?.followedKaname : false);
+                    return (
+                      <label className="inline-check" key={`${question.id}-${account.id}`}>
+                        <input
+                          type="checkbox"
+                          required={Boolean(question.required)}
+                          checked={Boolean(checked)}
+                          onChange={(event) => updateXFollowAnswer(question.id, account.id, event.target.checked)}
+                        />
+                        {account.label}をフォローしました
+                      </label>
+                    );
+                  })}
+                  {contactAccountList.length === 0 && (
                     <label className="inline-check">
                       <input
                         type="checkbox"
                         required={Boolean(question.required)}
-                        checked={Boolean(answers[question.id]?.followedKaname)}
-                        onChange={(event) => updateXContactAnswer(question.id, { followedKaname: event.target.checked })}
+                        checked={Boolean(answers[question.id]?.followedBellbo)}
+                        onChange={(event) => updateXContactAnswer(question.id, { followedBellbo: event.target.checked })}
                       />
-                      かなめ🦐をフォローしました
+                      運営からの連絡条件を確認しました
                     </label>
                   )}
                   <label className="inline-check">
@@ -2489,7 +2659,10 @@ function PublicSubmissionForm({ logoSrc, payload }) {
               )}
             </div>
           ))}
-          <button className="primary" type="submit"><Send size={16} />回答データを作成</button>
+          <div className="form-bottom-actions">
+            <button className="primary" type="submit" disabled={submitBusy}><Send size={16} />{submitBusy ? "送信中" : "回答データを作成"}</button>
+            <button className="secondary" type="button" onClick={scrollToTop}>上に戻る</button>
+          </div>
         </form>
 
         {result && (
@@ -2752,11 +2925,16 @@ function SourceImportCard({ title, description, value, onChange, onImportUrl, on
 }
 
 function downloadAttachment(attachment) {
+  downloadDataUrlFile(attachment?.dataUrl, attachment?.fileName || "audio-file");
+}
+
+async function saveAttachmentWithPicker(attachment) {
   if (!attachment?.dataUrl) return;
-  const anchor = document.createElement("a");
-  anchor.href = attachment.dataUrl;
-  anchor.download = attachment.fileName || "audio-file";
-  anchor.click();
+  try {
+    await saveDataUrlWithPicker(attachment.dataUrl, attachment.fileName || "audio-file");
+  } catch {
+    // User cancelled the picker. No UI state is needed here.
+  }
 }
 
 function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem, removeItem, addEpisode, wordpressSite }) {
@@ -3151,6 +3329,7 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
                     <span>{attachment.fileName}</span>
                     <small>{Math.round((attachment.size || 0) / 1024 / 1024 * 10) / 10}MB</small>
                     <button className="secondary" onClick={() => downloadAttachment(attachment)}><Download size={16} />ダウンロード</button>
+                    <button className="secondary" onClick={() => saveAttachmentWithPicker(attachment)}><FolderOpen size={16} />保存先を選ぶ</button>
                     {attachment.dataUrl && isImageAttachment(attachment) && (
                       <img className="attachment-image" src={attachment.dataUrl} alt={attachment.fileName || "添付画像"} />
                     )}
@@ -3696,6 +3875,7 @@ function CodexPack({ codexPack, copyPack, copied, selectedEpisode }) {
 
 function SettingsPanel({ settings, updateSettings, exportJson, importJson, resetSample, copyTransferLink, transferCopied }) {
   const [folderMessage, setFolderMessage] = useState("");
+  const additionalXAccounts = Array.isArray(settings.additionalXAccounts) ? settings.additionalXAccounts : [];
 
   const chooseFolder = async () => {
     if (!window.showDirectoryPicker) {
@@ -3709,6 +3889,36 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
     } catch {
       setFolderMessage("フォルダー選択をキャンセルしました。");
     }
+  };
+
+  const updateAdditionalXAccount = (index, patch) => {
+    const accounts = additionalXAccounts.map((account, accountIndex) => ({
+      id: account.id || `x_extra_${accountIndex}`,
+      label: account.label || account.name || "追加アカウント",
+      handle: account.handle || account.xHandle || ""
+    }));
+    const next = accounts.map((account, accountIndex) =>
+      accountIndex === index ? { ...account, ...patch, handle: normalizeXHandle(patch.handle ?? account.handle) } : account
+    );
+    updateSettings({ additionalXAccounts: next });
+  };
+
+  const addAdditionalXAccount = () => {
+    const accounts = additionalXAccounts.map((account, index) => ({
+      id: account.id || `x_extra_${index}`,
+      label: account.label || account.name || "追加アカウント",
+      handle: account.handle || account.xHandle || ""
+    }));
+    updateSettings({
+      additionalXAccounts: [
+        ...accounts,
+        { id: newId("x"), label: "追加アカウント", handle: "" }
+      ]
+    });
+  };
+
+  const removeAdditionalXAccount = (index) => {
+    updateSettings({ additionalXAccounts: additionalXAccounts.filter((_, accountIndex) => accountIndex !== index) });
   };
 
   return (
@@ -3739,12 +3949,38 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
       <article className="panel">
         <div className="form-grid">
           <Field label="Obsidian格納庫パス" value={settings.obsidianPath} onChange={(value) => updateSettings({ obsidianPath: value })} />
+          <p className="hint-text wide">ここはCodexが記事作成マニュアルやバックアップを読む場所です。オンラインフォームの回答保存先ではありません。</p>
           <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
           <Field label="WordPressサイト" value={settings.wordpressSite} onChange={(value) => updateSettings({ wordpressSite: value })} />
           <Field label="SE_Pon URL" value={settings.sePonUrl} onChange={(value) => updateSettings({ sePonUrl: value })} />
+          <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptなどのWebアプリURL" wide />
+          <Field label="回答保存先Google DriveフォルダーURL（控え）" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
+          <TextArea label="音源保存先メモ" value={settings.audioSaveMemo || ""} onChange={(value) => updateSettings({ audioSaveMemo: value })} />
           <Field label="べるぼ☂ Xアカウント" value={settings.bellboXHandle || ""} onChange={(value) => updateSettings({ bellboXHandle: normalizeXHandle(value) })} />
           <Field label="かなめ🦐 Xアカウント" value={settings.kanameXHandle || ""} onChange={(value) => updateSettings({ kanameXHandle: normalizeXHandle(value) })} />
           <TextArea label="X連絡ブロック説明文" value={settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE} onChange={(value) => updateSettings({ xContactMessage: value })} />
+        </div>
+        <div className="settings-subpanel">
+          <div className="record-head">
+            <div>
+              <strong>追加Xアカウント</strong>
+              <p className="muted">フォームの連絡ブロックに、フォローリンクと確認チェックとして追加されます。</p>
+            </div>
+            <button className="secondary" onClick={addAdditionalXAccount}><Plus size={16} />追加</button>
+          </div>
+          {additionalXAccounts.length === 0 ? (
+            <p className="hint-text">追加アカウントは未設定です。</p>
+          ) : (
+            <div className="x-account-list">
+              {additionalXAccounts.map((account, index) => (
+                <div className="x-account-row" key={account.id || index}>
+                  <Field label="表示名" value={account.label || ""} onChange={(value) => updateAdditionalXAccount(index, { label: value })} />
+                  <Field label="Xアカウント" value={account.handle || ""} onChange={(value) => updateAdditionalXAccount(index, { handle: value })} />
+                  <button className="icon-danger" onClick={() => removeAdditionalXAccount(index)} aria-label="追加Xアカウントを削除"><Trash2 size={16} /></button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="button-row">
           <button className="secondary" onClick={() => updateSettings({ obsidianPath: DEFAULT_OBSIDIAN_PATH, obsidianFolderName: "Sunoパ！記事" })}>

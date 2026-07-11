@@ -60,6 +60,9 @@ Implemented:
 15. Responsive mobile layout for management screens and shared forms.
 16. PWA app shell with install metadata, home-screen icon, and basic offline app-shell caching.
 17. One-time device transfer links for moving the current browser data to another phone or desktop browser.
+18. Shared form table of contents, top return button, response status messaging, and audio download/save actions.
+19. Optional response Webhook URL setting for forwarding online form submissions to a Google Apps Script or other backend.
+20. Editable extra X contact accounts for shared form contact blocks.
 
 The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Application periods connect a date range, target episode, form, and listener submission sheet. Shared forms can use short `#/r/{id}` URLs after the app-generated Codex activation request is applied. They also keep compressed portable `#/s/...` URLs as immediate fallback links, so the form can open on devices that do not have the operator's local browser data even before a short URL is activated. Short reference URLs such as `#/p/...` and `#/f/...` are kept as management-device shortcuts only. Forms can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. Guest forms can also use an image field for the guest icon. When a response JSON or imported guest sheet includes a guest icon image, the thumbnail composer automatically registers it as the current guest icon. They can also use an X contact block that explains why Bellbo/Kaname follows are needed for DM contact while keeping the respondent's X URL usable for article promotion. The operator can import the response JSON, preview/download attached audio and images, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
 
@@ -80,4 +83,10 @@ The main design document is in:
 
 ```text
 docs/design.md
+```
+
+Google Drive response receiving setup:
+
+```text
+docs/google-drive-response-endpoint.md
 ```

@@ -926,6 +926,55 @@ textarea {
   gap: 14px;
 }
 
+.form-toc {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.form-toc strong {
+  color: #241f2f;
+  font-size: 13px;
+}
+
+.form-toc div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.form-toc button {
+  border: 1px solid #d6ccbd;
+  border-radius: 999px;
+  background: #f4efe6;
+  color: #241f2f;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.submit-status {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #c7dcca;
+  border-radius: 8px;
+  background: #f0fff3;
+  color: #245231;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.track-save-actions,
+.form-bottom-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .x-contact-message {
   padding: 10px 12px;
   border: 1px solid #eadfce;
@@ -940,6 +989,28 @@ textarea {
 
 .pack-output.compact {
   min-height: 260px;
+}
+
+.settings-subpanel {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.x-account-list {
+  display: grid;
+  gap: 10px;
+}
+
+.x-account-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
 }
 
 .thumbnail-studio {
@@ -1343,7 +1414,8 @@ textarea {
   .form-grid,
   .track-meta-grid,
   .question-row,
-  .attachment-item {
+  .attachment-item,
+  .x-account-row {
     grid-template-columns: 1fr;
   }
 
@@ -1393,7 +1465,9 @@ textarea {
 
   .button-row,
   .inline-actions,
-  .follow-actions {
+  .follow-actions,
+  .track-save-actions,
+  .form-bottom-actions {
     display: grid;
     grid-template-columns: 1fr;
     width: 100%;
