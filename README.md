@@ -53,7 +53,7 @@ Implemented:
 8. Response JSON creation/import with grouped song fields, in-form song preview, WAV/MP3 attachments, and internal X contact blocks.
 9. Response management with public/article/internal/constraint separation.
 10. Track and audio metadata management.
-11. Thumbnail composition from bundled fixed base images plus date text and an optional guest icon, with registered image previews.
+11. Thumbnail composition from bundled fixed base images plus date text and an optional guest icon, with registered image previews, saved generated previews, and reusable icon layout presets.
 12. Thumbnail and production asset management.
 13. Codex request pack generation.
 14. JSON export/import backup.
@@ -61,7 +61,9 @@ Implemented:
 16. PWA app shell with install metadata, home-screen icon, and basic offline app-shell caching.
 17. One-time device transfer links for moving the current browser data to another phone or desktop browser.
 
-The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Application periods connect a date range, target episode, form, and listener submission sheet. Shared forms default to compressed portable `#/s/...` URLs for external respondents, so the form can open on devices that do not have the operator's local browser data. Short reference URLs such as `#/p/...` and `#/f/...` are kept as management-device shortcuts only. Forms can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. They can also use an internal X contact block that normalizes handles into profile URLs and links respondents to the Bellbo/Kaname operating accounts before DM contact. The operator can import the response JSON, preview/download attached audio, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
+The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Application periods connect a date range, target episode, form, and listener submission sheet. Shared forms default to compressed portable `#/s/...` URLs for external respondents, so the form can open on devices that do not have the operator's local browser data. Short reference URLs such as `#/p/...` and `#/f/...` are kept as management-device shortcuts only. Forms can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. Guest forms can also use an image field for the guest icon. When a response JSON or imported guest sheet includes a guest icon image, the thumbnail composer automatically registers it as the current guest icon. They can also use an internal X contact block that normalizes handles into profile URLs and links respondents to the Bellbo/Kaname operating accounts before DM contact. The operator can import the response JSON, preview/download attached audio and images, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
+
+Generated thumbnail PNG previews are stored in the browser's IndexedDB and referenced from the main localStorage data. This keeps generated images available after a reload without overloading localStorage. Base images, guest icons, and generated previews are still browser-local until a future cloud sync layer is added.
 
 The PWA version can be added to a smartphone home screen or installed from desktop browsers. Data still lives in each browser's localStorage, so automatic smartphone/PC synchronization requires a future cloud storage layer such as Google Drive, Firebase, or Supabase. Until then, use device transfer links for small browser states or JSON export/import for larger states with images and audio.
 

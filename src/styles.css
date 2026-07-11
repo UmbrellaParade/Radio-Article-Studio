@@ -560,6 +560,15 @@ textarea {
   padding: 9px;
 }
 
+.image-answer-preview {
+  width: 88px;
+  height: 88px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fff;
+  object-fit: cover;
+}
+
 .track-question-fields {
   display: grid;
   gap: 10px;
@@ -843,6 +852,16 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.attachment-image {
+  grid-column: 1 / -1;
+  width: 96px;
+  height: 96px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fff;
+  object-fit: cover;
+}
+
 .public-shell {
   max-width: 920px;
 }
@@ -917,6 +936,18 @@ textarea {
   border: 1px solid #d6ccbd;
   border-radius: 8px;
   background: #fbf6ed;
+}
+
+.thumbnail-layout-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fffaf2;
 }
 
 .thumbnail-card {
@@ -1070,6 +1101,7 @@ textarea {
   .two-col,
   .import-grid,
   .thumbnail-grid,
+  .thumbnail-layout-controls,
   .bellbo-url-row,
   .form-grid,
   .track-meta-grid,

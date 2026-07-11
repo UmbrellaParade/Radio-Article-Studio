@@ -25,6 +25,8 @@ import {
 import "./styles.css";
 
 const STORAGE_KEY = "radio-article-studio:v1";
+const THUMBNAIL_IMAGE_DB_NAME = "radio-article-studio-thumbnails";
+const THUMBNAIL_IMAGE_STORE = "generated";
 const DEFAULT_OBSIDIAN_PATH = "C:\\Users\\myabe\\OneDrive\\Desktop\\Obsidian Folder\\Umbrella Parade\\Sunoパ！記事";
 const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
 const DEFAULT_KANAME_X_HANDLE = "kaname_mbembe";
@@ -37,6 +39,56 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
     });
   });
 }
+
+const openThumbnailImageDb = () =>
+  new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("indexeddb-unavailable"));
+      return;
+    }
+    const request = window.indexedDB.open(THUMBNAIL_IMAGE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(THUMBNAIL_IMAGE_STORE)) {
+        db.createObjectStore(THUMBNAIL_IMAGE_STORE, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+const saveGeneratedThumbnailImage = async (id, dataUrl) => {
+  const db = await openThumbnailImageDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(THUMBNAIL_IMAGE_STORE, "readwrite");
+    transaction.objectStore(THUMBNAIL_IMAGE_STORE).put({ id, dataUrl, savedAt: new Date().toISOString() });
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error);
+    };
+  });
+};
+
+const loadGeneratedThumbnailImage = async (id) => {
+  if (!id) return "";
+  const db = await openThumbnailImageDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(THUMBNAIL_IMAGE_STORE, "readonly");
+    const request = transaction.objectStore(THUMBNAIL_IMAGE_STORE).get(id);
+    request.onsuccess = () => {
+      db.close();
+      resolve(request.result?.dataUrl || "");
+    };
+    request.onerror = () => {
+      db.close();
+      reject(request.error);
+    };
+  });
+};
 
 const QUESTION_USE_OPTIONS = [
   ["public", "公開してOKなプロフィール"],
@@ -54,9 +106,10 @@ const QUESTION_KIND_OPTIONS = [
   ["long", "長文"],
   ["url", "URL"],
   ["track", "楽曲"],
+  ["image", "画像"],
   ["x_contact", "X連絡ブロック"],
   ["choice", "選択式"],
-  ["file", "ファイル単体"]
+  ["file", "音源ファイル単体"]
 ];
 
 const TRACK_URL_ERROR_MESSAGE = "楽曲URLはYouTubeまたはSunoのURLを入力してください。";
@@ -72,10 +125,16 @@ const detectUrlType = (url = "") => {
 };
 
 const AUDIO_FILE_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,.mp3,.wav";
+const IMAGE_FILE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif";
 
 const isAudioUpload = (file) => {
   const name = file?.name?.toLowerCase() ?? "";
   return name.endsWith(".mp3") || name.endsWith(".wav") || ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"].includes(file?.type);
+};
+
+const isImageUpload = (file) => {
+  const name = file?.name?.toLowerCase() ?? "";
+  return /\.(png|jpe?g|webp|gif)$/.test(name) || String(file?.type ?? "").startsWith("image/");
 };
 
 const isAudioAttachment = (attachment) => {
@@ -83,6 +142,32 @@ const isAudioAttachment = (attachment) => {
   const mime = attachment?.mimeType?.toLowerCase() ?? "";
   return name.endsWith(".mp3") || name.endsWith(".wav") || mime.includes("audio/");
 };
+
+const isImageAttachment = (attachment) => {
+  const name = attachment?.fileName?.toLowerCase() ?? "";
+  const mime = attachment?.mimeType?.toLowerCase() ?? "";
+  const src = String(attachment?.dataUrl || attachment?.sourceUrl || attachment?.url || "").toLowerCase();
+  return /\.(png|jpe?g|webp|gif)(\?|#|$)/.test(name) || mime.startsWith("image/") || src.startsWith("data:image/");
+};
+
+const isGuestIconAttachment = (attachment) => {
+  if (!isImageAttachment(attachment)) return false;
+  const text = `${attachment.questionLabel || ""} ${attachment.questionId || ""} ${attachment.fileName || ""}`.toLowerCase();
+  return /ゲスト|アイコン|icon|avatar|profile|プロフィール|画像/.test(text);
+};
+
+const findGuestIconAttachment = (attachments = []) =>
+  attachments.find(isGuestIconAttachment) || attachments.find(isImageAttachment) || null;
+
+const makeGuestIconFromAttachment = (attachment, fallbackName = "guest-icon") =>
+  attachment
+    ? {
+        name: attachment.fileName || attachment.questionLabel || fallbackName,
+        dataUrl: attachment.dataUrl || attachment.sourceUrl || attachment.url || "",
+        source: "response",
+        updatedAt: new Date().toISOString()
+      }
+    : null;
 
 const normalizeXHandle = (value = "") =>
   String(value)
@@ -181,9 +266,43 @@ const THUMBNAIL_PRESETS = [
   }
 ];
 
+const THUMBNAIL_ICON_LAYOUT_PRESETS = [
+  {
+    id: "single",
+    name: "1人用",
+    templates: {
+      article16x9: { iconX: 50, iconY: 77, iconSize: 28 },
+      standfm1x1: { iconX: 50, iconY: 82, iconSize: 23 },
+      stream9x16: { iconX: 50, iconY: 78, iconSize: 30 }
+    }
+  }
+];
+
+const getIconLayoutPresetTemplates = (preset) => preset?.templates ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0].templates;
+
+const applyIconLayoutPresetToTemplates = (templates = defaultThumbnailStudio.templates, preset) => {
+  const presetTemplates = getIconLayoutPresetTemplates(preset);
+  return Object.fromEntries(
+    THUMBNAIL_PRESETS.map((thumbnailPreset) => {
+      const key = thumbnailPreset.key;
+      return [
+        key,
+        {
+          ...defaultThumbnailStudio.templates[key],
+          ...(templates?.[key] ?? {}),
+          ...(presetTemplates[key] ?? {})
+        }
+      ];
+    })
+  );
+};
+
 const defaultThumbnailStudio = {
   date: "",
   guestIcon: { name: "", dataUrl: "" },
+  activeLayoutPreset: "single",
+  customLayoutPresets: [],
+  generated: {},
   templates: Object.fromEntries(
     THUMBNAIL_PRESETS.map((preset) => [
       preset.key,
@@ -192,9 +311,7 @@ const defaultThumbnailStudio = {
         source: "fixed",
         assetUrl: preset.baseUrl,
         dataUrl: "",
-        iconX: preset.key === "stream9x16" ? 50 : 74,
-        iconY: preset.key === "stream9x16" ? 38 : 52,
-        iconSize: preset.key === "stream9x16" ? 30 : 28
+        ...(THUMBNAIL_ICON_LAYOUT_PRESETS[0].templates[preset.key] ?? {})
       }
     ])
   )
@@ -411,6 +528,7 @@ const upsertTrack = (tracks, nextTrack) => {
 const buildResponseFromRow = (row, episodeId, formId) => {
   const respondent = pick(row, ["ゲスト名", "お名前", "名前", "活動名", "アーティスト名", "回答者", "応募者名"]);
   const xUrl = pick(row, ["X URL", "Twitter URL", "X", "Twitter"]);
+  const iconUrl = pick(row, ["ゲストアイコン画像", "アイコン画像", "プロフィール画像", "サムネ用画像", "画像URL", "アイコンURL", "icon", "avatar", "profile image"]);
   const profile = pick(row, ["活動紹介文", "プロフィール", "紹介文", "自己紹介", "公開プロフィール"]);
   const topics = pick(row, ["今回話したいこと", "記事で紹介してほしい内容", "話したいこと", "トピック"]);
   const songThought = pick(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "紹介文", "記事で触れてほしいポイント"]);
@@ -427,7 +545,20 @@ const buildResponseFromRow = (row, episodeId, formId) => {
     publicInfo: compactLines([profile, xUrl && `X: ${xUrl}`]),
     articleUse: compactLines([topics, songThought]),
     internalOnly: internal,
-    constraints
+    constraints,
+    attachments: iconUrl
+      ? [
+          {
+            questionId: "q_guest_icon",
+            questionLabel: "ゲストアイコン画像",
+            fileName: iconUrl.split("/").filter(Boolean).pop()?.split(/[?#]/)[0] || "guest-icon",
+            mimeType: "image/*",
+            size: 0,
+            dataUrl: iconUrl,
+            sourceUrl: iconUrl
+          }
+        ]
+      : []
   };
 };
 
@@ -466,13 +597,22 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
 
   let nextResponses = current.responses;
   let nextTracks = current.tracks;
+  let nextThumbnailStudio = current.thumbnailStudio ?? defaultThumbnailStudio;
   let responseCount = 0;
   let trackCount = 0;
 
   rows.forEach((row) => {
     if (kind === "guest") {
       const response = buildResponseFromRow(row, selectedEpisode.id, "form_guest");
-      if (response.respondent || response.publicInfo || response.articleUse || response.constraints) {
+      if (response.respondent || response.publicInfo || response.articleUse || response.constraints || response.attachments?.length) {
+        const guestIcon = makeGuestIconFromAttachment(findGuestIconAttachment(response.attachments), `${response.respondent || "guest"}-icon`);
+        if (guestIcon) {
+          nextThumbnailStudio = {
+            ...defaultThumbnailStudio,
+            ...nextThumbnailStudio,
+            guestIcon
+          };
+        }
         nextResponses = [
           response,
           ...nextResponses.filter(
@@ -509,7 +649,7 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
   });
 
   return {
-    data: { ...current, responses: nextResponses, tracks: nextTracks },
+    data: { ...current, responses: nextResponses, tracks: nextTracks, thumbnailStudio: nextThumbnailStudio },
     result: { responses: responseCount, tracks: trackCount }
   };
 };
@@ -724,6 +864,7 @@ const sampleData = {
       questions: [
         { id: "q_guest_name", label: "ゲスト名 正式表記", kind: "short", required: true, use: "public" },
         { id: "q_guest_x", label: "X URL", kind: "url", required: true, use: "public" },
+        { id: "q_guest_icon", label: "ゲストアイコン画像", kind: "image", required: false, use: "internal" },
         { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: false, use: "internal" },
         { id: "q_profile", label: "活動紹介文", kind: "long", required: true, use: "public" },
         { id: "q_topics", label: "今回話したいこと", kind: "long", required: false, use: "article" },
@@ -916,6 +1057,17 @@ function migrateData(input) {
       }
     }
 
+    if (isGuestForm && !questions.some((question) => question.kind === "image" || /アイコン|プロフィール画像|icon|avatar/i.test(question.label ?? ""))) {
+      const insertIndex = questions.findIndex((question) => question.id === "q_guest_x");
+      const iconQuestion = { id: "q_guest_icon", label: "ゲストアイコン画像", kind: "image", required: false, use: "internal" };
+      questions = [...questions];
+      if (insertIndex >= 0) {
+        questions.splice(insertIndex + 1, 0, iconQuestion);
+      } else {
+        questions.push(iconQuestion);
+      }
+    }
+
     if (isGuestForm && !questions.some((question) => question.kind === "track")) {
       const topicsIndex = questions.findIndex((question) => question.id === "q_topics");
       const trackQuestion = { id: "q_guest_track", label: "紹介する楽曲", kind: "track", required: false, use: "article" };
@@ -986,7 +1138,10 @@ function migrateData(input) {
       guestIcon: {
         ...defaultThumbnailStudio.guestIcon,
         ...(input.thumbnailStudio?.guestIcon ?? {})
-      }
+      },
+      activeLayoutPreset: input.thumbnailStudio?.activeLayoutPreset ?? defaultThumbnailStudio.activeLayoutPreset,
+      customLayoutPresets: input.thumbnailStudio?.customLayoutPresets ?? [],
+      generated: input.thumbnailStudio?.generated ?? {}
     },
     episodes,
     forms,
@@ -1534,6 +1689,8 @@ ${assetRows || "-"}
           constraints: response.constraints || "",
           attachments
         };
+        const guestIconAttachment = findGuestIconAttachment(attachments);
+        const guestIcon = makeGuestIconFromAttachment(guestIconAttachment, `${normalized.respondent || "guest"}-icon`);
         const importedTracks = buildTracksFromRawAnswers(parsed.rawAnswers ?? [], normalized.episodeId, normalized.formId, normalized.respondent, normalized.periodId);
         setData((current) => {
           let nextTracks = current.tracks;
@@ -1546,7 +1703,14 @@ ${assetRows || "-"}
           return {
             ...current,
             responses: [normalized, ...current.responses],
-            tracks: nextTracks
+            tracks: nextTracks,
+            thumbnailStudio: guestIcon
+              ? {
+                  ...defaultThumbnailStudio,
+                  ...(current.thumbnailStudio ?? {}),
+                  guestIcon
+                }
+              : current.thumbnailStudio
           };
         });
         setActive("responses");
@@ -1876,6 +2040,23 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     });
   };
 
+  const updateImageAnswer = async (questionId, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!isImageUpload(file)) {
+      alert("PNG、JPG、WebP、GIFの画像を選んでください。");
+      event.target.value = "";
+      return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    updateAnswer(questionId, {
+      fileName: file.name,
+      mimeType: file.type || "image/png",
+      size: file.size,
+      dataUrl
+    });
+  };
+
   const updateTrackFileAnswer = async (questionId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1917,6 +2098,16 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         size: answers[question.id].size,
         dataUrl: answers[question.id].dataUrl
       }));
+    const imageAttachments = form.questions
+      .filter((question) => question.kind === "image" && answers[question.id]?.dataUrl)
+      .map((question) => ({
+        questionId: question.id,
+        questionLabel: question.label,
+        fileName: answers[question.id].fileName,
+        mimeType: answers[question.id].mimeType,
+        size: answers[question.id].size,
+        dataUrl: answers[question.id].dataUrl
+      }));
     const trackAttachments = form.questions
       .filter((question) => question.kind === "track" && answers[question.id]?.audio?.dataUrl)
       .map((question) => ({
@@ -1929,7 +2120,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         size: answers[question.id].audio.size,
         dataUrl: answers[question.id].audio.dataUrl
       }));
-    const attachments = [...fileAttachments, ...trackAttachments];
+    const attachments = [...fileAttachments, ...imageAttachments, ...trackAttachments];
 
     return {
       version: 1,
@@ -1955,7 +2146,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         use: question.use,
         useLabel: QUESTION_USE_LABELS[question.use] ?? question.use,
         answer: formatAnswerValue(answers[question.id]),
-        attachment: question.kind === "file" ? answers[question.id] || null : question.kind === "track" ? answers[question.id]?.audio || null : null,
+        attachment: question.kind === "file" || question.kind === "image" ? answers[question.id] || null : question.kind === "track" ? answers[question.id]?.audio || null : null,
         track: question.kind === "track" ? answers[question.id] || null : null,
         xContact: question.kind === "x_contact" ? answers[question.id] || null : null
       }))
@@ -2029,6 +2220,19 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                     onChange={(event) => updateFileAnswer(question.id, event)}
                   />
                   <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : "WAVまたはMP3をアップロード"}</small>
+                </div>
+              ) : question.kind === "image" ? (
+                <div className="upload-field">
+                  <input
+                    type="file"
+                    required={Boolean(question.required)}
+                    accept={IMAGE_FILE_ACCEPT}
+                    onChange={(event) => updateImageAnswer(question.id, event)}
+                  />
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : "PNG、JPG、WebP、GIFをアップロード"}</small>
+                  {answers[question.id]?.dataUrl && (
+                    <img className="image-answer-preview" src={answers[question.id].dataUrl} alt={`${question.label} preview`} />
+                  )}
                 </div>
               ) : question.kind === "track" ? (
                 <div className="track-question-fields">
@@ -2632,7 +2836,7 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
             </div>
             <div className="question-list">
               <div className="subhead">質問項目</div>
-              <p className="hint-text">入力形式: 楽曲を選ぶと「楽曲名・楽曲URL・WAV/MP3アップロード」の3点セットになります。ファイル単体は音源以外の添付用です。</p>
+              <p className="hint-text">入力形式: 楽曲を選ぶと「楽曲名・楽曲URL・WAV/MP3アップロード」の3点セットになります。画像はゲストアイコンやプロフィール画像用、ファイル単体はWAV/MP3の音源添付用です。</p>
               {form.questions.map((question) => (
                 <div className="question-row" key={question.id}>
                   <input value={question.label} onChange={(event) => patchQuestion(form.id, question.id, { label: event.target.value })} />
@@ -2696,12 +2900,15 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
             </div>
             {response.attachments?.length > 0 && (
               <div className="attachment-list">
-                <div className="subhead">添付音源</div>
+                <div className="subhead">添付ファイル</div>
                 {response.attachments.map((attachment, index) => (
                   <div className="attachment-item" key={`${attachment.fileName}-${index}`}>
                     <span>{attachment.fileName}</span>
                     <small>{Math.round((attachment.size || 0) / 1024 / 1024 * 10) / 10}MB</small>
                     <button className="secondary" onClick={() => downloadAttachment(attachment)}><Download size={16} />ダウンロード</button>
+                    {attachment.dataUrl && isImageAttachment(attachment) && (
+                      <img className="attachment-image" src={attachment.dataUrl} alt={attachment.fileName || "添付画像"} />
+                    )}
                     {attachment.dataUrl && isAudioAttachment(attachment) && (
                       <audio className="attachment-audio" controls preload="metadata" src={attachment.dataUrl} />
                     )}
@@ -2771,6 +2978,7 @@ const loadCanvasImage = (src) =>
     const image = new window.Image();
     image.onload = () => resolve(image);
     image.onerror = reject;
+    if (!src.startsWith("data:")) image.crossOrigin = "anonymous";
     image.src = src;
   });
 
@@ -2865,9 +3073,36 @@ async function renderThumbnail({ preset, template, icon, date }) {
 }
 
 function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
-  const [preview, setPreview] = useState({});
   const [message, setMessage] = useState("");
+  const [layoutPresetName, setLayoutPresetName] = useState("");
+  const [generatedImages, setGeneratedImages] = useState({});
   const thumbnailDate = studio.date || episodeDate || "";
+  const generated = studio.generated ?? {};
+  const customLayoutPresets = studio.customLayoutPresets ?? [];
+  const layoutPresets = [...THUMBNAIL_ICON_LAYOUT_PRESETS, ...customLayoutPresets];
+  const activeLayoutPresetId = studio.activeLayoutPreset || THUMBNAIL_ICON_LAYOUT_PRESETS[0].id;
+
+  useEffect(() => {
+    let active = true;
+    Promise.all(
+      THUMBNAIL_PRESETS.map(async (preset) => {
+        const saved = generated[preset.key];
+        if (saved?.dataUrl) return [preset.key, saved.dataUrl];
+        if (!saved?.imageKey) return [preset.key, ""];
+        try {
+          return [preset.key, await loadGeneratedThumbnailImage(saved.imageKey)];
+        } catch {
+          return [preset.key, ""];
+        }
+      })
+    ).then((entries) => {
+      if (!active) return;
+      setGeneratedImages(Object.fromEntries(entries.filter(([, dataUrl]) => dataUrl)));
+    });
+    return () => {
+      active = false;
+    };
+  }, [generated.article16x9?.imageKey, generated.article16x9?.dataUrl, generated.standfm1x1?.imageKey, generated.standfm1x1?.dataUrl, generated.stream9x16?.imageKey, generated.stream9x16?.dataUrl]);
 
   const handleTemplateFile = async (presetKey, event) => {
     const file = event.target.files?.[0];
@@ -2923,6 +3158,62 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     }));
   };
 
+  const applyLayoutPreset = (presetId) => {
+    const preset = layoutPresets.find((item) => item.id === presetId) ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0];
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      activeLayoutPreset: preset.id,
+      templates: applyIconLayoutPresetToTemplates(current.templates, preset)
+    }));
+    setMessage(`${preset.name} の配置を適用しました。`);
+  };
+
+  const saveCurrentLayoutPreset = () => {
+    const name = layoutPresetName.trim();
+    if (!name) {
+      setMessage("プリセット名を入力してください。");
+      return;
+    }
+    const preset = {
+      id: newId("layout"),
+      name,
+      templates: Object.fromEntries(
+        THUMBNAIL_PRESETS.map((presetItem) => {
+          const template = studio.templates?.[presetItem.key] ?? defaultThumbnailStudio.templates[presetItem.key];
+          return [
+            presetItem.key,
+            {
+              iconX: Number(template.iconX || 50),
+              iconY: Number(template.iconY || 50),
+              iconSize: Number(template.iconSize || 28)
+            }
+          ];
+        })
+      )
+    };
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      activeLayoutPreset: preset.id,
+      customLayoutPresets: [...(current.customLayoutPresets ?? []), preset]
+    }));
+    setLayoutPresetName("");
+    setMessage(`${name} を配置プリセットに保存しました。`);
+  };
+
+  const deleteActiveLayoutPreset = () => {
+    if (THUMBNAIL_ICON_LAYOUT_PRESETS.some((preset) => preset.id === activeLayoutPresetId)) return;
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      activeLayoutPreset: THUMBNAIL_ICON_LAYOUT_PRESETS[0].id,
+      templates: applyIconLayoutPresetToTemplates(current.templates, THUMBNAIL_ICON_LAYOUT_PRESETS[0]),
+      customLayoutPresets: (current.customLayoutPresets ?? []).filter((preset) => preset.id !== activeLayoutPresetId)
+    }));
+    setMessage("カスタム配置プリセットを削除しました。");
+  };
+
   const resetTemplate = (presetKey) => {
     updateStudio((current) => ({
       ...defaultThumbnailStudio,
@@ -2951,19 +3242,42 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         icon: studio.guestIcon,
         date: thumbnailDate
       });
-      setPreview((current) => ({ ...current, [preset.key]: dataUrl }));
-      setMessage(`${preset.label} を生成しました。`);
+      const fileName = `${guestName || "guest"}-${preset.fileName}`;
+      const generatedAt = new Date().toISOString();
+      const imageKey = `${preset.key}-${Date.now()}`;
+      let generatedRecord = {
+        imageKey,
+        fileName,
+        label: preset.label,
+        generatedAt
+      };
+      try {
+        await saveGeneratedThumbnailImage(imageKey, dataUrl);
+      } catch {
+        generatedRecord = { ...generatedRecord, dataUrl };
+      }
+      setGeneratedImages((current) => ({ ...current, [preset.key]: dataUrl }));
+      updateStudio((current) => ({
+        ...defaultThumbnailStudio,
+        ...current,
+        generated: {
+          ...(current.generated ?? {}),
+          [preset.key]: generatedRecord
+        }
+      }));
+      setMessage(`${preset.label} を生成して保存しました。`);
     } catch {
       setMessage("ベース画像を読み込めませんでした。固定ベースに戻すか、画像を登録し直してください。");
     }
   };
 
   const downloadOne = (preset) => {
-    const dataUrl = preview[preset.key];
+    const saved = generated[preset.key];
+    const dataUrl = generatedImages[preset.key] || saved?.dataUrl;
     if (!dataUrl) return;
     const anchor = document.createElement("a");
     anchor.href = dataUrl;
-    anchor.download = `${guestName || "guest"}-${preset.fileName}`;
+    anchor.download = saved.fileName || `${guestName || "guest"}-${preset.fileName}`;
     anchor.click();
   };
 
@@ -2985,6 +3299,21 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         <p className="hint-text wide">初期値は選択中の放送日です。日付は各ベース画像上部の二重丸に、添付サンプルと同じ3行形式で入ります。</p>
       </div>
 
+      <div className="thumbnail-layout-controls">
+        <SelectField
+          label="配置プリセット"
+          value={activeLayoutPresetId}
+          options={layoutPresets.map((preset) => preset.id)}
+          labels={Object.fromEntries(layoutPresets.map((preset) => [preset.id, preset.name]))}
+          onChange={applyLayoutPreset}
+        />
+        <Field label="新規プリセット名" value={layoutPresetName} onChange={setLayoutPresetName} placeholder="例: 2人用" />
+        <button className="secondary" onClick={saveCurrentLayoutPreset}><Save size={16} />現在の配置を保存</button>
+        <button className="danger" onClick={deleteActiveLayoutPreset} disabled={THUMBNAIL_ICON_LAYOUT_PRESETS.some((preset) => preset.id === activeLayoutPresetId)}>
+          <Trash2 size={16} />プリセット削除
+        </button>
+      </div>
+
       {studio.guestIcon?.name && (
         <div className="registered-image-row">
           <img src={studio.guestIcon.dataUrl} alt="登録済みゲストアイコン" />
@@ -2998,6 +3327,8 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           const template = studio.templates?.[preset.key] ?? defaultThumbnailStudio.templates[preset.key];
           const templateSource = getTemplateSource(template);
           const templateLabel = isCustomTemplate(template) ? template.name : `${preset.baseName}（固定）`;
+          const savedGenerated = generated[preset.key];
+          const savedGeneratedDataUrl = generatedImages[preset.key] || savedGenerated?.dataUrl;
           return (
             <section className="thumbnail-card" key={preset.key}>
               <div className="thumbnail-card-head">
@@ -3025,12 +3356,12 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
               </div>
               <div className="button-row">
                 <button className="primary" onClick={() => generateOne(preset)}>生成</button>
-                <button className="secondary" onClick={() => downloadOne(preset)} disabled={!preview[preset.key]}>PNG保存</button>
+                <button className="secondary" onClick={() => downloadOne(preset)} disabled={!savedGeneratedDataUrl}>PNG保存</button>
               </div>
-              {preview[preset.key] && (
+              {savedGeneratedDataUrl && (
                 <div className="registered-template">
-                  <span>合成プレビュー</span>
-                  <img className="thumbnail-preview" src={preview[preset.key]} alt={`${preset.label} preview`} />
+                  <span>保存済み合成プレビュー</span>
+                  <img className="thumbnail-preview" src={savedGeneratedDataUrl} alt={`${preset.label} preview`} />
                 </div>
               )}
             </section>
