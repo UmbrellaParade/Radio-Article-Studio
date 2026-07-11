@@ -942,6 +942,8 @@ const nextSlotNo = (tracks, episodeId) => {
 
 const appendTrack = (tracks, nextTrack) => [...tracks, nextTrack];
 
+const getDefaultOwnerHonorific = (source = "") => (source === "パーソナリティ曲" ? "さんなし" : "さん");
+
 const buildResponseFromRow = (row, episodeId, formId) => {
   const respondent = pick(row, ["ゲスト名", "お名前", "名前", "活動名", "アーティスト名", "回答者", "応募者名"]);
   const xUrl = pick(row, ["X URL", "Twitter URL", "X", "Twitter"]);
@@ -1010,7 +1012,7 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId
   const url = pick(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"]);
   const audioFile = pick(row, ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"]);
   const articlePoint = pick(row, ["曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"]);
-  const honorific = pick(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"]);
+  const honorific = pick(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"]) || getDefaultOwnerHonorific(source);
 
   if (!title && !url && !audioFile) return null;
 
@@ -1138,7 +1140,7 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
         audioFile: track.audio?.fileName || "",
         audio: track.audio || null,
         embedUrl: makeEmbedUrl(track.url || ""),
-        honorific: source === "パーソナリティ曲" ? "さんなし" : "",
+        honorific: getDefaultOwnerHonorific(source),
         articlePoint: `${answer.label}から取り込み`,
         status: "回答JSONから取り込み"
       };
@@ -1800,6 +1802,7 @@ function migrateData(input) {
       periodId: "",
       aiArtist: "",
       ...track,
+      honorific: track.honorific || getDefaultOwnerHonorific(track.source),
       urlType: track.urlType || detectUrlType(track.url)
     }))
   };
@@ -2058,7 +2061,7 @@ function App() {
         audioFile: "",
         audio: null,
         embedUrl: "",
-        honorific: "",
+        honorific: getDefaultOwnerHonorific("ゲスト曲"),
         articlePoint: "",
         status: "未確認"
       }
@@ -2487,10 +2490,11 @@ ${response.constraints || "-"}`
 
     const trackRows = episodeTracks
       .map((track) => {
-        const aiArtistNote = track.aiArtist ? ` / AIアーティスト名: ${track.aiArtist}` : "";
+        const ownerHonorific = track.honorific || getDefaultOwnerHonorific(track.source);
+        const aiArtistNote = track.aiArtist ? ` / AIアーティスト名: ${track.aiArtist}（敬称なし）` : "";
         return (
           `${track.slotNo}. ${track.title || "曲名未入力"} / ${track.artist || "アーティスト未入力"}\n` +
-          `   種別: ${track.source} / 応募期間: ${track.periodId || "-"}${aiArtistNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
+          `   種別: ${track.source} / 本人名の敬称: ${ownerHonorific} / 応募期間: ${track.periodId || "-"}${aiArtistNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
           `   記事ポイント: ${track.articlePoint || "-"}`
         );
       })
@@ -4070,6 +4074,15 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
   const updateTrackUrl = (track, url) => {
     patchItem("tracks", track.id, { url, urlType: detectUrlType(url), embedUrl: makeEmbedUrl(url) || track.embedUrl });
   };
+  const updateTrackSource = (track, source) => {
+    const currentHonorific = track.honorific || "";
+    const oldDefault = getDefaultOwnerHonorific(track.source);
+    const patch = { source };
+    if (!currentHonorific || currentHonorific === oldDefault) {
+      patch.honorific = getDefaultOwnerHonorific(source);
+    }
+    patchItem("tracks", track.id, patch);
+  };
   const saveTrackAudio = async (audio, fallbackName) => {
     try {
       await saveDataUrlWithPicker(audio.dataUrl, audio.fileName || fallbackName || "audio-file");
@@ -4094,8 +4107,8 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
               </div>
               <div className="track-meta-grid">
                 <Field label="曲順" type="number" value={track.slotNo} onChange={(value) => patchItem("tracks", track.id, { slotNo: value })} />
-                <SelectField label="紹介枠" value={track.source} options={["ゲスト曲", "パーソナリティ曲", "リスナー応募曲"]} onChange={(value) => patchItem("tracks", track.id, { source: value })} />
-                <Field label="アーティスト名" value={track.artist} onChange={(value) => patchItem("tracks", track.id, { artist: value })} />
+                <SelectField label="紹介枠" value={track.source} options={["ゲスト曲", "パーソナリティ曲", "リスナー応募曲"]} onChange={(value) => updateTrackSource(track, value)} />
+                <Field label="本人名（ゲスト/応募者/パーソナリティ）" value={track.artist} onChange={(value) => patchItem("tracks", track.id, { artist: value })} />
                 <Field label="AIアーティスト名" value={track.aiArtist} onChange={(value) => patchItem("tracks", track.id, { aiArtist: value })} />
               </div>
               <div className="song-card">
@@ -4109,7 +4122,7 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
                   <Field label="楽曲URL（YouTube / Suno）" value={track.url} onChange={(value) => updateTrackUrl(track, value)} />
                   <Field label="音源ファイル（WAV / mp3）" value={track.audioFile} onChange={(value) => patchItem("tracks", track.id, { audioFile: value })} />
                   <Field label="埋め込みURL（必要なら）" value={track.embedUrl} onChange={(value) => patchItem("tracks", track.id, { embedUrl: value })} />
-                  <Field label="敬称ルール" value={track.honorific} onChange={(value) => patchItem("tracks", track.id, { honorific: value })} />
+                  <Field label="本人名の敬称ルール" value={track.honorific || getDefaultOwnerHonorific(track.source)} onChange={(value) => patchItem("tracks", track.id, { honorific: value })} />
                   <TextArea label="記事で触れるポイント" value={track.articlePoint} onChange={(value) => patchItem("tracks", track.id, { articlePoint: value })} />
                 </div>
                 {audioDownloadUrl && !audio?.dataUrl && (
