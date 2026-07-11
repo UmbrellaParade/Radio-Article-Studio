@@ -926,6 +926,13 @@ textarea {
   gap: 14px;
 }
 
+.x-contact-message {
+  padding: 10px 12px;
+  border: 1px solid #eadfce;
+  border-radius: 8px;
+  background: #fbf6ed;
+}
+
 .eyebrow.slim {
   margin: 0;
   font-size: 11px;
@@ -1033,6 +1040,57 @@ textarea {
   border: 1px solid #d6ccbd;
   border-radius: 8px;
   background: #fff;
+  object-fit: contain;
+}
+
+.image-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 14, 22, .78);
+}
+
+.image-modal-panel {
+  width: min(96vw, 1280px);
+  max-height: 94vh;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fff8ee;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .35);
+}
+
+.image-modal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.image-modal-head strong,
+.image-modal-head span {
+  display: block;
+}
+
+.image-modal-head span {
+  margin-top: 3px;
+  color: #665d70;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.image-modal-panel img {
+  width: 100%;
+  max-height: calc(94vh - 92px);
+  display: block;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #120f18;
   object-fit: contain;
 }
 
@@ -1383,6 +1441,19 @@ textarea {
 
   .thumbnail-preview {
     max-height: 180px;
+  }
+
+  .image-modal {
+    padding: 8px;
+  }
+
+  .image-modal-panel {
+    width: 100%;
+    max-height: 96vh;
+  }
+
+  .image-modal-panel img {
+    max-height: calc(96vh - 92px);
   }
 
   .registered-image-row {

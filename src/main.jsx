@@ -20,7 +20,9 @@ import {
   Settings,
   Share2,
   Trash2,
-  Upload
+  Upload,
+  X,
+  ZoomIn
 } from "lucide-react";
 import "./styles.css";
 
@@ -31,6 +33,8 @@ const SHARED_FORMS_DIR = "shared-forms";
 const DEFAULT_OBSIDIAN_PATH = "C:\\Users\\myabe\\OneDrive\\Desktop\\Obsidian Folder\\Umbrella Parade\\Sunoパ！記事";
 const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
 const DEFAULT_KANAME_X_HANDLE = "kaname_mbembe";
+const DEFAULT_X_CONTACT_MESSAGE =
+  "Xでご連絡するため、べるぼ☂とかなめ🦐のアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。";
 const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
@@ -225,10 +229,7 @@ const formatAnswerValue = (value) => {
   if (typeof value === "object" && ("xHandle" in value || "xUrl" in value || "dmOk" in value)) {
     return compactLines([
       `Xアカウント: ${value.xHandle || "-"}`,
-      `X URL: ${value.xUrl || "-"}`,
-      `べるぼ☂フォロー: ${value.followedBellbo ? "はい" : "未確認"}`,
-      `かなめ🦐フォロー: ${value.followedKaname ? "はい" : "未確認"}`,
-      `DM連絡OK: ${value.dmOk ? "はい" : "未確認"}`
+      `X URL: ${value.xUrl || "-"}`
     ]);
   }
   return String(value);
@@ -253,7 +254,7 @@ const THUMBNAIL_PRESETS = [
     fileName: "standfm-thumbnail.png",
     baseName: "固定ベース 1:1",
     baseUrl: publicAsset("thumbnail-templates/sunopa-standfm-1x1.png"),
-    dateBadge: { x: 50, y: 16.2, year: 40, date: 62, weekday: 42, offsets: [-62, 1, 68] }
+    dateBadge: { x: 50, y: 15.4, year: 40, date: 62, weekday: 42, offsets: [-62, 1, 68] }
   },
   {
     key: "stream9x16",
@@ -263,7 +264,7 @@ const THUMBNAIL_PRESETS = [
     fileName: "stream-background.png",
     baseName: "固定ベース 9:16",
     baseUrl: publicAsset("thumbnail-templates/sunopa-stream-9x16.png"),
-    dateBadge: { x: 50, y: 19.4, year: 48, date: 76, weekday: 52, offsets: [-76, 0, 84] }
+    dateBadge: { x: 50, y: 17.9, year: 48, date: 76, weekday: 52, offsets: [-76, 0, 84] }
   }
 ];
 
@@ -745,6 +746,21 @@ const getPublishedSharePayloadUrl = (slug) => publicAsset(`${SHARED_FORMS_DIR}/$
 const makePublishedShareUrl = (slug) =>
   `${window.location.origin}${window.location.pathname}#/r/${encodeURIComponent(normalizeShareSlug(slug))}`;
 
+const makeShortUrlActivationRequest = (slug, payload) => {
+  const shareSlug = normalizeShareSlug(slug);
+  return `Radio Article Studioの短いURLを有効化してください。
+
+短いURL:
+${makePublishedShareUrl(shareSlug)}
+
+配置先:
+public/${SHARED_FORMS_DIR}/${shareSlug}.json
+
+配置するJSON:
+${JSON.stringify(payload, null, 2)}
+`;
+};
+
 const downloadTextFile = (content, fileName, type = "text/plain") => {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -841,6 +857,7 @@ const makeSharePayload = (form, settings = sampleData.settings, context = {}) =>
       bellbo: normalizeXHandle(settings.bellboXHandle || DEFAULT_BELLBO_X_HANDLE),
       kaname: normalizeXHandle(settings.kanameXHandle || "")
     },
+    xContactMessage: settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE,
     form: {
       id: form.id,
       name: form.name,
@@ -905,7 +922,8 @@ const sampleData = {
     wordpressSite: "https://ai-music.noiseinmysoul.com/",
     sePonUrl: "https://umbrellaparade.github.io/SE_Pon/",
     bellboXHandle: DEFAULT_BELLBO_X_HANDLE,
-    kanameXHandle: DEFAULT_KANAME_X_HANDLE
+    kanameXHandle: DEFAULT_KANAME_X_HANDLE,
+    xContactMessage: DEFAULT_X_CONTACT_MESSAGE
   },
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
@@ -937,7 +955,7 @@ const sampleData = {
         { id: "q_guest_name", label: "ゲスト名 正式表記", kind: "short", required: true, use: "public" },
         { id: "q_guest_x", label: "X URL", kind: "url", required: true, use: "public" },
         { id: "q_guest_icon", label: "ゲストアイコン画像", kind: "image", required: false, use: "internal" },
-        { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: false, use: "internal" },
+        { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: false, use: "public" },
         { id: "q_profile", label: "活動紹介文", kind: "long", required: true, use: "public" },
         { id: "q_topics", label: "今回話したいこと", kind: "long", required: false, use: "article" },
         { id: "q_guest_track", label: "紹介する楽曲", kind: "track", required: false, use: "article" },
@@ -953,7 +971,7 @@ const sampleData = {
       description: "送って頂く楽曲の楽曲名、楽曲URL、WAV/MP3音源、記事掲載可否を集めるフォーム。",
       questions: [
         { id: "q_artist", label: "アーティスト名 正式表記", kind: "short", required: true, use: "article" },
-        { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: true, use: "internal" },
+        { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: true, use: "public" },
         { id: "q_track", label: "送って頂く楽曲", kind: "track", required: true, use: "article" },
         { id: "q_credit", label: "クレジット/表記注意", kind: "long", required: false, use: "constraint" }
       ]
@@ -1122,7 +1140,7 @@ function migrateData(input) {
         label: "連絡用Xアカウント",
         kind: "x_contact",
         required: isListenerForm,
-        use: "internal"
+        use: "public"
       };
       questions = [...questions];
       if (insertIndex >= 0) {
@@ -1177,12 +1195,17 @@ function migrateData(input) {
       }
     }
 
+    questions = questions.map((question) =>
+      question.kind === "x_contact" && question.use === "internal" ? { ...question, use: "public" } : question
+    );
+
     return { ...form, shareSlug: form.shareSlug || getFormPublishedSlug(form), questions };
   });
 
   const settings = { ...sampleData.settings, ...(input.settings ?? {}) };
   if (!settings.bellboXHandle) settings.bellboXHandle = DEFAULT_BELLBO_X_HANDLE;
   if (!settings.kanameXHandle) settings.kanameXHandle = DEFAULT_KANAME_X_HANDLE;
+  if (!settings.xContactMessage) settings.xContactMessage = DEFAULT_X_CONTACT_MESSAGE;
   const episodes = (input.episodes ?? sampleData.episodes).map((episode) => {
     const articleSlug = episode.articleSlug || extractSlugFromUrl(episode.articleUrl);
     return {
@@ -2052,6 +2075,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     bellbo: normalizeXHandle(payload?.contactAccounts?.bellbo || DEFAULT_BELLBO_X_HANDLE),
     kaname: normalizeXHandle(payload?.contactAccounts?.kaname || DEFAULT_KANAME_X_HANDLE)
   };
+  const xContactMessage = payload?.xContactMessage || DEFAULT_X_CONTACT_MESSAGE;
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState("");
   const [copied, setCopied] = useState(false);
@@ -2077,7 +2101,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
           <h2>共有フォームを開けませんでした</h2>
           <p className="muted">
             {payload?.publishedSlug
-              ? `公開JSON public/shared-forms/${payload.publishedSlug}.json がまだ配置されていないか、公開IDが違う可能性があります。`
+              ? `この短いURLはまだ有効化されていない可能性があります。管理画面の「URL用JSONをコピー」を使って、Codexに短いURLの有効化を依頼してください。`
               : "URLが途中で切れている可能性があります。管理画面から共有リンクを作り直してください。"}
           </p>
           <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
@@ -2188,7 +2212,11 @@ function PublicSubmissionForm({ logoSrc, payload }) {
   const formatAnswers = (uses) =>
     form.questions
       .filter((question) => uses.includes(question.use))
-      .map((question) => `${question.label}: ${formatAnswerValue(answers[question.id])}`)
+      .map((question) => {
+        const formatted = formatAnswerValue(answers[question.id]);
+        return formatted && formatted !== "-" ? `${question.label}: ${formatted}` : "";
+      })
+      .filter(Boolean)
       .join("\n");
 
   const inferRespondent = () => {
@@ -2400,6 +2428,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                       )}
                     </small>
                   </label>
+                  <p className="hint-text x-contact-message">{xContactMessage}</p>
                   <div className="follow-actions">
                     {contactAccounts.bellbo ? (
                       <a className="secondary" href={makeXUrl(contactAccounts.bellbo)} target="_blank" rel="noreferrer">
@@ -2443,7 +2472,6 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                     />
                     XのDMで運営から連絡を受け取ってOKです
                   </label>
-                  <p className="hint-text">連絡用のため、記事本文には載せない内部確認情報として扱います。</p>
                 </div>
               ) : question.kind === "long" ? (
                 <textarea
@@ -2862,6 +2890,16 @@ function ApplicationPeriods({
     window.setTimeout(() => setCopiedPeriodId(""), 1800);
   };
 
+  const copyPeriodActivationRequest = async (period) => {
+    const form = forms.find((item) => item.id === period.formId);
+    if (!form) return;
+    const episode = episodes.find((item) => item.id === period.episodeId);
+    const slug = getPeriodPublishedSlug(period, episode, form);
+    await navigator.clipboard.writeText(makeShortUrlActivationRequest(slug, makeSharePayload(form, settings, { period, episode })));
+    setCopiedPeriodId(`${period.id}:activation`);
+    window.setTimeout(() => setCopiedPeriodId(""), 1800);
+  };
+
   return (
     <div className="view-stack">
       <SectionTitle
@@ -2895,32 +2933,35 @@ function ApplicationPeriods({
                 <Field label="受付開始" type="date" value={period.startDate} onChange={(value) => patchItem("applicationPeriods", period.id, { startDate: value })} />
                 <Field label="受付終了" type="date" value={period.endDate} onChange={(value) => patchItem("applicationPeriods", period.id, { endDate: value })} />
                 <SelectField label="状態" value={period.status} options={["準備中", "受付中", "受付終了", "取り込み済み", "保留"]} onChange={(value) => patchItem("applicationPeriods", period.id, { status: value })} />
-                <Field label="短縮公開ID" value={period.shareSlug} onChange={(value) => patchItem("applicationPeriods", period.id, { shareSlug: value })} placeholder="例: yui-20260723" />
+                <Field label="短縮ID" value={period.shareSlug} onChange={(value) => patchItem("applicationPeriods", period.id, { shareSlug: value })} placeholder="例: yui-20260723" />
                 <Field label="Google Sheets / CSV URL" value={period.csvUrl} onChange={(value) => patchItem("applicationPeriods", period.id, { csvUrl: value })} />
                 <TextArea label="メモ" value={period.notes} onChange={(value) => patchItem("applicationPeriods", period.id, { notes: value })} />
               </div>
               <div className="share-box short-share">
                 <div>
-                  <strong><Share2 size={16} />公開後に使える短いURL</strong>
-                  <span>ゲストさんやSNSに渡す用です。先に「公開JSONを保存」して、Codexに public/shared-forms/{publishedSlug || "id"}.json へ配置してもらうと、このURLで開けます。</span>
+                  <strong><Share2 size={16} />短いURL</strong>
+                  <span>ゲストさんやSNSに渡す用です。まだ開けない時は「Codex用依頼をコピー」をそのままCodexに貼ってください。</span>
                 </div>
                 <input readOnly value={publishedUrl} onFocus={(event) => event.target.select()} />
                 <div className="inline-actions">
                   <button className="secondary" onClick={() => copyPublishedPeriodShareUrl(period)} disabled={!publishedUrl}>
-                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:published` ? "コピー済み" : "短い公開URLをコピー"}
+                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:published` ? "コピー済み" : "短いURLをコピー"}
                   </button>
                   <button className="secondary" onClick={() => downloadPublishedPeriodJson(period)} disabled={!publishedUrl}>
-                    <Download size={16} />公開JSONを保存
+                    <Download size={16} />URL用JSONを保存
                   </button>
                   <button className="secondary" onClick={() => copyPublishedPeriodJson(period)} disabled={!publishedUrl}>
-                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:json` ? "JSONコピー済み" : "公開JSONをコピー"}
+                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:json` ? "JSONコピー済み" : "URL用JSONをコピー"}
+                  </button>
+                  <button className="secondary" onClick={() => copyPeriodActivationRequest(period)} disabled={!publishedUrl}>
+                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:activation` ? "依頼文コピー済み" : "Codex用依頼をコピー"}
                   </button>
                 </div>
               </div>
               <div className="share-box">
                 <div>
-                  <strong><Share2 size={16} />長い外部URL（即時用）</strong>
-                  <span>公開JSONを置かなくても今すぐ使える予備URLです。フォーム内容をURLに含めるため長くなります。</span>
+                  <strong><Share2 size={16} />長いURL（すぐ使える）</strong>
+                  <span>短いURLを有効化する前に使える予備URLです。フォーム内容をURLに含めるため長くなります。</span>
                 </div>
                 <input readOnly value={shareUrl} onFocus={(event) => event.target.select()} />
                 <div className="inline-actions">
@@ -2980,6 +3021,13 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
     window.setTimeout(() => setCopiedFormId(""), 1800);
   };
 
+  const copyFormActivationRequest = async (form) => {
+    const slug = getFormPublishedSlug(form);
+    await navigator.clipboard.writeText(makeShortUrlActivationRequest(slug, makeSharePayload(form, settings)));
+    setCopiedFormId(`${form.id}:activation`);
+    window.setTimeout(() => setCopiedFormId(""), 1800);
+  };
+
   return (
     <div className="view-stack">
       <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、外部共有URLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
@@ -2992,31 +3040,34 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
             </div>
             <div className="form-grid">
               <Field label="フォーム名" value={form.name} onChange={(value) => patchItem("forms", form.id, { name: value })} />
-              <Field label="短縮公開ID" value={form.shareSlug} onChange={(value) => patchItem("forms", form.id, { shareSlug: value })} placeholder="例: guest-form" />
+              <Field label="短縮ID" value={form.shareSlug} onChange={(value) => patchItem("forms", form.id, { shareSlug: value })} placeholder="例: guest-form" />
               <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
             </div>
             <div className="share-box short-share">
               <div>
-              <strong><Share2 size={16} />公開後に使える短いURL</strong>
-                <span>ゲストさんやSNSに渡す用です。先に「公開JSONを保存」して、Codexに public/shared-forms/{getFormPublishedSlug(form)}.json へ配置してもらうと、このURLで開けます。</span>
+                <strong><Share2 size={16} />短いURL</strong>
+                <span>ゲストさんやSNSに渡す用です。まだ開けない時は「Codex用依頼をコピー」をそのままCodexに貼ってください。</span>
               </div>
               <input readOnly value={makePublishedShareUrl(getFormPublishedSlug(form))} onFocus={(event) => event.target.select()} />
               <div className="inline-actions">
                 <button className="secondary" onClick={() => copyPublishedShareUrl(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:published` ? "コピー済み" : "短い公開URLをコピー"}
+                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:published` ? "コピー済み" : "短いURLをコピー"}
                 </button>
                 <button className="secondary" onClick={() => downloadPublishedFormJson(form)}>
-                  <Download size={16} />公開JSONを保存
+                  <Download size={16} />URL用JSONを保存
                 </button>
                 <button className="secondary" onClick={() => copyPublishedFormJson(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:json` ? "JSONコピー済み" : "公開JSONをコピー"}
+                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:json` ? "JSONコピー済み" : "URL用JSONをコピー"}
+                </button>
+                <button className="secondary" onClick={() => copyFormActivationRequest(form)}>
+                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:activation` ? "依頼文コピー済み" : "Codex用依頼をコピー"}
                 </button>
               </div>
             </div>
             <div className="share-box">
               <div>
-                <strong><Share2 size={16} />長い外部URL（即時用）</strong>
-                <span>公開JSONを置かなくても今すぐ使える予備URLです。フォーム内容をURLに含めるため長くなります。期間を指定する場合は「応募期間管理」のURLを使います。</span>
+                <strong><Share2 size={16} />長いURL（すぐ使える）</strong>
+                <span>短いURLを有効化する前に使える予備URLです。フォーム内容をURLに含めるため長くなります。期間を指定する場合は「応募期間管理」のURLを使います。</span>
               </div>
               <input readOnly value={makePortableShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
               <div className="inline-actions">
@@ -3270,6 +3321,8 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   const [message, setMessage] = useState("");
   const [layoutPresetName, setLayoutPresetName] = useState("");
   const [generatedImages, setGeneratedImages] = useState({});
+  const [previewImage, setPreviewImage] = useState(null);
+  const [generatingKey, setGeneratingKey] = useState("");
   const thumbnailDate = studio.date || episodeDate || "";
   const generated = studio.generated ?? {};
   const customLayoutPresets = studio.customLayoutPresets ?? [];
@@ -3429,6 +3482,8 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   };
 
   const generateOne = async (preset) => {
+    setGeneratingKey(preset.key);
+    setMessage(`${preset.label} を生成しています。`);
     try {
       const dataUrl = await renderThumbnail({
         preset,
@@ -3459,9 +3514,12 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           [preset.key]: generatedRecord
         }
       }));
+      setPreviewImage({ src: dataUrl, label: preset.label, width: preset.width, height: preset.height, fileName });
       setMessage(`${preset.label} を生成して保存しました。`);
     } catch {
       setMessage("ベース画像を読み込めませんでした。固定ベースに戻すか、画像を登録し直してください。");
+    } finally {
+      setGeneratingKey("");
     }
   };
 
@@ -3473,6 +3531,17 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     anchor.href = dataUrl;
     anchor.download = saved.fileName || `${guestName || "guest"}-${preset.fileName}`;
     anchor.click();
+  };
+
+  const openLargePreview = (preset, dataUrl, saved) => {
+    if (!dataUrl) return;
+    setPreviewImage({
+      src: dataUrl,
+      label: preset.label,
+      width: preset.width,
+      height: preset.height,
+      fileName: saved?.fileName || `${guestName || "guest"}-${preset.fileName}`
+    });
   };
 
   return (
@@ -3549,8 +3618,13 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
                 <SliderField label="サイズ" value={template.iconSize} onChange={(value) => patchTemplate(preset.key, { iconSize: value })} min="10" max="60" />
               </div>
               <div className="button-row">
-                <button className="primary" onClick={() => generateOne(preset)}>生成</button>
+                <button className="primary" onClick={() => generateOne(preset)} disabled={generatingKey === preset.key}>
+                  {generatingKey === preset.key ? "生成中" : "生成"}
+                </button>
                 <button className="secondary" onClick={() => downloadOne(preset)} disabled={!savedGeneratedDataUrl}>PNG保存</button>
+                <button className="secondary" onClick={() => openLargePreview(preset, savedGeneratedDataUrl, savedGenerated)} disabled={!savedGeneratedDataUrl}>
+                  <ZoomIn size={16} />大きく確認
+                </button>
               </div>
               {savedGeneratedDataUrl && (
                 <div className="registered-template">
@@ -3562,6 +3636,20 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           );
         })}
       </div>
+      {previewImage && (
+        <div className="image-modal" role="dialog" aria-modal="true" aria-label="生成画像の確認" onClick={() => setPreviewImage(null)}>
+          <div className="image-modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="image-modal-head">
+              <div>
+                <strong>{previewImage.label}</strong>
+                <span>{previewImage.width} x {previewImage.height} / {previewImage.fileName}</span>
+              </div>
+              <button className="icon-danger" onClick={() => setPreviewImage(null)} aria-label="閉じる"><X size={18} /></button>
+            </div>
+            <img src={previewImage.src} alt={`${previewImage.label} large preview`} />
+          </div>
+        </div>
+      )}
     </article>
   );
 }
@@ -3656,6 +3744,7 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           <Field label="SE_Pon URL" value={settings.sePonUrl} onChange={(value) => updateSettings({ sePonUrl: value })} />
           <Field label="べるぼ☂ Xアカウント" value={settings.bellboXHandle || ""} onChange={(value) => updateSettings({ bellboXHandle: normalizeXHandle(value) })} />
           <Field label="かなめ🦐 Xアカウント" value={settings.kanameXHandle || ""} onChange={(value) => updateSettings({ kanameXHandle: normalizeXHandle(value) })} />
+          <TextArea label="X連絡ブロック説明文" value={settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE} onChange={(value) => updateSettings({ xContactMessage: value })} />
         </div>
         <div className="button-row">
           <button className="secondary" onClick={() => updateSettings({ obsidianPath: DEFAULT_OBSIDIAN_PATH, obsidianFolderName: "Sunoパ！記事" })}>
