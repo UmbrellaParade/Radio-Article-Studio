@@ -191,7 +191,10 @@ const makeGuestIconFromAttachment = (attachment, fallbackName = "guest-icon") =>
   attachment
     ? {
         name: attachment.fileName || attachment.questionLabel || fallbackName,
-        dataUrl: attachment.dataUrl || attachment.sourceUrl || attachment.url || "",
+        dataUrl: makeImagePreviewUrl(attachment.dataUrl || attachment.sourceUrl || attachment.url || ""),
+        cropX: 50,
+        cropY: 50,
+        cropZoom: 100,
         source: "response",
         updatedAt: new Date().toISOString()
       }
@@ -294,6 +297,13 @@ const makeDirectAudioDownloadUrl = (url = "") => {
   if (!isWebUrl(trimmed)) return "";
   const driveFileId = getGoogleDriveFileId(trimmed);
   if (driveFileId) return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(driveFileId)}`;
+  return trimmed;
+};
+
+const makeImagePreviewUrl = (url = "") => {
+  const trimmed = String(url).trim();
+  const driveFileId = getGoogleDriveFileId(trimmed);
+  if (driveFileId) return `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveFileId)}&sz=w1200`;
   return trimmed;
 };
 
@@ -460,7 +470,7 @@ const applyIconLayoutPresetToTemplates = (templates = defaultThumbnailStudio.tem
 
 const defaultThumbnailStudio = {
   date: "",
-  guestIcon: { name: "", dataUrl: "" },
+  guestIcon: { name: "", dataUrl: "", cropX: 50, cropY: 50, cropZoom: 100 },
   guestIcons: [],
   activeLayoutPreset: "single",
   layoutPresetVersion: THUMBNAIL_LAYOUT_PRESET_VERSION,
@@ -482,6 +492,12 @@ const defaultThumbnailStudio = {
   )
 };
 
+const clampNumber = (value, fallback, min, max) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+};
+
 const normalizeGuestIconList = (guestIcon = defaultThumbnailStudio.guestIcon, guestIcons = []) => {
   const sourceIcons = Array.isArray(guestIcons) && guestIcons.length ? guestIcons : guestIcon?.dataUrl ? [guestIcon] : [];
   const seen = new Set();
@@ -490,7 +506,10 @@ const normalizeGuestIconList = (guestIcon = defaultThumbnailStudio.guestIcon, gu
     .map((icon, index) => ({
       id: icon.id || `guest_icon_${index}`,
       name: icon.name || `guest-icon-${index + 1}`,
-      dataUrl: icon.dataUrl
+      dataUrl: icon.dataUrl,
+      cropX: clampNumber(icon.cropX, 50, 0, 100),
+      cropY: clampNumber(icon.cropY, 50, 0, 100),
+      cropZoom: clampNumber(icon.cropZoom ?? icon.zoom, 100, 100, 300)
     }))
     .filter((icon) => {
       const key = `${icon.name}:${icon.dataUrl.slice(0, 80)}`;
@@ -1061,7 +1080,7 @@ const buildResponseFromRow = (row, episodeId, formId, fallbackRespondent = "") =
             fileName: iconUrl.split("/").filter(Boolean).pop()?.split(/[?#]/)[0] || "guest-icon",
             mimeType: "image/*",
             size: 0,
-            dataUrl: iconUrl,
+            dataUrl: makeImagePreviewUrl(iconUrl),
             sourceUrl: iconUrl
           }
         ]
@@ -2078,9 +2097,10 @@ function App() {
 
     Promise.all(
       THUMBNAIL_PRESETS.map(async (preset) => {
+        const template = await resolveThumbnailTemplateForRender(preset.key, studio.templates?.[preset.key]);
         const dataUrl = await renderThumbnail({
           preset,
-          template: studio.templates?.[preset.key],
+          template,
           icon: studio.guestIcon,
           icons: guestIcons,
           date: thumbnailDate,
@@ -2088,9 +2108,11 @@ function App() {
         });
         const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, currentGuestName);
         return [preset.key, generatedRecord];
-      })
+      }).map((task) => task.catch(() => null))
     )
       .then((entries) => {
+        const generatedEntries = entries.filter(Boolean);
+        if (generatedEntries.length === 0) throw new Error("AUTO_THUMBNAIL_GENERATION_FAILED");
         if (cancelled) return;
         setData((current) => {
           if (current.thumbnailStudio?.autoGenerateRequestedAt !== requestId) return current;
@@ -2101,14 +2123,14 @@ function App() {
               ...(current.thumbnailStudio ?? {}),
               generated: {
                 ...(current.thumbnailStudio?.generated ?? {}),
-                ...Object.fromEntries(entries)
+                ...Object.fromEntries(generatedEntries)
               },
               autoGenerateRequestedAt: ""
             },
             imports: {
               ...defaultImports,
               ...current.imports,
-              lastLog: [`${new Date().toLocaleString("ja-JP")} サムネ: 取り込み内容から自動生成しました。`, ...(current.imports?.lastLog ?? [])].slice(0, 8)
+              lastLog: [`${new Date().toLocaleString("ja-JP")} サムネ: ${generatedEntries.length}件を取り込み内容から自動生成しました。`, ...(current.imports?.lastLog ?? [])].slice(0, 8)
             }
           };
         });
@@ -4333,6 +4355,10 @@ const fileToDataUrl = (file) =>
 
 const loadCanvasImage = (src) =>
   new Promise((resolve, reject) => {
+    if (!src) {
+      reject(new Error("image-src-missing"));
+      return;
+    }
     const image = new window.Image();
     image.onload = () => resolve(image);
     image.onerror = reject;
@@ -4340,12 +4366,15 @@ const loadCanvasImage = (src) =>
     image.src = src;
   });
 
-function drawCoverAt(ctx, image, x, y, width, height) {
-  const scale = Math.max(width / image.width, height / image.height);
+function drawCoverAt(ctx, image, x, y, width, height, crop = {}) {
+  const cropX = clampNumber(crop.cropX, 50, 0, 100);
+  const cropY = clampNumber(crop.cropY, 50, 0, 100);
+  const cropZoom = clampNumber(crop.cropZoom ?? crop.zoom, 100, 100, 300) / 100;
+  const scale = Math.max(width / image.width, height / image.height) * cropZoom;
   const drawWidth = image.width * scale;
   const drawHeight = image.height * scale;
-  const drawX = x + (width - drawWidth) / 2;
-  const drawY = y + (height - drawHeight) / 2;
+  const drawX = x + (width - drawWidth) * (cropX / 100);
+  const drawY = y + (height - drawHeight) * (cropY / 100);
   ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
 }
 
@@ -4359,6 +4388,21 @@ const getNormalizedThumbnailTemplate = (presetKey, template) => ({
   ...defaultThumbnailStudio.templates[presetKey],
   ...(template ?? {})
 });
+
+async function resolveThumbnailTemplateForRender(presetKey, template) {
+  const normalizedTemplate = getNormalizedThumbnailTemplate(presetKey, template);
+  if (!isCustomTemplate(normalizedTemplate) || normalizedTemplate.dataUrl || !normalizedTemplate.baseImageKey) {
+    return normalizedTemplate;
+  }
+  try {
+    return {
+      ...normalizedTemplate,
+      dataUrl: await loadGeneratedThumbnailImage(normalizedTemplate.baseImageKey)
+    };
+  } catch {
+    return normalizedTemplate;
+  }
+}
 
 function drawDateBadge(ctx, preset, dateString) {
   const lines = formatThumbnailDateLines(dateString);
@@ -4490,9 +4534,14 @@ async function renderThumbnail({ preset, template, icon, icons = [], date, guest
   canvas.height = preset.height;
   const ctx = canvas.getContext("2d");
   const guestIcons = normalizeGuestIconList(icon, icons);
-  const [baseImage, iconImages, badgeImage] = await Promise.all([
+  const [baseImage, loadedIcons, badgeImage] = await Promise.all([
     loadCanvasImage(templateSource),
-    Promise.all(guestIcons.map((guestIcon) => loadCanvasImage(guestIcon.dataUrl).catch(() => null))),
+    Promise.all(
+      guestIcons.map(async (guestIcon) => ({
+        guestIcon,
+        image: await loadCanvasImage(guestIcon.dataUrl).catch(() => null)
+      }))
+    ),
     loadCanvasImage(GUEST_BADGE_ASSET_URL).catch(() => null)
   ]);
 
@@ -4500,7 +4549,8 @@ async function renderThumbnail({ preset, template, icon, icons = [], date, guest
   drawDateBadge(ctx, preset, date);
 
   const iconSlots = getThumbnailIconSlots(normalizedTemplate);
-  iconImages.filter(Boolean).slice(0, iconSlots.length).forEach((iconImage, index) => {
+  const drawableIcons = loadedIcons.filter(({ image }) => image).slice(0, iconSlots.length);
+  drawableIcons.forEach(({ guestIcon, image: iconImage }, index) => {
     const slot = iconSlots[index] ?? iconSlots[0];
     const diameter = Math.round((Math.min(preset.width, preset.height) * Number(slot.size || 28)) / 100);
     const centerX = Math.round((preset.width * Number(slot.x || 50)) / 100);
@@ -4512,7 +4562,7 @@ async function renderThumbnail({ preset, template, icon, icons = [], date, guest
     ctx.beginPath();
     ctx.arc(centerX, centerY, diameter / 2, 0, Math.PI * 2);
     ctx.clip();
-    drawCoverAt(ctx, iconImage, x, y, diameter, diameter);
+    drawCoverAt(ctx, iconImage, x, y, diameter, diameter, guestIcon);
     ctx.restore();
 
     ctx.save();
@@ -4524,7 +4574,7 @@ async function renderThumbnail({ preset, template, icon, icons = [], date, guest
     ctx.restore();
   });
 
-  drawGuestBadge(ctx, preset, normalizedTemplate, Boolean(iconImages.some(Boolean) || guestName), badgeImage);
+  drawGuestBadge(ctx, preset, normalizedTemplate, Boolean(drawableIcons.length || guestName), badgeImage);
   drawGuestName(ctx, preset, normalizedTemplate, guestName);
 
   return canvas.toDataURL("image/png");
@@ -4573,7 +4623,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   const activeLayoutPresetIsDefault = THUMBNAIL_ICON_LAYOUT_PRESETS.some((preset) => preset.id === activeLayoutPresetId);
   const activeLayoutPresetHasOverride = Boolean(layoutPresetOverrides[activeLayoutPresetId]);
   const guestIcons = normalizeGuestIconList(studio.guestIcon, studio.guestIcons);
-  const guestIconPreviewKey = guestIcons.map((icon) => `${icon.name}:${icon.dataUrl.slice(0, 80)}`).join("|");
+  const guestIconPreviewKey = guestIcons.map((icon) => `${icon.name}:${icon.dataUrl.slice(0, 80)}:${icon.cropX}:${icon.cropY}:${icon.cropZoom}`).join("|");
   const getHydratedTemplate = (presetKey) => {
     const template = getNormalizedThumbnailTemplate(presetKey, studio.templates?.[presetKey]);
     if (!isCustomTemplate(template)) return template;
@@ -4765,6 +4815,9 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
         id: newId("guest_icon"),
         name: file.name || `guest-icon-${index + 1}`,
         dataUrl: await fileToDataUrl(file),
+        cropX: 50,
+        cropY: 50,
+        cropZoom: 100,
         source: "manual",
         updatedAt: new Date().toISOString()
       }))
@@ -4794,6 +4847,29 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       guestIcons: []
     }));
     setMessage("ゲストアイコンを解除しました。");
+  };
+
+  const patchGuestIconCrop = (index, patch) => {
+    const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
+    const nextGuestIcons = guestIcons.map((icon, iconIndex) =>
+      iconIndex === index
+        ? {
+            ...icon,
+            ...patch,
+            cropX: clampNumber(patch.cropX ?? icon.cropX, icon.cropX ?? 50, 0, 100),
+            cropY: clampNumber(patch.cropY ?? icon.cropY, icon.cropY ?? 50, 0, 100),
+            cropZoom: clampNumber(patch.cropZoom ?? icon.cropZoom, icon.cropZoom ?? 100, 100, 300)
+          }
+        : icon
+    );
+    forgetGeneratedImages(presetKeys);
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      generated: removeGeneratedRecords(current.generated, presetKeys),
+      guestIcon: nextGuestIcons[0] ?? { ...defaultThumbnailStudio.guestIcon },
+      guestIcons: nextGuestIcons
+    }));
   };
 
   const patchTemplate = (presetKey, patch) => {
@@ -5142,14 +5218,51 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       </div>
 
       {guestIcons.length > 0 && (
-        <div className="registered-image-row">
-          <div className="registered-icon-stack">
+        <div className="registered-icons-panel">
+          <div className="registered-image-row">
+            <div className="registered-icon-stack">
+              {guestIcons.map((icon, index) => (
+                <img
+                  src={icon.dataUrl}
+                  alt={`登録済みゲストアイコン ${index + 1}`}
+                  key={`${icon.name}-${index}`}
+                  style={{
+                    objectPosition: `${icon.cropX}% ${icon.cropY}%`,
+                    transform: `scale(${icon.cropZoom / 100})`,
+                    transformOrigin: `${icon.cropX}% ${icon.cropY}%`
+                  }}
+                />
+              ))}
+            </div>
+            <p className="muted">ゲストアイコン: {guestIcons.map((icon) => icon.name).join(" / ")}</p>
+            <button className="secondary" onClick={clearGuestIcon}><X size={16} />アイコン解除</button>
+          </div>
+          <div className="icon-crop-list">
             {guestIcons.map((icon, index) => (
-              <img src={icon.dataUrl} alt={`登録済みゲストアイコン ${index + 1}`} key={`${icon.name}-${index}`} />
+              <div className="icon-crop-card" key={`${icon.id}-${index}`}>
+                <div className="icon-crop-preview">
+                  <img
+                    src={icon.dataUrl}
+                    alt={`切り抜き確認 ${index + 1}`}
+                    style={{
+                      objectPosition: `${icon.cropX}% ${icon.cropY}%`,
+                      transform: `scale(${icon.cropZoom / 100})`,
+                      transformOrigin: `${icon.cropX}% ${icon.cropY}%`
+                    }}
+                  />
+                </div>
+                <div className="icon-crop-controls">
+                  <strong>{index + 1}. {icon.name}</strong>
+                  <SliderField label="切り抜き 横位置" value={icon.cropX} onChange={(value) => patchGuestIconCrop(index, { cropX: value })} />
+                  <SliderField label="切り抜き 縦位置" value={icon.cropY} onChange={(value) => patchGuestIconCrop(index, { cropY: value })} />
+                  <SliderField label="切り抜き 拡大率" value={icon.cropZoom} onChange={(value) => patchGuestIconCrop(index, { cropZoom: value })} min="100" max="300" />
+                </div>
+              </div>
             ))}
           </div>
-          <p className="muted">ゲストアイコン: {guestIcons.map((icon) => icon.name).join(" / ")}</p>
-          <button className="secondary" onClick={clearGuestIcon}><X size={16} />アイコン解除</button>
+          {guestIcons.some((icon) => !String(icon.dataUrl || "").startsWith("data:")) && (
+            <p className="hint-text">Driveなど外部URLの画像は、ブラウザ制約でPNG合成に入らない場合があります。その時は「ゲストアイコン」から画像ファイルを登録してください。</p>
+          )}
         </div>
       )}
       {message && <p className="hint-text">{message}</p>}
