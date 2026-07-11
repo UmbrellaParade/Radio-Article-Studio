@@ -44,17 +44,20 @@ The current app is a browser-based working prototype with localStorage persisten
 Implemented:
 
 1. Dashboard.
-2. Broadcast episode management.
-3. Form template management.
-4. Shareable form URL prototype.
-5. Response JSON creation/import.
-6. Response management with public/article/internal/constraint separation.
-7. Track and audio metadata management.
-8. Thumbnail and production asset management.
-9. Codex request pack generation.
-10. JSON export/import backup.
+2. Spreadsheet/CSV import for guest questionnaires, listener song submissions, and personality song sheets.
+3. Bellbo-only manual song URL entry.
+4. Broadcast episode management.
+5. Form template management.
+6. Shareable form URL prototype.
+7. Response JSON creation/import.
+8. Response management with public/article/internal/constraint separation.
+9. Track and audio metadata management.
+10. Thumbnail composition from three base images plus a guest icon.
+11. Thumbnail and production asset management.
+12. Codex request pack generation.
+13. JSON export/import backup.
 
-The shareable form prototype does not automatically collect submissions yet. Respondents create or download a response JSON, then the operator imports it into the response screen. External integrations such as Google Drive, Google Sheets, WordPress, and SE_Pon are planned for later phases.
+The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
 
 ## Development
 

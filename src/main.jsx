@@ -52,9 +52,231 @@ const detectUrlType = (url = "") => {
   return "Other";
 };
 
+const THUMBNAIL_PRESETS = [
+  { key: "article16x9", label: "記事サムネ 16:9", width: 1280, height: 720, fileName: "article-thumbnail.png" },
+  { key: "standfm1x1", label: "stand.fm 正方形 1:1", width: 1080, height: 1080, fileName: "standfm-thumbnail.png" },
+  { key: "stream9x16", label: "配信背景 9:16", width: 1080, height: 1920, fileName: "stream-background.png" }
+];
+
+const defaultThumbnailStudio = {
+  guestIcon: { name: "", dataUrl: "" },
+  templates: Object.fromEntries(
+    THUMBNAIL_PRESETS.map((preset) => [
+      preset.key,
+      {
+        name: "",
+        dataUrl: "",
+        iconX: preset.key === "stream9x16" ? 50 : 74,
+        iconY: preset.key === "stream9x16" ? 38 : 52,
+        iconSize: preset.key === "stream9x16" ? 30 : 28
+      }
+    ])
+  )
+};
+
+const defaultImports = {
+  guestCsvUrl: "",
+  listenerCsvUrl: "",
+  personalityCsvUrl: "",
+  bellboTrackUrl: "",
+  lastLog: []
+};
+
 const newId = (prefix) => {
   if (crypto?.randomUUID) return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+};
+
+const normalizeKey = (value = "") =>
+  String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[ 　_\-・:：/／（）()［\][\].。]/g, "");
+
+const compactLines = (items) => items.filter(Boolean).join("\n");
+
+const pick = (row, aliases) => {
+  const normalized = Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizeKey(key), value]));
+  for (const alias of aliases) {
+    const value = normalized[normalizeKey(alias)];
+    if (value != null && String(value).trim() !== "") return String(value).trim();
+  }
+  return "";
+};
+
+const parseCsv = (text) => {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      value += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(value);
+      if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  row.push(value);
+  if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+  if (rows.length < 2) return [];
+
+  const headers = rows[0].map((header) => header.trim());
+  return rows.slice(1).map((cells) =>
+    Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, cells[index]?.trim() ?? ""]))
+  );
+};
+
+const toGoogleCsvUrl = (url) => {
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  const spreadsheetMatch = trimmed.match(/\/spreadsheets\/d\/([^/]+)/);
+  if (!spreadsheetMatch) return trimmed;
+  const gidMatch = trimmed.match(/[?&#]gid=([^&#]+)/);
+  const gid = gidMatch?.[1] ?? "0";
+  return `https://docs.google.com/spreadsheets/d/${spreadsheetMatch[1]}/export?format=csv&gid=${gid}`;
+};
+
+const makeEmbedUrl = (url) => {
+  const youtube = url.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/)([A-Za-z0-9_-]+)/);
+  if (youtube) return `https://www.youtube.com/embed/${youtube[1]}`;
+  return "";
+};
+
+const nextSlotNo = (tracks, episodeId) => {
+  const values = tracks.filter((track) => track.episodeId === episodeId).map((track) => Number(track.slotNo) || 0);
+  return Math.max(0, ...values) + 1;
+};
+
+const upsertTrack = (tracks, nextTrack) => {
+  const existingIndex = tracks.findIndex(
+    (track) =>
+      track.episodeId === nextTrack.episodeId &&
+      ((nextTrack.url && track.url === nextTrack.url) ||
+        (track.source === nextTrack.source && track.artist === nextTrack.artist && track.title === nextTrack.title))
+  );
+  if (existingIndex === -1) return [...tracks, nextTrack];
+  return tracks.map((track, index) => (index === existingIndex ? { ...track, ...nextTrack, id: track.id, slotNo: track.slotNo } : track));
+};
+
+const buildResponseFromRow = (row, episodeId, formId) => {
+  const respondent = pick(row, ["ゲスト名", "お名前", "名前", "活動名", "アーティスト名", "回答者", "応募者名"]);
+  const xUrl = pick(row, ["X URL", "Twitter URL", "X", "Twitter"]);
+  const profile = pick(row, ["活動紹介文", "プロフィール", "紹介文", "自己紹介", "公開プロフィール"]);
+  const topics = pick(row, ["今回話したいこと", "記事で紹介してほしい内容", "話したいこと", "トピック"]);
+  const songThought = pick(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "紹介文", "記事で触れてほしいポイント"]);
+  const internal = pick(row, ["制作側だけに共有するメモ", "内部確認", "運営メモ", "非公開メモ"]);
+  const constraints = pick(row, ["触れないでほしいこと", "NG質問", "表記注意", "注意事項", "記事/SNSで触れないこと・表記ルール"]);
+
+  return {
+    id: newId("res"),
+    episodeId,
+    formId,
+    respondent,
+    status: "未確認",
+    publicInfo: compactLines([profile, xUrl && `X: ${xUrl}`]),
+    articleUse: compactLines([topics, songThought]),
+    internalOnly: internal,
+    constraints
+  };
+};
+
+const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "") => {
+  const artist = pick(row, ["アーティスト名", "ゲスト名", "活動名", "応募者名", "担当"]) || fallbackArtist;
+  const title = pick(row, ["曲名", "楽曲名", "紹介曲", "タイトル"]);
+  const url = pick(row, ["楽曲URL", "曲URL", "URL", "Suno URL", "YouTube URL"]);
+  const audioFile = pick(row, ["音源ファイル", "音源ファイルURL", "WAV", "mp3", "音源URL", "Drive URL"]);
+  const articlePoint = pick(row, ["曲に込めた想い", "曲紹介", "記事で触れてほしいポイント", "紹介文", "メッセージ"]);
+  const honorific = pick(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"]);
+
+  if (!title && !url && !audioFile) return null;
+
+  return {
+    id: newId("tr"),
+    episodeId,
+    slotNo: 0,
+    source,
+    artist,
+    title: title || `${artist || source} 紹介曲`,
+    urlType: detectUrlType(url),
+    url,
+    audioFile,
+    embedUrl: makeEmbedUrl(url),
+    honorific,
+    articlePoint,
+    status: "取り込み済み"
+  };
+};
+
+const importRowsIntoData = (current, selectedEpisode, rows, kind) => {
+  if (!selectedEpisode || rows.length === 0) {
+    return { data: current, result: { responses: 0, tracks: 0 } };
+  }
+
+  let nextResponses = current.responses;
+  let nextTracks = current.tracks;
+  let responseCount = 0;
+  let trackCount = 0;
+
+  rows.forEach((row) => {
+    if (kind === "guest") {
+      const response = buildResponseFromRow(row, selectedEpisode.id, "form_guest");
+      if (response.respondent || response.publicInfo || response.articleUse || response.constraints) {
+        nextResponses = [
+          response,
+          ...nextResponses.filter(
+            (item) => !(item.episodeId === selectedEpisode.id && item.formId === "form_guest" && item.respondent === response.respondent)
+          )
+        ];
+        responseCount += 1;
+      }
+      const track = buildTrackFromRow(row, selectedEpisode.id, "ゲスト曲", response.respondent);
+      if (track) {
+        track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
+        nextTracks = upsertTrack(nextTracks, track);
+        trackCount += 1;
+      }
+    }
+
+    if (kind === "listener") {
+      const track = buildTrackFromRow(row, selectedEpisode.id, "リスナー応募曲");
+      if (track) {
+        track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
+        nextTracks = upsertTrack(nextTracks, track);
+        trackCount += 1;
+      }
+    }
+
+    if (kind === "personality") {
+      const track = buildTrackFromRow(row, selectedEpisode.id, "パーソナリティ曲");
+      if (track) {
+        track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
+        nextTracks = upsertTrack(nextTracks, track);
+        trackCount += 1;
+      }
+    }
+  });
+
+  return {
+    data: { ...current, responses: nextResponses, tracks: nextTracks },
+    result: { responses: responseCount, tracks: trackCount }
+  };
 };
 
 const encodeSharePayload = (payload) => {
@@ -105,6 +327,8 @@ const sampleData = {
     wordpressSite: "https://ai-music.noiseinmysoul.com/",
     sePonUrl: "https://umbrellaparade.github.io/SE_Pon/"
   },
+  imports: defaultImports,
+  thumbnailStudio: defaultThumbnailStudio,
   episodes: [
     {
       id: "ep_yui_2026_07_10",
@@ -305,6 +529,19 @@ function migrateData(input) {
   return {
     ...sampleData,
     ...input,
+    imports: { ...defaultImports, ...(input.imports ?? {}) },
+    thumbnailStudio: {
+      ...defaultThumbnailStudio,
+      ...(input.thumbnailStudio ?? {}),
+      templates: {
+        ...defaultThumbnailStudio.templates,
+        ...(input.thumbnailStudio?.templates ?? {})
+      },
+      guestIcon: {
+        ...defaultThumbnailStudio.guestIcon,
+        ...(input.thumbnailStudio?.guestIcon ?? {})
+      }
+    },
     forms,
     tracks: (input.tracks ?? sampleData.tracks).map((track) => ({
       audioFile: "",
@@ -501,6 +738,95 @@ function App() {
     setData((current) => ({ ...current, settings: { ...current.settings, ...patch } }));
   };
 
+  const updateImports = (patch) => {
+    setData((current) => ({ ...current, imports: { ...defaultImports, ...current.imports, ...patch } }));
+  };
+
+  const appendImportLog = (message) => {
+    setData((current) => ({
+      ...current,
+      imports: {
+        ...defaultImports,
+        ...current.imports,
+        lastLog: [`${new Date().toLocaleString("ja-JP")} ${message}`, ...(current.imports?.lastLog ?? [])].slice(0, 8)
+      }
+    }));
+  };
+
+  const importCsvText = (text, kind, label = "CSV") => {
+    const rows = parseCsv(text);
+    setData((current) => {
+      const { data: next, result } = importRowsIntoData(current, selectedEpisode, rows, kind);
+      return next;
+    });
+    appendImportLog(`${label}: ${rows.length}行を読み込みました。`);
+  };
+
+  const importCsvUrl = async (kind, url, label) => {
+    const csvUrl = toGoogleCsvUrl(url);
+    if (!csvUrl) {
+      appendImportLog(`${label}: URLが未入力です。`);
+      return;
+    }
+    try {
+      const response = await fetch(csvUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      importCsvText(text, kind, label);
+    } catch (error) {
+      appendImportLog(`${label}: 読み込みに失敗しました。公開CSV URLまたは共有設定を確認してください。`);
+    }
+  };
+
+  const importCsvFile = (event, kind, label) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      importCsvText(String(reader.result), kind, `${label}: ${file.name}`);
+      event.target.value = "";
+    };
+    reader.readAsText(file, "utf-8");
+  };
+
+  const applyBellboTrackUrl = () => {
+    const url = data.imports?.bellboTrackUrl?.trim();
+    if (!selectedEpisode || !url) {
+      appendImportLog("べるぼ☂曲URL: 放送回またはURLが未入力です。");
+      return;
+    }
+
+    setData((current) => {
+      const existing = current.tracks.find(
+        (track) => track.episodeId === selectedEpisode.id && track.source === "パーソナリティ曲" && track.artist === "べるぼ☂"
+      );
+      const nextTrack = {
+        id: existing?.id ?? newId("tr"),
+        episodeId: selectedEpisode.id,
+        slotNo: existing?.slotNo ?? nextSlotNo(current.tracks, selectedEpisode.id),
+        source: "パーソナリティ曲",
+        artist: "べるぼ☂",
+        title: existing?.title || "べるぼ☂ 紹介曲",
+        urlType: detectUrlType(url),
+        url,
+        audioFile: existing?.audioFile ?? "",
+        embedUrl: existing?.embedUrl || makeEmbedUrl(url),
+        honorific: "さんなし",
+        articlePoint: existing?.articlePoint ?? "",
+        status: "URL反映済み"
+      };
+      return { ...current, tracks: upsertTrack(current.tracks, nextTrack) };
+    });
+    appendImportLog("べるぼ☂曲URLを今回の放送回に反映しました。");
+  };
+
+  const updateThumbnailStudio = (updater) => {
+    setData((current) => ({
+      ...current,
+      thumbnailStudio: typeof updater === "function" ? updater(current.thumbnailStudio ?? defaultThumbnailStudio) : updater
+    }));
+  };
+
   const codexPack = useMemo(() => {
     if (!selectedEpisode) return "";
     const responseBlocks = episodeResponses
@@ -595,7 +921,7 @@ ${assetRows || "-"}
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const next = JSON.parse(String(reader.result));
+        const next = migrateData(JSON.parse(String(reader.result)));
         setData(next);
         setSelectedEpisodeId(next.episodes?.[0]?.id ?? "");
       } catch {
@@ -652,6 +978,7 @@ ${assetRows || "-"}
       <nav className="app-nav" aria-label="Main navigation">
         {[
           ["dashboard", "ダッシュボード", Radio],
+          ["imports", "取り込み", Upload],
           ["episodes", "放送回", CalendarDays],
           ["forms", "フォーム", ListChecks],
           ["responses", "回答", Database],
@@ -700,6 +1027,16 @@ ${assetRows || "-"}
               setActive={setActive}
             />
           )}
+          {active === "imports" && (
+            <ImportsPanel
+              imports={data.imports ?? defaultImports}
+              selectedEpisode={selectedEpisode}
+              updateImports={updateImports}
+              importCsvUrl={importCsvUrl}
+              importCsvFile={importCsvFile}
+              applyBellboTrackUrl={applyBellboTrackUrl}
+            />
+          )}
           {active === "episodes" && (
             <Episodes
               episodes={data.episodes}
@@ -734,7 +1071,15 @@ ${assetRows || "-"}
             <Tracks tracks={episodeTracks} patchItem={patchItem} removeItem={removeItem} addTrack={addTrack} />
           )}
           {active === "assets" && (
-            <Assets assets={episodeAssets} patchItem={patchItem} removeItem={removeItem} addAsset={addAsset} />
+            <Assets
+              assets={episodeAssets}
+              patchItem={patchItem}
+              removeItem={removeItem}
+              addAsset={addAsset}
+              thumbnailStudio={data.thumbnailStudio ?? defaultThumbnailStudio}
+              updateThumbnailStudio={updateThumbnailStudio}
+              guestName={selectedEpisode?.guestName ?? ""}
+            />
           )}
           {active === "pack" && (
             <CodexPack codexPack={codexPack} copyPack={copyPack} copied={copied} selectedEpisode={selectedEpisode} />
@@ -968,6 +1313,99 @@ function StatusLine({ done, label }) {
   );
 }
 
+function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, importCsvFile, applyBellboTrackUrl }) {
+  return (
+    <div className="view-stack">
+      <SectionTitle
+        title="自動取り込み"
+        subtitle="アンケートや応募フォームのスプレッドシートを取り込みます。べるぼ☂が手で入れるのは基本的に自分の曲URLだけです。"
+      />
+
+      <article className="panel">
+        <h2>今回の放送回</h2>
+        <dl className="detail-list">
+          <div><dt>タイトル</dt><dd>{selectedEpisode?.title || "未選択"}</dd></div>
+          <div><dt>放送日</dt><dd>{selectedEpisode?.date || "-"}</dd></div>
+          <div><dt>ゲスト</dt><dd>{selectedEpisode?.guestName || "-"}</dd></div>
+        </dl>
+      </article>
+
+      <div className="import-grid">
+        <SourceImportCard
+          title="ゲストアンケート"
+          description="ゲスト情報、紹介曲、NG事項、アイコンURLなどを取り込みます。"
+          value={imports.guestCsvUrl}
+          onChange={(value) => updateImports({ guestCsvUrl: value })}
+          onImportUrl={() => importCsvUrl("guest", imports.guestCsvUrl, "ゲストアンケート")}
+          onImportFile={(event) => importCsvFile(event, "guest", "ゲストアンケート")}
+        />
+        <SourceImportCard
+          title="リスナー応募曲"
+          description="応募者名、曲名、楽曲URL、音源ファイル、表記注意を取り込みます。"
+          value={imports.listenerCsvUrl}
+          onChange={(value) => updateImports({ listenerCsvUrl: value })}
+          onImportUrl={() => importCsvUrl("listener", imports.listenerCsvUrl, "リスナー応募曲")}
+          onImportFile={(event) => importCsvFile(event, "listener", "リスナー応募曲")}
+        />
+        <SourceImportCard
+          title="パーソナリティ曲シート"
+          description="かなめ🦐曲など、運営側で別シート管理している曲情報を取り込みます。"
+          value={imports.personalityCsvUrl}
+          onChange={(value) => updateImports({ personalityCsvUrl: value })}
+          onImportUrl={() => importCsvUrl("personality", imports.personalityCsvUrl, "パーソナリティ曲")}
+          onImportFile={(event) => importCsvFile(event, "personality", "パーソナリティ曲")}
+        />
+      </div>
+
+      <article className="panel focus-panel">
+        <div>
+          <h2>べるぼ☂の今回の曲</h2>
+          <p className="muted">ここだけ手入力。URLを入れると、今回の放送回のパーソナリティ曲として反映します。</p>
+        </div>
+        <div className="bellbo-url-row">
+          <Field label="べるぼ☂ 曲URL（Suno / YouTube）" value={imports.bellboTrackUrl} onChange={(value) => updateImports({ bellboTrackUrl: value })} />
+          <button className="primary" onClick={applyBellboTrackUrl}><Save size={16} />曲URLを反映</button>
+        </div>
+      </article>
+
+      <article className="panel">
+        <h2>取り込みログ</h2>
+        <div className="log-list">
+          {(imports.lastLog ?? []).length ? (
+            imports.lastLog.map((line) => <div key={line}>{line}</div>)
+          ) : (
+            <p className="muted">まだ取り込みはありません。</p>
+          )}
+        </div>
+      </article>
+
+      <article className="panel">
+        <h2>対応しやすい列名</h2>
+        <p className="muted">
+          ゲスト名、活動紹介文、今回話したいこと、触れないでほしいこと、曲名、アーティスト名、楽曲URL、音源ファイル、記事で触れてほしいポイント、表記注意。
+        </p>
+      </article>
+    </div>
+  );
+}
+
+function SourceImportCard({ title, description, value, onChange, onImportUrl, onImportFile }) {
+  return (
+    <article className="record import-card">
+      <h2>{title}</h2>
+      <p className="muted">{description}</p>
+      <Field label="Google Sheets / CSV URL" value={value} onChange={onChange} />
+      <div className="button-row">
+        <button className="primary" onClick={onImportUrl}><Upload size={16} />URLから取り込み</button>
+        <label className="secondary file-button">
+          <Upload size={16} />CSVファイル
+          <input type="file" accept=".csv,text/csv" onChange={onImportFile} />
+        </label>
+      </div>
+    </article>
+  );
+}
+
 function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem, removeItem, addEpisode }) {
   return (
     <div className="view-stack">
@@ -1143,10 +1581,194 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
   );
 }
 
-function Assets({ assets, patchItem, removeItem, addAsset }) {
+const fileToDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+const loadCanvasImage = (src) =>
+  new Promise((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+
+function drawCoverAt(ctx, image, x, y, width, height) {
+  const scale = Math.max(width / image.width, height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const drawX = x + (width - drawWidth) / 2;
+  const drawY = y + (height - drawHeight) / 2;
+  ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+}
+
+function drawCover(ctx, image, width, height) {
+  drawCoverAt(ctx, image, 0, 0, width, height);
+}
+
+async function renderThumbnail({ preset, template, icon }) {
+  if (!template?.dataUrl || !icon?.dataUrl) throw new Error("template-or-icon-missing");
+  const canvas = document.createElement("canvas");
+  canvas.width = preset.width;
+  canvas.height = preset.height;
+  const ctx = canvas.getContext("2d");
+  const [baseImage, iconImage] = await Promise.all([loadCanvasImage(template.dataUrl), loadCanvasImage(icon.dataUrl)]);
+
+  drawCover(ctx, baseImage, preset.width, preset.height);
+
+  const diameter = Math.round((Math.min(preset.width, preset.height) * Number(template.iconSize || 28)) / 100);
+  const centerX = Math.round((preset.width * Number(template.iconX || 50)) / 100);
+  const centerY = Math.round((preset.height * Number(template.iconY || 50)) / 100);
+  const x = centerX - diameter / 2;
+  const y = centerY - diameter / 2;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, diameter / 2, 0, Math.PI * 2);
+  ctx.clip();
+  drawCoverAt(ctx, iconImage, x, y, diameter, diameter);
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, diameter / 2, 0, Math.PI * 2);
+  ctx.lineWidth = Math.max(6, Math.round(diameter * 0.035));
+  ctx.strokeStyle = "rgba(255,255,255,.94)";
+  ctx.stroke();
+  ctx.restore();
+
+  return canvas.toDataURL("image/png");
+}
+
+function ThumbnailComposer({ studio, updateStudio, guestName }) {
+  const [preview, setPreview] = useState({});
+  const [message, setMessage] = useState("");
+
+  const handleTemplateFile = async (presetKey, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      templates: {
+        ...defaultThumbnailStudio.templates,
+        ...current.templates,
+        [presetKey]: {
+          ...defaultThumbnailStudio.templates[presetKey],
+          ...current.templates?.[presetKey],
+          name: file.name,
+          dataUrl
+        }
+      }
+    }));
+    event.target.value = "";
+  };
+
+  const handleIconFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    updateStudio((current) => ({ ...defaultThumbnailStudio, ...current, guestIcon: { name: file.name, dataUrl } }));
+    event.target.value = "";
+  };
+
+  const patchTemplate = (presetKey, patch) => {
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      templates: {
+        ...defaultThumbnailStudio.templates,
+        ...current.templates,
+        [presetKey]: {
+          ...defaultThumbnailStudio.templates[presetKey],
+          ...current.templates?.[presetKey],
+          ...patch
+        }
+      }
+    }));
+  };
+
+  const generateOne = async (preset) => {
+    try {
+      const dataUrl = await renderThumbnail({
+        preset,
+        template: studio.templates?.[preset.key],
+        icon: studio.guestIcon
+      });
+      setPreview((current) => ({ ...current, [preset.key]: dataUrl }));
+      setMessage(`${preset.label} を生成しました。`);
+    } catch {
+      setMessage("ベース画像とゲストアイコンを先にセットしてください。");
+    }
+  };
+
+  const downloadOne = (preset) => {
+    const dataUrl = preview[preset.key];
+    if (!dataUrl) return;
+    const anchor = document.createElement("a");
+    anchor.href = dataUrl;
+    anchor.download = `${guestName || "guest"}-${preset.fileName}`;
+    anchor.click();
+  };
+
+  return (
+    <article className="panel thumbnail-studio">
+      <div className="record-head">
+        <div>
+          <h2>サムネ自動合成</h2>
+          <p className="muted">3サイズのベース画像に、ゲストアイコンを指定位置で重ねます。</p>
+        </div>
+        <label className="secondary file-button">
+          <Upload size={16} />ゲストアイコン
+          <input type="file" accept="image/*" onChange={handleIconFile} />
+        </label>
+      </div>
+
+      {studio.guestIcon?.name && <p className="muted">ゲストアイコン: {studio.guestIcon.name}</p>}
+      {message && <p className="hint-text">{message}</p>}
+
+      <div className="thumbnail-grid">
+        {THUMBNAIL_PRESETS.map((preset) => {
+          const template = studio.templates?.[preset.key] ?? defaultThumbnailStudio.templates[preset.key];
+          return (
+            <section className="thumbnail-card" key={preset.key}>
+              <div className="thumbnail-card-head">
+                <strong>{preset.label}</strong>
+                <span>{preset.width} x {preset.height}</span>
+              </div>
+              <label className="secondary file-button">
+                <Upload size={16} />ベース画像
+                <input type="file" accept="image/*" onChange={(event) => handleTemplateFile(preset.key, event)} />
+              </label>
+              <p className="muted">{template.name || "未セット"}</p>
+              <div className="slider-grid">
+                <SliderField label="横位置" value={template.iconX} onChange={(value) => patchTemplate(preset.key, { iconX: value })} />
+                <SliderField label="縦位置" value={template.iconY} onChange={(value) => patchTemplate(preset.key, { iconY: value })} />
+                <SliderField label="サイズ" value={template.iconSize} onChange={(value) => patchTemplate(preset.key, { iconSize: value })} min="10" max="60" />
+              </div>
+              <div className="button-row">
+                <button className="primary" onClick={() => generateOne(preset)}>生成</button>
+                <button className="secondary" onClick={() => downloadOne(preset)} disabled={!preview[preset.key]}>PNG保存</button>
+              </div>
+              {preview[preset.key] && <img className="thumbnail-preview" src={preview[preset.key]} alt={`${preset.label} preview`} />}
+            </section>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+function Assets({ assets, patchItem, removeItem, addAsset, thumbnailStudio, updateThumbnailStudio, guestName }) {
   return (
     <div className="view-stack">
       <SectionTitle title="サムネ/素材管理" subtitle="記事16:9、stand.fm 1:1、配信背景9:16、音源フォルダーなどを放送回に紐づけます。" action={<button className="primary" onClick={addAsset}><Plus size={16} />素材追加</button>} />
+      <ThumbnailComposer studio={thumbnailStudio} updateStudio={updateThumbnailStudio} guestName={guestName} />
       <div className="records">
         {assets.map((asset) => (
           <article className="record" key={asset.id}>
@@ -1231,6 +1853,15 @@ function TextArea({ label, value, onChange }) {
     <label className="field wide">
       <span>{label}</span>
       <textarea value={value ?? ""} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function SliderField({ label, value, onChange, min = "0", max = "100" }) {
+  return (
+    <label className="field">
+      <span>{label}: {value}%</span>
+      <input type="range" min={min} max={max} value={value ?? 50} onChange={(event) => onChange(Number(event.target.value))} />
     </label>
   );
 }
