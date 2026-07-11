@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "type": "radio-article-studio-form",
+  "contactAccounts": {
+    "bellbo": "bellbo13",
+    "kaname": "kaname_mbembe",
+    "additional": []
+  },
+  "xContactMessage": "Xでご連絡するため、べるぼ☂とかなめ🦐のアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。",
+  "submission": {
+    "endpointUrl": "https://script.google.com/macros/s/AKfycbzL9UJ6IlN1gzXGiPfNn_QlVtd_l4I1OO0PzpApLabO00N8Xf8EW36d_qYk4E7hVEK8Tg/exec",
+    "driveFolderUrl": "https://drive.google.com/drive/folders/1NJyhXgvtLPEvrI3SWulZ8ffnbsMke6sd",
+    "audioSaveMemo": "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー"
+  },
+  "form": {
+    "id": "form_personality",
+    "name": "パーソナリティ曲入力",
+    "type": "運営",
+    "description": "かなめ🦐/べるぼ☂の紹介曲を入力するフォーム。",
+    "questions": [
+      { "id": "q_owner", "label": "担当", "kind": "short", "required": true, "use": "article" },
+      { "id": "q_track", "label": "紹介する楽曲", "kind": "track", "required": true, "use": "article" },
+      { "id": "q_point", "label": "記事で触れてほしいポイント", "kind": "long", "required": false, "use": "article" }
+    ]
+  }
+}

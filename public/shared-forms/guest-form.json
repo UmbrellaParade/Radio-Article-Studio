@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "type": "radio-article-studio-form",
+  "contactAccounts": {
+    "bellbo": "bellbo13",
+    "kaname": "kaname_mbembe",
+    "additional": []
+  },
+  "xContactMessage": "Xでご連絡するため、べるぼ☂とかなめ🦐のアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。",
+  "submission": {
+    "endpointUrl": "https://script.google.com/macros/s/AKfycbzL9UJ6IlN1gzXGiPfNn_QlVtd_l4I1OO0PzpApLabO00N8Xf8EW36d_qYk4E7hVEK8Tg/exec",
+    "driveFolderUrl": "https://drive.google.com/drive/folders/1NJyhXgvtLPEvrI3SWulZ8ffnbsMke6sd",
+    "audioSaveMemo": "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー"
+  },
+  "form": {
+    "id": "form_guest",
+    "name": "ゲスト回アンケート",
+    "type": "ゲスト",
+    "description": "ゲスト紹介、紹介楽曲、NG/注意事項を集めるフォーム。",
+    "questions": [
+      { "id": "q_guest_name", "label": "ゲスト名 正式表記", "kind": "short", "required": true, "use": "public" },
+      { "id": "q_guest_x", "label": "X URL", "kind": "url", "required": true, "use": "public" },
+      { "id": "q_guest_icon", "label": "ゲストアイコン画像", "kind": "image", "required": false, "use": "internal" },
+      { "id": "q_contact_x", "label": "連絡用Xアカウント", "kind": "x_contact", "required": false, "use": "public" },
+      { "id": "q_profile", "label": "活動紹介文", "kind": "long", "required": true, "use": "public" },
+      { "id": "q_topics", "label": "今回話したいこと", "kind": "long", "required": false, "use": "article" },
+      { "id": "q_guest_track", "label": "紹介する楽曲", "kind": "track", "required": false, "use": "article" },
+      { "id": "q_ng", "label": "触れないでほしいこと/NG質問", "kind": "long", "required": false, "use": "constraint" }
+    ]
+  }
+}

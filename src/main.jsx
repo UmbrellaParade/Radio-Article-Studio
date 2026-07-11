@@ -254,6 +254,7 @@ const formatAnswerValue = (value) => {
   if (typeof value === "object" && ("title" in value || "url" in value || "audio" in value)) {
     return compactLines([
       `楽曲名: ${value.title || "-"}`,
+      `アーティスト名: ${value.artist || "-"}`,
       `楽曲URL: ${value.url || "-"}`,
       `音源ファイル: ${formatAnswerValue(value.audio)}`
     ]);
@@ -700,17 +701,19 @@ const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "",
     .map((answer) => {
       const track = answer.track;
       if (!track.title && !track.url && !track.audio?.fileName) return null;
+      const trackArtist = track.artist || artist;
       return {
         id: newId("tr"),
         episodeId,
         periodId,
         slotNo: 0,
         source,
-        artist,
-        title: track.title || `${artist || source} 紹介曲`,
+        artist: trackArtist,
+        title: track.title || `${trackArtist || source} 紹介曲`,
         urlType: detectUrlType(track.url),
         url: track.url || "",
         audioFile: track.audio?.fileName || "",
+        audio: track.audio || null,
         embedUrl: makeEmbedUrl(track.url || ""),
         honorific: source === "パーソナリティ曲" ? "さんなし" : "",
         articlePoint: `${answer.label}から取り込み`,
@@ -1331,6 +1334,7 @@ function migrateData(input) {
     })),
     tracks: (input.tracks ?? sampleData.tracks).map((track) => ({
       audioFile: "",
+      audio: null,
       periodId: "",
       ...track,
       urlType: track.urlType || detectUrlType(track.url)
@@ -1453,6 +1457,7 @@ function App() {
         urlType: "Suno",
         url: "",
         audioFile: "",
+        audio: null,
         embedUrl: "",
         honorific: "",
         articlePoint: "",
@@ -1933,7 +1938,7 @@ ${assetRows || "-"}
   }
 
   if (sharedPayload) {
-    return <PublicSubmissionForm logoSrc={logoSrc} payload={sharedPayload} />;
+    return <PublicSubmissionForm logoSrc={logoSrc} payload={sharedPayload} operatorSettings={data.settings} />;
   }
 
   return (
@@ -2095,7 +2100,6 @@ function RestoreDataView({ logoSrc, payload, restoreData }) {
         <article className="panel">
           <h2>引き継ぎデータを開けませんでした</h2>
           <p className="muted">URLが途中で切れている可能性があります。PC側で引き継ぎリンクを作り直すか、JSON読み込みを使ってください。</p>
-          <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
         </article>
       </main>
     );
@@ -2135,7 +2139,7 @@ function RestoreDataView({ logoSrc, payload, restoreData }) {
   );
 }
 
-function PublicSubmissionForm({ logoSrc, payload }) {
+function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }) {
   const form = payload?.form;
   const period = payload?.period;
   const episode = payload?.episode;
@@ -2146,18 +2150,18 @@ function PublicSubmissionForm({ logoSrc, payload }) {
   };
   const contactAccountList = getContactAccountList({ contactAccounts });
   const xContactMessage = payload?.xContactMessage || DEFAULT_X_CONTACT_MESSAGE;
-  const submission = payload?.submission || {};
+  const submission = {
+    ...(payload?.submission || {}),
+    endpointUrl: payload?.submission?.endpointUrl || operatorSettings.responseEndpointUrl || "",
+    driveFolderUrl: payload?.submission?.driveFolderUrl || operatorSettings.responseDriveFolderUrl || ""
+  };
   const [answers, setAnswers] = useState({});
-  const [result, setResult] = useState("");
-  const [copied, setCopied] = useState(false);
   const [formError, setFormError] = useState("");
   const [submitStatus, setSubmitStatus] = useState("");
   const [submitBusy, setSubmitBusy] = useState(false);
 
   useEffect(() => {
     setAnswers({});
-    setResult("");
-    setCopied(false);
     setFormError("");
     setSubmitStatus("");
     setSubmitBusy(false);
@@ -2183,10 +2187,9 @@ function PublicSubmissionForm({ logoSrc, payload }) {
           <h2>共有フォームを開けませんでした</h2>
           <p className="muted">
             {payload?.publishedSlug
-              ? `この短いURLはまだ有効化されていない可能性があります。管理画面の「URL用JSONをコピー」を使って、Codexに短いURLの有効化を依頼してください。`
-              : "URLが途中で切れている可能性があります。管理画面から共有リンクを作り直してください。"}
+              ? `この短いURLはまだ有効化されていない可能性があります。URLを送ってくれた運営側へご連絡ください。`
+              : "URLが途中で切れている可能性があります。URLを送ってくれた運営側へご連絡ください。"}
           </p>
-          <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
         </article>
       </main>
     );
@@ -2201,6 +2204,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
       ...current,
       [questionId]: {
         title: "",
+        artist: "",
         url: "",
         audio: null,
         ...(current[questionId] ?? {}),
@@ -2358,6 +2362,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         questionId: question.id,
         questionLabel: `${question.label}: 音源ファイル`,
         trackTitle: answers[question.id].title || "",
+        trackArtist: answers[question.id].artist || "",
         trackUrl: answers[question.id].url || "",
         fileName: answers[question.id].audio.fileName,
         mimeType: answers[question.id].audio.mimeType,
@@ -2411,10 +2416,9 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     setSubmitStatus("");
     const responsePayload = buildResponsePayload();
     const json = JSON.stringify(responsePayload, null, 2);
-    setResult(json);
     const endpointUrl = String(submission.endpointUrl || "").trim();
     if (!endpointUrl) {
-      setSubmitStatus("送信先URLが未設定です。回答JSONをコピーまたはダウンロードして運営側で取り込んでください。");
+      setSubmitStatus("送信先の設定に不備があります。URLを送ってくれた運営側へご連絡ください。");
       return;
     }
     setSubmitBusy(true);
@@ -2427,37 +2431,9 @@ function PublicSubmissionForm({ logoSrc, payload }) {
       });
       setSubmitStatus("回答データを送信しました。受信結果は運営側の保存先で確認してください。");
     } catch {
-      setSubmitStatus("送信できませんでした。回答JSONをダウンロードして運営側へ送ってください。");
+      setSubmitStatus("送信できませんでした。時間を置いて再送信するか、URLを送ってくれた運営側へご連絡ください。");
     } finally {
       setSubmitBusy(false);
-    }
-  };
-
-  const copyResult = async () => {
-    if (!result) return;
-    await navigator.clipboard.writeText(result);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
-  };
-
-  const downloadResult = () => {
-    if (!result) return;
-    const blob = new Blob([result], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${form.id}-response.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const saveAudioAnswer = async (audio) => {
-    if (!audio?.dataUrl) return;
-    try {
-      const usedPicker = await saveDataUrlWithPicker(audio.dataUrl, audio.fileName || "audio-file");
-      setSubmitStatus(usedPicker ? "保存先を選んで音源を保存しました。" : "ブラウザの通常ダウンロードで音源を保存しました。");
-    } catch {
-      setSubmitStatus("音源保存をキャンセルしました。");
     }
   };
 
@@ -2485,7 +2461,6 @@ function PublicSubmissionForm({ logoSrc, payload }) {
               </div>
             )}
           </div>
-          <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
         </div>
 
         {formError && <p className="form-error">{formError}</p>}
@@ -2533,12 +2508,33 @@ function PublicSubmissionForm({ logoSrc, payload }) {
               ) : question.kind === "track" ? (
                 <div className="track-question-fields">
                   <label>
+                    <span>楽曲をWAVかMP3でアップロード</span>
+                    <input
+                      type="file"
+                      required={Boolean(question.required)}
+                      accept={AUDIO_FILE_ACCEPT}
+                      onChange={(event) => updateTrackFileAnswer(question.id, event)}
+                    />
+                    <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : "WAVまたはMP3をアップロードしてください。"}</small>
+                  </label>
+                  <p className="hint-text track-entry-help">音源を選んだあとも、楽曲名・アーティスト名は手動で入力や修正ができます。</p>
+                  <label>
                     <span>楽曲名</span>
                     <input
                       required={Boolean(question.required)}
                       value={answers[question.id]?.title ?? ""}
                       onChange={(event) => updateTrackAnswer(question.id, { title: event.target.value })}
                     />
+                    <small>正式な楽曲名を入力してください。あとから修正できます。</small>
+                  </label>
+                  <label>
+                    <span>アーティスト名</span>
+                    <input
+                      required={Boolean(question.required)}
+                      value={answers[question.id]?.artist ?? ""}
+                      onChange={(event) => updateTrackAnswer(question.id, { artist: event.target.value })}
+                    />
+                    <small>記事や紹介欄に載せる正式表記を入力してください。</small>
                   </label>
                   <label>
                     <span>楽曲URL（YouTube / Suno）</span>
@@ -2555,26 +2551,6 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                     />
                     <small>YouTubeまたはSunoの共有URLだけ受け付けます。</small>
                   </label>
-                  <label>
-                    <span>楽曲をWAVかMP3でアップロード</span>
-                    <input
-                      type="file"
-                      required={Boolean(question.required)}
-                      accept={AUDIO_FILE_ACCEPT}
-                      onChange={(event) => updateTrackFileAnswer(question.id, event)}
-                    />
-                    <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : "WAVまたはMP3をアップロード"}</small>
-                  </label>
-                  {answers[question.id]?.audio?.dataUrl && (
-                    <div className="track-save-actions">
-                      <button type="button" className="secondary" onClick={() => downloadDataUrlFile(answers[question.id].audio.dataUrl, answers[question.id].audio.fileName || "audio-file")}>
-                        <Download size={16} />音源をダウンロード
-                      </button>
-                      <button type="button" className="secondary" onClick={() => saveAudioAnswer(answers[question.id].audio)}>
-                        <FolderOpen size={16} />保存先を選んで保存
-                      </button>
-                    </div>
-                  )}
                   <TrackPreview track={answers[question.id]} />
                 </div>
               ) : question.kind === "x_contact" ? (
@@ -2660,23 +2636,10 @@ function PublicSubmissionForm({ logoSrc, payload }) {
             </div>
           ))}
           <div className="form-bottom-actions">
-            <button className="primary" type="submit" disabled={submitBusy}><Send size={16} />{submitBusy ? "送信中" : "回答データを作成"}</button>
+            <button className="primary" type="submit" disabled={submitBusy}><Send size={16} />{submitBusy ? "送信中" : "送信する"}</button>
             <button className="secondary" type="button" onClick={scrollToTop}>上に戻る</button>
           </div>
         </form>
-
-        {result && (
-          <div className="result-box">
-            <div className="record-head">
-              <strong>回答JSON</strong>
-              <div className="inline-actions">
-                <button className="secondary" onClick={copyResult}><ClipboardCopy size={16} />{copied ? "コピー済み" : "コピー"}</button>
-                <button className="secondary" onClick={downloadResult}><Download size={16} />ダウンロード</button>
-              </div>
-            </div>
-            <textarea className="pack-output compact" value={result} readOnly />
-          </div>
-        )}
       </article>
     </main>
   );
@@ -3351,39 +3314,62 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
   const updateTrackUrl = (track, url) => {
     patchItem("tracks", track.id, { url, urlType: detectUrlType(url), embedUrl: makeEmbedUrl(url) || track.embedUrl });
   };
+  const saveTrackAudio = async (audio, fallbackName) => {
+    try {
+      await saveDataUrlWithPicker(audio.dataUrl, audio.fileName || fallbackName || "audio-file");
+    } catch {
+      // 保存先選択のキャンセルは運用上よくあるので、画面上のエラーにはしない。
+    }
+  };
 
   return (
     <div className="view-stack">
       <SectionTitle title="楽曲/音源管理" subtitle="1曲を1ブロックで管理します。楽曲名、楽曲URL、音源ファイルをまとめて入力します。" action={<button className="primary" onClick={addTrack}><Plus size={16} />楽曲追加</button>} />
       <div className="records">
-        {tracks.map((track) => (
-          <article className="record" key={track.id}>
-            <div className="record-head">
-              <strong>{track.slotNo}. {track.title || "楽曲名未入力"} / {track.artist || "アーティスト未入力"}</strong>
-              <button className="icon-danger" onClick={() => removeItem("tracks", track.id)}><Trash2 size={16} /></button>
-            </div>
-            <div className="track-meta-grid">
-              <Field label="曲順" type="number" value={track.slotNo} onChange={(value) => patchItem("tracks", track.id, { slotNo: value })} />
-              <SelectField label="紹介枠" value={track.source} options={["ゲスト曲", "パーソナリティ曲", "リスナー応募曲"]} onChange={(value) => patchItem("tracks", track.id, { source: value })} />
-              <Field label="アーティスト名" value={track.artist} onChange={(value) => patchItem("tracks", track.id, { artist: value })} />
-            </div>
-            <div className="song-card">
-              <div className="song-card-title">
-                <Music size={17} />
-                <span>1曲分の情報</span>
-                <b>{track.url ? detectUrlType(track.url) : "URL未入力"}</b>
+        {tracks.map((track) => {
+          const audio = track.audio;
+          return (
+            <article className="record" key={track.id}>
+              <div className="record-head">
+                <strong>{track.slotNo}. {track.title || "楽曲名未入力"} / {track.artist || "アーティスト未入力"}</strong>
+                <button className="icon-danger" onClick={() => removeItem("tracks", track.id)}><Trash2 size={16} /></button>
               </div>
-              <div className="form-grid">
-                <Field label="楽曲名" value={track.title} onChange={(value) => patchItem("tracks", track.id, { title: value })} />
-                <Field label="楽曲URL（YouTube / Suno）" value={track.url} onChange={(value) => updateTrackUrl(track, value)} />
-                <Field label="音源ファイル（WAV / mp3）" value={track.audioFile} onChange={(value) => patchItem("tracks", track.id, { audioFile: value })} />
-                <Field label="埋め込みURL（必要なら）" value={track.embedUrl} onChange={(value) => patchItem("tracks", track.id, { embedUrl: value })} />
-                <Field label="敬称ルール" value={track.honorific} onChange={(value) => patchItem("tracks", track.id, { honorific: value })} />
-                <TextArea label="記事で触れるポイント" value={track.articlePoint} onChange={(value) => patchItem("tracks", track.id, { articlePoint: value })} />
+              <div className="track-meta-grid">
+                <Field label="曲順" type="number" value={track.slotNo} onChange={(value) => patchItem("tracks", track.id, { slotNo: value })} />
+                <SelectField label="紹介枠" value={track.source} options={["ゲスト曲", "パーソナリティ曲", "リスナー応募曲"]} onChange={(value) => patchItem("tracks", track.id, { source: value })} />
+                <Field label="アーティスト名" value={track.artist} onChange={(value) => patchItem("tracks", track.id, { artist: value })} />
               </div>
-            </div>
-          </article>
-        ))}
+              <div className="song-card">
+                <div className="song-card-title">
+                  <Music size={17} />
+                  <span>1曲分の情報</span>
+                  <b>{track.url ? detectUrlType(track.url) : "URL未入力"}</b>
+                </div>
+                <div className="form-grid">
+                  <Field label="楽曲名" value={track.title} onChange={(value) => patchItem("tracks", track.id, { title: value })} />
+                  <Field label="楽曲URL（YouTube / Suno）" value={track.url} onChange={(value) => updateTrackUrl(track, value)} />
+                  <Field label="音源ファイル（WAV / mp3）" value={track.audioFile} onChange={(value) => patchItem("tracks", track.id, { audioFile: value })} />
+                  <Field label="埋め込みURL（必要なら）" value={track.embedUrl} onChange={(value) => patchItem("tracks", track.id, { embedUrl: value })} />
+                  <Field label="敬称ルール" value={track.honorific} onChange={(value) => patchItem("tracks", track.id, { honorific: value })} />
+                  <TextArea label="記事で触れるポイント" value={track.articlePoint} onChange={(value) => patchItem("tracks", track.id, { articlePoint: value })} />
+                </div>
+                {audio?.dataUrl && (
+                  <div className="track-audio-ops">
+                    <div>
+                      <strong>取り込み済み音源</strong>
+                      <small>{audio.fileName || track.audioFile || "audio-file"} / {Math.round((audio.size || 0) / 1024 / 1024 * 10) / 10}MB</small>
+                    </div>
+                    <div className="inline-actions">
+                      <button className="secondary" onClick={() => downloadDataUrlFile(audio.dataUrl, audio.fileName || track.audioFile || "audio-file")}><Download size={16} />ダウンロード</button>
+                      <button className="secondary" onClick={() => saveTrackAudio(audio, track.audioFile)}><FolderOpen size={16} />保存先を選ぶ</button>
+                    </div>
+                    <audio className="attachment-audio" controls preload="metadata" src={audio.dataUrl} />
+                  </div>
+                )}
+              </div>
+            </article>
+          );
+        })}
       </div>
     </div>
   );

@@ -968,11 +968,39 @@ textarea {
   font-weight: 800;
 }
 
-.track-save-actions,
 .form-bottom-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.track-entry-help {
+  margin: 0;
+}
+
+.track-audio-ops {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.track-audio-ops > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.track-audio-ops strong {
+  color: #241f2f;
+  font-size: 13px;
+}
+
+.track-audio-ops small {
+  color: #665d70;
+  font-size: 12px;
 }
 
 .x-contact-message {
@@ -1466,7 +1494,6 @@ textarea {
   .button-row,
   .inline-actions,
   .follow-actions,
-  .track-save-actions,
   .form-bottom-actions {
     display: grid;
     grid-template-columns: 1fr;

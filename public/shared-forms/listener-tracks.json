@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "type": "radio-article-studio-form",
+  "contactAccounts": {
+    "bellbo": "bellbo13",
+    "kaname": "kaname_mbembe",
+    "additional": []
+  },
+  "xContactMessage": "Xでご連絡するため、べるぼ☂とかなめ🦐のアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。",
+  "submission": {
+    "endpointUrl": "https://script.google.com/macros/s/AKfycbzL9UJ6IlN1gzXGiPfNn_QlVtd_l4I1OO0PzpApLabO00N8Xf8EW36d_qYk4E7hVEK8Tg/exec",
+    "driveFolderUrl": "https://drive.google.com/drive/folders/1NJyhXgvtLPEvrI3SWulZ8ffnbsMke6sd",
+    "audioSaveMemo": "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー"
+  },
+  "form": {
+    "id": "form_listener",
+    "name": "リスナー楽曲応募フォーム",
+    "type": "リスナー",
+    "description": "送って頂く楽曲の楽曲名、楽曲URL、WAV/MP3音源、記事掲載可否を集めるフォーム。",
+    "questions": [
+      { "id": "q_artist", "label": "アーティスト名 正式表記", "kind": "short", "required": true, "use": "article" },
+      { "id": "q_contact_x", "label": "連絡用Xアカウント", "kind": "x_contact", "required": true, "use": "public" },
+      { "id": "q_track", "label": "送って頂く楽曲", "kind": "track", "required": true, "use": "article" },
+      { "id": "q_credit", "label": "クレジット/表記注意", "kind": "long", "required": false, "use": "constraint" }
+    ]
+  }
+}
