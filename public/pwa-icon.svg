@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Umbrella Parade Radio Article Studio">
+  <rect width="512" height="512" fill="#241f2f"/>
+  <circle cx="256" cy="256" r="202" fill="none" stroke="#f0c477" stroke-width="6"/>
+  <path d="M112 209a144 85 0 0 1 288 0" fill="none" stroke="#f7f2e9" stroke-width="16" stroke-linecap="square"/>
+  <path d="M112 244a48 38 0 0 1 96 0" fill="none" stroke="#f7f2e9" stroke-width="16"/>
+  <path d="M208 244a48 38 0 0 1 96 0" fill="none" stroke="#f7f2e9" stroke-width="16"/>
+  <path d="M304 244a48 38 0 0 1 96 0" fill="none" stroke="#f7f2e9" stroke-width="16"/>
+  <path d="M256 124v194" stroke="#f7f2e9" stroke-width="16" stroke-linecap="round"/>
+  <path d="M256 321c0 28 18 36 36 20" fill="none" stroke="#f7f2e9" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="117" cy="391" r="21" fill="#14b6c8"/>
+  <circle cx="393" cy="117" r="19" fill="#d65285"/>
+  <text x="256" y="433" text-anchor="middle" font-family="Arial, sans-serif" font-size="76" font-weight="700" fill="#f7f2e9">RAS</text>
+</svg>

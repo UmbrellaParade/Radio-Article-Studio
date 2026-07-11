@@ -30,6 +30,14 @@ const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
 const DEFAULT_KANAME_X_HANDLE = "kaname_mbembe";
 const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register(publicAsset("sw.js"), { scope: import.meta.env.BASE_URL }).catch(() => {
+      console.warn("Radio Article Studio: service worker registration failed.");
+    });
+  });
+}
+
 const QUESTION_USE_OPTIONS = [
   ["public", "公開してOKなプロフィール"],
   ["article", "記事で紹介してほしい内容"],
@@ -2998,6 +3006,28 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
   return (
     <div className="view-stack">
       <SectionTitle title="設定/バックアップ" subtitle="ブラウザ内保存のエクスポート、インポート、主要パスを管理します。" />
+      <article className="panel sync-panel">
+        <div className="sync-heading">
+          <Database size={20} />
+          <div>
+            <h3>アプリ化とデータ同期</h3>
+            <p>
+              スマホではホーム画面に追加、PCではブラウザのインストールからアプリ風に起動できます。
+              現在の制作データはこの端末のブラウザ内に保存されるため、スマホとPCの自動連動にはGoogle Drive、Firebase、Supabaseなどのクラウド保存機能が別途必要です。
+            </p>
+          </div>
+        </div>
+        <div className="sync-status-grid">
+          <div>
+            <b>今すぐ可能</b>
+            <span>ホーム画面追加、オフライン起動補助、JSON書き出し/読み込みでの引き継ぎ</span>
+          </div>
+          <div>
+            <b>次フェーズ</b>
+            <span>ログイン、クラウド保存、スマホ/PC間の自動同期、共同編集</span>
+          </div>
+        </div>
+      </article>
       <article className="panel">
         <div className="form-grid">
           <Field label="Obsidian格納庫パス" value={settings.obsidianPath} onChange={(value) => updateSettings({ obsidianPath: value })} />

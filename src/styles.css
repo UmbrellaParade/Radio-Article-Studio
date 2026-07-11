@@ -264,6 +264,62 @@ h1 {
   background: linear-gradient(135deg, #fffdf8, #effbfc);
 }
 
+.sync-panel {
+  border-color: #cdbfe0;
+  background:
+    linear-gradient(135deg, rgba(255, 253, 248, .98), rgba(244, 238, 251, .98)),
+    radial-gradient(circle at top right, rgba(214, 82, 133, .16), transparent 38%);
+}
+
+.sync-heading {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.sync-heading svg {
+  color: #129fb0;
+  margin-top: 3px;
+}
+
+.sync-heading h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.sync-heading p {
+  margin: 0;
+  color: #5b5267;
+  line-height: 1.8;
+}
+
+.sync-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sync-status-grid div {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #e4d6c6;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .68);
+}
+
+.sync-status-grid b {
+  color: #241f2f;
+}
+
+.sync-status-grid span {
+  color: #665d70;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .bellbo-url-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1089,6 +1145,10 @@ textarea {
   .record,
   .stat-card {
     border-radius: 8px;
+  }
+
+  .sync-status-grid {
+    grid-template-columns: 1fr;
   }
 
   .side-panel {
