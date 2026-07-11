@@ -6,6 +6,7 @@ import {
   Database,
   Download,
   FileText,
+  FolderOpen,
   Image,
   Link,
   ListChecks,
@@ -23,6 +24,7 @@ import {
 import "./styles.css";
 
 const STORAGE_KEY = "radio-article-studio:v1";
+const DEFAULT_OBSIDIAN_PATH = "C:\\Users\\myabe\\OneDrive\\Desktop\\Obsidian Folder\\Umbrella Parade\\Sunoパ！記事";
 
 const QUESTION_USE_OPTIONS = [
   ["public", "公開してOKなプロフィール"],
@@ -39,8 +41,9 @@ const QUESTION_KIND_OPTIONS = [
   ["short", "短文"],
   ["long", "長文"],
   ["url", "URL"],
+  ["track", "楽曲"],
   ["choice", "選択式"],
-  ["file", "ファイル"]
+  ["file", "ファイル単体"]
 ];
 
 const detectUrlType = (url = "") => {
@@ -62,6 +65,13 @@ const isAudioUpload = (file) => {
 const formatAnswerValue = (value) => {
   if (!value) return "-";
   if (typeof value === "object" && value.fileName) return `${value.fileName} (${Math.round((value.size || 0) / 1024 / 1024 * 10) / 10}MB)`;
+  if (typeof value === "object" && ("title" in value || "url" in value || "audio" in value)) {
+    return compactLines([
+      `楽曲名: ${value.title || "-"}`,
+      `楽曲URL: ${value.url || "-"}`,
+      `音源ファイル: ${formatAnswerValue(value.audio)}`
+    ]);
+  }
   return String(value);
 };
 
@@ -218,9 +228,56 @@ const toGoogleCsvUrl = (url) => {
   return `https://docs.google.com/spreadsheets/d/${spreadsheetMatch[1]}/export?format=csv&gid=${gid}`;
 };
 
-const makeEmbedUrl = (url) => {
+const makeEmbedUrl = (url = "") => {
   const youtube = url.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/)([A-Za-z0-9_-]+)/);
   if (youtube) return `https://www.youtube.com/embed/${youtube[1]}`;
+  const suno = url.match(/suno\.com\/(?:song|embed)\/([a-f0-9-]{36})/i);
+  if (suno) return `https://suno.com/embed/${suno[1]}`;
+  if (url.includes("suno.com/")) return url;
+  return "";
+};
+
+const cleanFetchedTrackTitle = (title = "", sourceType = "") => {
+  const trimmed = String(title).replace(/\s+/g, " ").trim();
+  if (!trimmed) return "";
+  if (sourceType === "Suno") {
+    return trimmed
+      .replace(/\s*\|\s*Suno\s*$/i, "")
+      .replace(/\s+by\s+[^|]+$/i, "")
+      .trim();
+  }
+  return trimmed;
+};
+
+const fetchTrackTitleFromUrl = async (url = "") => {
+  const sourceType = detectUrlType(url);
+  if (!url || sourceType === "Other") return "";
+
+  if (sourceType === "YouTube") {
+    try {
+      const response = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+      if (response.ok) {
+        const data = await response.json();
+        return cleanFetchedTrackTitle(data.title, sourceType);
+      }
+    } catch {
+      // Fall through to the generic reader below.
+    }
+  }
+
+  if (sourceType === "Suno") {
+    try {
+      const response = await fetch(`https://r.jina.ai/http://${url}`);
+      if (response.ok) {
+        const text = await response.text();
+        const title = text.match(/^Title:\s*(.+)$/m)?.[1] ?? "";
+        return cleanFetchedTrackTitle(title, sourceType);
+      }
+    } catch {
+      return "";
+    }
+  }
+
   return "";
 };
 
@@ -344,6 +401,37 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind) => {
   };
 };
 
+const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "", respondent = "") => {
+  const source =
+    formId === "form_listener" ? "リスナー応募曲" : formId === "form_personality" ? "パーソナリティ曲" : "ゲスト曲";
+  const ownerAnswer =
+    rawAnswers.find((answer) => /アーティスト|ゲスト名|活動名|応募者|担当|名前/.test(answer.label))?.answer ?? "";
+  const artist = ownerAnswer && ownerAnswer !== "-" ? ownerAnswer : respondent;
+
+  return rawAnswers
+    .filter((answer) => answer.kind === "track" && answer.track)
+    .map((answer) => {
+      const track = answer.track;
+      if (!track.title && !track.url && !track.audio?.fileName) return null;
+      return {
+        id: newId("tr"),
+        episodeId,
+        slotNo: 0,
+        source,
+        artist,
+        title: track.title || `${artist || source} 紹介曲`,
+        urlType: detectUrlType(track.url),
+        url: track.url || "",
+        audioFile: track.audio?.fileName || "",
+        embedUrl: makeEmbedUrl(track.url || ""),
+        honorific: source === "パーソナリティ曲" ? "さんなし" : "",
+        articlePoint: `${answer.label}から取り込み`,
+        status: "回答JSONから取り込み"
+      };
+    })
+    .filter(Boolean);
+};
+
 const encodeSharePayload = (payload) => {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
   let binary = "";
@@ -388,7 +476,8 @@ const makeShareUrl = (form) => {
 
 const sampleData = {
   settings: {
-    obsidianPath: "C:\\Users\\myabe\\OneDrive\\Desktop\\Obsidian Folder\\Umbrella Parade\\Sunoパ！記事",
+    obsidianPath: DEFAULT_OBSIDIAN_PATH,
+    obsidianFolderName: "Sunoパ！記事",
     wordpressSite: "https://ai-music.noiseinmysoul.com/",
     sePonUrl: "https://umbrellaparade.github.io/SE_Pon/"
   },
@@ -422,6 +511,7 @@ const sampleData = {
         { id: "q_guest_x", label: "X URL", kind: "url", required: true, use: "public" },
         { id: "q_profile", label: "活動紹介文", kind: "long", required: true, use: "public" },
         { id: "q_topics", label: "今回話したいこと", kind: "long", required: false, use: "article" },
+        { id: "q_guest_track", label: "紹介する楽曲", kind: "track", required: false, use: "article" },
         { id: "q_ng", label: "触れないでほしいこと/NG質問", kind: "long", required: false, use: "constraint" }
       ]
     },
@@ -433,9 +523,7 @@ const sampleData = {
       description: "送って頂く楽曲の楽曲名、楽曲URL、WAV/MP3音源、記事掲載可否を集めるフォーム。",
       questions: [
         { id: "q_artist", label: "アーティスト名 正式表記", kind: "short", required: true, use: "article" },
-        { id: "q_song", label: "送って頂く楽曲: 楽曲名", kind: "short", required: true, use: "article" },
-        { id: "q_music_url", label: "送って頂く楽曲: 楽曲URL（YouTube / Suno）", kind: "url", required: true, use: "article" },
-        { id: "q_audio", label: "送って頂く楽曲: WAV/MP3アップロード", kind: "file", required: true, use: "internal" },
+        { id: "q_track", label: "送って頂く楽曲", kind: "track", required: true, use: "article" },
         { id: "q_credit", label: "クレジット/表記注意", kind: "long", required: false, use: "constraint" }
       ]
     },
@@ -447,9 +535,7 @@ const sampleData = {
       description: "かなめ🦐/べるぼ☂の紹介曲を運営側で入力するフォーム。",
       questions: [
         { id: "q_owner", label: "担当", kind: "choice", required: true, use: "article" },
-        { id: "q_title", label: "送って頂く楽曲: 楽曲名", kind: "short", required: true, use: "article" },
-        { id: "q_url", label: "送って頂く楽曲: 楽曲URL（YouTube / Suno）", kind: "url", required: true, use: "article" },
-        { id: "q_audio", label: "送って頂く楽曲: WAV/MP3アップロード", kind: "file", required: false, use: "internal" },
+        { id: "q_track", label: "送って頂く楽曲", kind: "track", required: true, use: "article" },
         { id: "q_point", label: "記事で触れてほしいポイント", kind: "long", required: false, use: "article" }
       ]
     }
@@ -561,38 +647,39 @@ const sampleData = {
 
 function migrateData(input) {
   const forms = (input.forms ?? sampleData.forms).map((form) => {
-    const questions = (form.questions ?? []).map((question) => {
-      if (form.id === "form_personality" && question.id === "q_title") {
-        return { ...question, label: "送って頂く楽曲: 楽曲名" };
-      }
-      if (form.id === "form_personality" && question.id === "q_url") {
-        return { ...question, label: "送って頂く楽曲: 楽曲URL（YouTube / Suno）" };
-      }
-      if (question.id === "q_song") {
-        return { ...question, label: "送って頂く楽曲: 楽曲名" };
-      }
-      if (question.id === "q_music_url") {
-        return { ...question, label: "送って頂く楽曲: 楽曲URL（YouTube / Suno）" };
-      }
-      if (question.id === "q_audio") {
-        return { ...question, label: "送って頂く楽曲: WAV/MP3アップロード", required: form.id === "form_listener" ? true : question.required };
-      }
-      return question;
-    });
+    let questions = form.questions ?? [];
 
-    if (form.id === "form_personality" && !questions.some((question) => question.id === "q_audio")) {
-      const urlIndex = questions.findIndex((question) => question.id === "q_url");
-      const audioQuestion = {
-        id: "q_audio",
-        label: "送って頂く楽曲: WAV/MP3アップロード",
-        kind: "file",
-        required: false,
-        use: "internal"
-      };
-      if (urlIndex >= 0) {
-        questions.splice(urlIndex + 1, 0, audioQuestion);
+    if (form.id === "form_guest" && !questions.some((question) => question.kind === "track")) {
+      const topicsIndex = questions.findIndex((question) => question.id === "q_topics");
+      const trackQuestion = { id: "q_guest_track", label: "紹介する楽曲", kind: "track", required: false, use: "article" };
+      questions = [...questions];
+      if (topicsIndex >= 0) {
+        questions.splice(topicsIndex + 1, 0, trackQuestion);
       } else {
-        questions.push(audioQuestion);
+        questions.push(trackQuestion);
+      }
+    }
+
+    if (form.id === "form_listener" || form.id === "form_personality") {
+      const oldTrackIds = new Set(["q_song", "q_music_url", "q_title", "q_url", "q_audio"]);
+      const existingTrack = questions.find((question) => question.kind === "track" || question.id === "q_track");
+      const trackQuestion = {
+        id: existingTrack?.id || "q_track",
+        label: existingTrack?.label || "送って頂く楽曲",
+        kind: "track",
+        required: existingTrack?.required ?? true,
+        use: existingTrack?.use || "article"
+      };
+      const rest = questions.filter((question) => !oldTrackIds.has(question.id) && question.id !== trackQuestion.id);
+      const insertAfterId = form.id === "form_listener" ? "q_artist" : "q_owner";
+      const insertIndex = rest.findIndex((question) => question.id === insertAfterId);
+      questions = [...rest];
+      if (!questions.some((question) => question.kind === "track")) {
+        if (insertIndex >= 0) {
+          questions.splice(insertIndex + 1, 0, trackQuestion);
+        } else {
+          questions.push(trackQuestion);
+        }
       }
     }
 
@@ -899,35 +986,39 @@ function App() {
     reader.readAsText(file, "utf-8");
   };
 
-  const applyBellboTrackUrl = () => {
+  const applyBellboTrackUrl = async () => {
     const url = data.imports?.bellboTrackUrl?.trim();
     if (!selectedEpisode || !url) {
       appendImportLog("べるぼ☂曲URL: 放送回またはURLが未入力です。");
       return;
     }
 
+    appendImportLog("べるぼ☂曲URLから曲名を取得しています。");
+    const fetchedTitle = await fetchTrackTitleFromUrl(url);
+
     setData((current) => {
       const existing = current.tracks.find(
         (track) => track.episodeId === selectedEpisode.id && track.source === "パーソナリティ曲" && track.artist === "べるぼ☂"
       );
+      const shouldReplaceTitle = !existing?.title || existing.url !== url || existing.title === "べるぼ☂ 紹介曲";
       const nextTrack = {
         id: existing?.id ?? newId("tr"),
         episodeId: selectedEpisode.id,
         slotNo: existing?.slotNo ?? nextSlotNo(current.tracks, selectedEpisode.id),
         source: "パーソナリティ曲",
         artist: "べるぼ☂",
-        title: existing?.title || "べるぼ☂ 紹介曲",
+        title: shouldReplaceTitle ? fetchedTitle || existing?.title || "べるぼ☂ 紹介曲" : existing.title,
         urlType: detectUrlType(url),
         url,
         audioFile: existing?.audioFile ?? "",
-        embedUrl: existing?.embedUrl || makeEmbedUrl(url),
+        embedUrl: makeEmbedUrl(url) || existing?.embedUrl || "",
         honorific: "さんなし",
         articlePoint: existing?.articlePoint ?? "",
         status: "URL反映済み"
       };
       return { ...current, tracks: upsertTrack(current.tracks, nextTrack) };
     });
-    appendImportLog("べるぼ☂曲URLを今回の放送回に反映しました。");
+    appendImportLog(fetchedTitle ? `べるぼ☂曲「${fetchedTitle}」を今回の放送回に反映しました。` : "べるぼ☂曲URLを今回の放送回に反映しました。曲名は楽曲タブで修正できます。");
   };
 
   const updateThumbnailStudio = (updater) => {
@@ -1070,7 +1161,21 @@ ${assetRows || "-"}
           constraints: response.constraints || "",
           attachments
         };
-        updateData("responses", (responses) => [normalized, ...responses]);
+        const importedTracks = buildTracksFromRawAnswers(parsed.rawAnswers ?? [], normalized.episodeId, normalized.formId, normalized.respondent);
+        setData((current) => {
+          let nextTracks = current.tracks;
+          importedTracks.forEach((track) => {
+            nextTracks = upsertTrack(nextTracks, {
+              ...track,
+              slotNo: nextSlotNo(nextTracks, normalized.episodeId)
+            });
+          });
+          return {
+            ...current,
+            responses: [normalized, ...current.responses],
+            tracks: nextTracks
+          };
+        });
         setActive("responses");
       } catch {
         alert("回答JSONを読み込めませんでした。");
@@ -1244,6 +1349,19 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     setAnswers((current) => ({ ...current, [questionId]: value }));
   };
 
+  const updateTrackAnswer = (questionId, patch) => {
+    setAnswers((current) => ({
+      ...current,
+      [questionId]: {
+        title: "",
+        url: "",
+        audio: null,
+        ...(current[questionId] ?? {}),
+        ...patch
+      }
+    }));
+  };
+
   const updateFileAnswer = async (questionId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1261,6 +1379,25 @@ function PublicSubmissionForm({ logoSrc, payload }) {
     });
   };
 
+  const updateTrackFileAnswer = async (questionId, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!isAudioUpload(file)) {
+      alert("WAVまたはMP3ファイルを選んでください。");
+      event.target.value = "";
+      return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    updateTrackAnswer(questionId, {
+      audio: {
+        fileName: file.name,
+        mimeType: file.type || (file.name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg"),
+        size: file.size,
+        dataUrl
+      }
+    });
+  };
+
   const formatAnswers = (uses) =>
     form.questions
       .filter((question) => uses.includes(question.use))
@@ -1273,7 +1410,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
   };
 
   const buildResponsePayload = () => {
-    const attachments = form.questions
+    const fileAttachments = form.questions
       .filter((question) => question.kind === "file" && answers[question.id]?.dataUrl)
       .map((question) => ({
         questionId: question.id,
@@ -1283,6 +1420,19 @@ function PublicSubmissionForm({ logoSrc, payload }) {
         size: answers[question.id].size,
         dataUrl: answers[question.id].dataUrl
       }));
+    const trackAttachments = form.questions
+      .filter((question) => question.kind === "track" && answers[question.id]?.audio?.dataUrl)
+      .map((question) => ({
+        questionId: question.id,
+        questionLabel: `${question.label}: 音源ファイル`,
+        trackTitle: answers[question.id].title || "",
+        trackUrl: answers[question.id].url || "",
+        fileName: answers[question.id].audio.fileName,
+        mimeType: answers[question.id].audio.mimeType,
+        size: answers[question.id].audio.size,
+        dataUrl: answers[question.id].audio.dataUrl
+      }));
+    const attachments = [...fileAttachments, ...trackAttachments];
 
     return {
       version: 1,
@@ -1303,10 +1453,12 @@ function PublicSubmissionForm({ logoSrc, payload }) {
       rawAnswers: form.questions.map((question) => ({
         id: question.id,
         label: question.label,
+        kind: question.kind,
         use: question.use,
         useLabel: QUESTION_USE_LABELS[question.use] ?? question.use,
         answer: formatAnswerValue(answers[question.id]),
-        attachment: question.kind === "file" ? answers[question.id] || null : null
+        attachment: question.kind === "file" ? answers[question.id] || null : question.kind === "track" ? answers[question.id]?.audio || null : null,
+        track: question.kind === "track" ? answers[question.id] || null : null
       }))
     };
   };
@@ -1349,7 +1501,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
 
         <form className="public-form" onSubmit={submit}>
           {form.questions.map((question) => (
-            <label className="field wide" key={question.id}>
+            <div className="field wide" key={question.id}>
               <span>{question.label}{question.required ? " *" : ""}</span>
               <small>{QUESTION_USE_LABELS[question.use] ?? question.use}</small>
               {question.kind === "file" ? (
@@ -1361,6 +1513,36 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                     onChange={(event) => updateFileAnswer(question.id, event)}
                   />
                   <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : "WAVまたはMP3をアップロード"}</small>
+                </div>
+              ) : question.kind === "track" ? (
+                <div className="track-question-fields">
+                  <label>
+                    <span>楽曲名</span>
+                    <input
+                      required={Boolean(question.required)}
+                      value={answers[question.id]?.title ?? ""}
+                      onChange={(event) => updateTrackAnswer(question.id, { title: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>楽曲URL（YouTube / Suno）</span>
+                    <input
+                      type="url"
+                      required={Boolean(question.required)}
+                      value={answers[question.id]?.url ?? ""}
+                      onChange={(event) => updateTrackAnswer(question.id, { url: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>楽曲をWAVかMP3でアップロード</span>
+                    <input
+                      type="file"
+                      required={Boolean(question.required)}
+                      accept={AUDIO_FILE_ACCEPT}
+                      onChange={(event) => updateTrackFileAnswer(question.id, event)}
+                    />
+                    <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : "WAVまたはMP3をアップロード"}</small>
+                  </label>
                 </div>
               ) : question.kind === "long" ? (
                 <textarea
@@ -1376,7 +1558,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
                   onChange={(event) => updateAnswer(question.id, event.target.value)}
                 />
               )}
-            </label>
+            </div>
           ))}
           <button className="primary" type="submit"><Send size={16} />回答データを作成</button>
         </form>
@@ -1684,7 +1866,7 @@ function Forms({ forms, patchItem, removeItem, addForm, addQuestion, patchQuesti
             </div>
             <div className="question-list">
               <div className="subhead">質問項目</div>
-              <p className="hint-text">入力形式: 短文は1行、長文は複数行、URLはリンク、選択式は決まった候補から選ぶ項目です。</p>
+              <p className="hint-text">入力形式: 楽曲を選ぶと「楽曲名・楽曲URL・WAV/MP3アップロード」の3点セットになります。ファイル単体は音源以外の添付用です。</p>
               {form.questions.map((question) => (
                 <div className="question-row" key={question.id}>
                   <input value={question.label} onChange={(event) => patchQuestion(form.id, question.id, { label: event.target.value })} />
@@ -1767,7 +1949,7 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
 
 function Tracks({ tracks, patchItem, removeItem, addTrack }) {
   const updateTrackUrl = (track, url) => {
-    patchItem("tracks", track.id, { url, urlType: detectUrlType(url) });
+    patchItem("tracks", track.id, { url, urlType: detectUrlType(url), embedUrl: makeEmbedUrl(url) || track.embedUrl });
   };
 
   return (
@@ -1955,7 +2137,12 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
         </label>
       </div>
 
-      {studio.guestIcon?.name && <p className="muted">ゲストアイコン: {studio.guestIcon.name}</p>}
+      {studio.guestIcon?.name && (
+        <div className="registered-image-row">
+          <img src={studio.guestIcon.dataUrl} alt="登録済みゲストアイコン" />
+          <p className="muted">ゲストアイコン: {studio.guestIcon.name}</p>
+        </div>
+      )}
       {message && <p className="hint-text">{message}</p>}
 
       <div className="thumbnail-grid">
@@ -1972,6 +2159,14 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
                 <input type="file" accept="image/*" onChange={(event) => handleTemplateFile(preset.key, event)} />
               </label>
               <p className="muted">{template.name || "未セット"}</p>
+              {template.dataUrl ? (
+                <div className="registered-template">
+                  <span>登録済みベース画像</span>
+                  <img className="thumbnail-preview" src={template.dataUrl} alt={`${preset.label} base`} />
+                </div>
+              ) : (
+                <div className="empty-preview">ベース画像を登録するとここに表示されます</div>
+              )}
               <div className="slider-grid">
                 <SliderField label="横位置" value={template.iconX} onChange={(value) => patchTemplate(preset.key, { iconX: value })} />
                 <SliderField label="縦位置" value={template.iconY} onChange={(value) => patchTemplate(preset.key, { iconY: value })} />
@@ -1981,7 +2176,12 @@ function ThumbnailComposer({ studio, updateStudio, guestName }) {
                 <button className="primary" onClick={() => generateOne(preset)}>生成</button>
                 <button className="secondary" onClick={() => downloadOne(preset)} disabled={!preview[preset.key]}>PNG保存</button>
               </div>
-              {preview[preset.key] && <img className="thumbnail-preview" src={preview[preset.key]} alt={`${preset.label} preview`} />}
+              {preview[preset.key] && (
+                <div className="registered-template">
+                  <span>合成プレビュー</span>
+                  <img className="thumbnail-preview" src={preview[preset.key]} alt={`${preset.label} preview`} />
+                </div>
+              )}
             </section>
           );
         })}
@@ -2031,15 +2231,41 @@ function CodexPack({ codexPack, copyPack, copied, selectedEpisode }) {
 }
 
 function SettingsPanel({ settings, updateSettings, exportJson, importJson, resetSample }) {
+  const [folderMessage, setFolderMessage] = useState("");
+
+  const chooseFolder = async () => {
+    if (!window.showDirectoryPicker) {
+      setFolderMessage("このブラウザではフォルダー選択に未対応です。既定パスボタンを使うか、パス欄に貼り付けてください。");
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker();
+      updateSettings({ obsidianFolderName: handle.name });
+      setFolderMessage(`${handle.name} を選択しました。ブラウザの仕様で絶対パスは取得できないため、Codex用のパス欄は必要に応じて確認してください。`);
+    } catch {
+      setFolderMessage("フォルダー選択をキャンセルしました。");
+    }
+  };
+
   return (
     <div className="view-stack">
       <SectionTitle title="設定/バックアップ" subtitle="ブラウザ内保存のエクスポート、インポート、主要パスを管理します。" />
       <article className="panel">
         <div className="form-grid">
           <Field label="Obsidian格納庫パス" value={settings.obsidianPath} onChange={(value) => updateSettings({ obsidianPath: value })} />
+          <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
           <Field label="WordPressサイト" value={settings.wordpressSite} onChange={(value) => updateSettings({ wordpressSite: value })} />
           <Field label="SE_Pon URL" value={settings.sePonUrl} onChange={(value) => updateSettings({ sePonUrl: value })} />
         </div>
+        <div className="button-row">
+          <button className="secondary" onClick={() => updateSettings({ obsidianPath: DEFAULT_OBSIDIAN_PATH, obsidianFolderName: "Sunoパ！記事" })}>
+            <Save size={16} />既定のSunoパ！記事フォルダー
+          </button>
+          <button className="secondary" onClick={chooseFolder}>
+            <FolderOpen size={16} />フォルダーを選ぶ
+          </button>
+        </div>
+        {folderMessage && <p className="hint-text">{folderMessage}</p>}
         <div className="button-row">
           <button className="secondary" onClick={exportJson}><Download size={16} />JSONを書き出し</button>
           <label className="secondary file-button">

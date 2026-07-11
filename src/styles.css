@@ -454,7 +454,7 @@ textarea {
 
 .question-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 120px minmax(220px, 260px) 86px 40px;
+  grid-template-columns: minmax(220px, 1fr) 140px minmax(220px, 260px) 86px 40px;
   gap: 8px;
   align-items: center;
 }
@@ -467,6 +467,26 @@ textarea {
 .upload-field input[type="file"] {
   min-height: 0;
   padding: 9px;
+}
+
+.track-question-fields {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.track-question-fields label {
+  display: grid;
+  gap: 6px;
+}
+
+.track-question-fields label span {
+  color: #6b6175;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .mini-check {
@@ -634,6 +654,46 @@ textarea {
   font-weight: 800;
 }
 
+.registered-image-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.registered-image-row img {
+  width: 58px;
+  height: 58px;
+  border: 1px solid #d6ccbd;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #fff;
+}
+
+.registered-template {
+  display: grid;
+  gap: 6px;
+}
+
+.registered-template span {
+  color: #6b6175;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.empty-preview {
+  display: grid;
+  min-height: 110px;
+  place-items: center;
+  padding: 12px;
+  border: 1px dashed #d6ccbd;
+  border-radius: 8px;
+  background: #fff;
+  color: #7a7182;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
 .slider-grid {
   display: grid;
   gap: 8px;
@@ -641,10 +701,12 @@ textarea {
 
 .thumbnail-preview {
   width: 100%;
+  max-height: 220px;
   display: block;
   border: 1px solid #d6ccbd;
   border-radius: 8px;
   background: #fff;
+  object-fit: contain;
 }
 
 .primary,
