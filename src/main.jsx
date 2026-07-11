@@ -1419,7 +1419,7 @@ function PublicSubmissionForm({ logoSrc, payload }) {
   const form = payload?.form;
   const contactAccounts = {
     bellbo: normalizeXHandle(payload?.contactAccounts?.bellbo || DEFAULT_BELLBO_X_HANDLE),
-    kaname: normalizeXHandle(payload?.contactAccounts?.kaname || "")
+    kaname: normalizeXHandle(payload?.contactAccounts?.kaname || DEFAULT_KANAME_X_HANDLE)
   };
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState("");
