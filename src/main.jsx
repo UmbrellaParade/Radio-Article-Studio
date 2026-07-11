@@ -12,7 +12,6 @@ import {
   FolderOpen,
   Image,
   Link,
-  ListChecks,
   Mic2,
   Music,
   Plus,
@@ -1021,6 +1020,53 @@ const nextSlotNo = (tracks, episodeId) => {
 
 const appendTrack = (tracks, nextTrack) => [...tracks, nextTrack];
 
+const normalizeTrackUrlKey = (url = "") => {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) return "";
+  const driveFileId = getGoogleDriveFileId(trimmed);
+  if (driveFileId) return `drive:${driveFileId}`;
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = "";
+    parsed.searchParams.sort();
+    return parsed.href.replace(/\/$/, "").toLowerCase();
+  } catch {
+    return normalizeKey(trimmed);
+  }
+};
+
+const makeTrackImportKey = (track = {}) =>
+  [
+    track.episodeId || "",
+    track.periodId || "",
+    track.source || "",
+    normalizeTrackUrlKey(track.url) || normalizeTrackUrlKey(track.audioFile) || normalizeKey(track.title),
+    normalizeKey(track.artist),
+    normalizeKey(track.aiArtist)
+  ].join("|");
+
+const upsertImportedTrack = (tracks, incomingTrack) => {
+  const incomingKey = makeTrackImportKey(incomingTrack);
+  const existingIndex = tracks.findIndex((track) => makeTrackImportKey(track) === incomingKey);
+  if (existingIndex < 0 || !incomingKey.replace(/\|/g, "")) {
+    return { tracks: appendTrack(tracks, incomingTrack), created: true };
+  }
+  return {
+    tracks: tracks.map((track, index) =>
+      index === existingIndex
+        ? {
+            ...track,
+            ...incomingTrack,
+            id: track.id,
+            slotNo: track.slotNo || incomingTrack.slotNo,
+            status: "取り込み済み"
+          }
+        : track
+    ),
+    created: false
+  };
+};
+
 const getDefaultOwnerHonorific = (source = "") => (source === "パーソナリティ曲" ? "さんなし" : "さん");
 
 const buildResponseFromRow = (row, episodeId, formId, fallbackRespondent = "") => {
@@ -1191,7 +1237,17 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
   let nextThumbnailStudio = current.thumbnailStudio ?? defaultThumbnailStudio;
   let responseCount = 0;
   let trackCount = 0;
+  let trackCreateCount = 0;
+  let trackUpdateCount = 0;
   const importedGuestNames = [];
+  const reflectTrack = (track) => {
+    track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
+    const result = upsertImportedTrack(nextTracks, track);
+    nextTracks = result.tracks;
+    trackCount += 1;
+    if (result.created) trackCreateCount += 1;
+    else trackUpdateCount += 1;
+  };
 
   rows.forEach((row, rowIndex) => {
     if (kind === "guest") {
@@ -1212,27 +1268,21 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
       }
       const track = buildTrackFromRow(row, selectedEpisode.id, "ゲスト曲", response.respondent);
       if (track) {
-        track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
-        nextTracks = appendTrack(nextTracks, track);
-        trackCount += 1;
+        reflectTrack(track);
       }
     }
 
     if (kind === "listener") {
       const track = buildTrackFromRow(row, selectedEpisode.id, "リスナー応募曲", "", periodId);
       if (track) {
-        track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
-        nextTracks = appendTrack(nextTracks, track);
-        trackCount += 1;
+        reflectTrack(track);
       }
     }
 
     if (kind === "personality") {
       const track = buildTrackFromRow(row, selectedEpisode.id, "パーソナリティ曲");
       if (track) {
-        track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
-        nextTracks = appendTrack(nextTracks, track);
-        trackCount += 1;
+        reflectTrack(track);
       }
     }
   });
@@ -1252,7 +1302,7 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
 
   return {
     data: { ...current, responses: nextResponses, tracks: nextTracks, thumbnailStudio: nextThumbnailStudio },
-    result: { responses: responseCount, tracks: trackCount }
+    result: { responses: responseCount, tracks: trackCount, trackCreates: trackCreateCount, trackUpdates: trackUpdateCount }
   };
 };
 
@@ -2379,13 +2429,14 @@ function App() {
     setData((current) => {
       const currentEpisode = current.episodes.find((episode) => episode.id === selectedEpisode.id) ?? selectedEpisode;
       const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, kind, periodId);
+      const trackBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
       const emptyResultNote =
         result.responses === 0 && result.tracks === 0
           ? ` 列名が合っていない可能性があります。Googleフォームの質問名を確認してください。${summarizeImportColumns(rows)}`
           : "";
       return appendImportLogToData(
         next,
-        `${label}: ${rows.length}行を読み込み、回答${result.responses}件・楽曲${result.tracks}件を反映しました。${emptyResultNote}`
+        `${label}: ${rows.length}行を読み込み、回答${result.responses}件・楽曲${result.tracks}件${trackBreakdown}を反映しました。${emptyResultNote}`
       );
     });
   };
@@ -2457,14 +2508,15 @@ function App() {
 
     setData((current) => {
       const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
-      const { data: next } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
+      const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
+      const trackBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
       const nextWithPeriod = {
         ...next,
         applicationPeriods: next.applicationPeriods.map((item) =>
           item.id === period.id ? { ...item, status: rows.length ? "取り込み済み" : item.status } : item
         )
       };
-      return appendImportLogToData(nextWithPeriod, `${label}: ${rows.length}行を応募期間「${period.title || period.id}」として読み込みました。`);
+      return appendImportLogToData(nextWithPeriod, `${label}: ${rows.length}行を応募期間「${period.title || period.id}」として読み込み、楽曲${result.tracks}件${trackBreakdown}を反映しました。`);
     });
   };
 
@@ -2490,14 +2542,15 @@ function App() {
 
       setData((current) => {
         const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
-        const { data: next } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
+        const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
+        const trackBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
         const nextWithPeriod = {
           ...next,
           applicationPeriods: next.applicationPeriods.map((item) =>
             item.id === period.id ? { ...item, status: "取り込み済み" } : item
           )
         };
-        return appendImportLogToData(nextWithPeriod, `応募期間「${period.title || period.id}」: ${rows.length}行を読み込みました。`);
+        return appendImportLogToData(nextWithPeriod, `応募期間「${period.title || period.id}」: ${rows.length}行を読み込み、楽曲${result.tracks}件${trackBreakdown}を反映しました。`);
       });
     } catch (error) {
       appendImportLog(makeImportFailureMessage(`応募期間「${period.title || period.id}」`, error));
@@ -2891,7 +2944,6 @@ ${socialRows || "-"}
           ["dashboard", "ダッシュボード", Radio],
           ["imports", "取り込み", Upload],
           ["episodes", "放送回", CalendarDays],
-          ["forms", "フォーム", ListChecks],
           ["tracks", "楽曲", Music],
           ["assets", "素材", Image],
           ["social", "SNS告知", Share2],
@@ -3653,18 +3705,18 @@ function Header({ logoSrc }) {
 
 function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
   const articleUrl = selectedEpisode?.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode?.articleSlug);
-  const thumbnailGeneratedCount = Object.keys(data.thumbnailStudio?.generated ?? {}).length;
+  const articleThumbnailReady = Boolean(data.thumbnailStudio?.generated?.article16x9);
   const stats = [
     ["放送回", data.episodes.length, CalendarDays],
-    ["フォーム", data.forms.length, ListChecks],
-    ["楽曲", data.tracks.length, Music],
-    ["素材", thumbnailGeneratedCount, Image]
+    ["この回の楽曲", episodeTracks.length, Music],
+    ["記事アイキャッチ", articleThumbnailReady ? "済" : "未", Image],
+    ["Codexパック", selectedEpisode ? "作成" : "-", FileText]
   ];
   const statTargets = {
     放送回: "episodes",
-    フォーム: "forms",
-    楽曲: "tracks",
-    素材: "assets"
+    この回の楽曲: "tracks",
+    記事アイキャッチ: "assets",
+    Codexパック: "pack"
   };
 
   return (
@@ -3679,6 +3731,16 @@ function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
           </button>
         ))}
       </div>
+
+      <article className="panel">
+        <h2>基本の流れ</h2>
+        <div className="button-row">
+          <button className="secondary" onClick={() => setActive("imports")}>1. 取り込み</button>
+          <button className="secondary" onClick={() => setActive("tracks")}>2. 楽曲確認</button>
+          <button className="secondary" onClick={() => setActive("assets")}>3. サムネ作成</button>
+          <button className="primary" onClick={() => setActive("pack")}>4. Codexパック</button>
+        </div>
+      </article>
 
       <div className="two-col">
         <article className="panel">
