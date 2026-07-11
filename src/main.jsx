@@ -224,6 +224,23 @@ const formatXHandle = (value = "") => {
   return handle ? `@${handle}` : "";
 };
 
+const extractXHandleFromText = (value = "") => {
+  const text = String(value || "");
+  const handleMatch = text.match(/@([A-Za-z0-9_]{1,15})/);
+  if (handleMatch) return normalizeXHandle(handleMatch[1]);
+  const urlMatch = text.match(/https?:\/\/(?:www\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})/i);
+  if (urlMatch) return normalizeXHandle(urlMatch[1]);
+  return "";
+};
+
+const formatJapaneseDate = (dateString = "") => {
+  if (!dateString) return "配信日未定";
+  const date = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateString;
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日（${weekdays[date.getDay()]}）`;
+};
+
 const normalizeAdditionalXAccounts = (accounts = []) =>
   accounts
     .map((account, index) => {
@@ -392,9 +409,9 @@ const THUMBNAIL_ICON_LAYOUT_PRESETS = [
     id: "single",
     name: "1人用",
     templates: {
-      article16x9: { iconX: 50, iconY: 77, iconSize: 28, iconSlots: [{ x: 50, y: 77, size: 28 }], guestNameVisible: true, guestNameX: 50, guestNameY: 91, guestNameSize: 6, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 77, guestBadgeSize: 12 },
-      standfm1x1: { iconX: 50, iconY: 82, iconSize: 23, iconSlots: [{ x: 50, y: 82, size: 23 }], guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 82, guestBadgeSize: 10 },
-      stream9x16: { iconX: 50, iconY: 78, iconSize: 30, iconSlots: [{ x: 50, y: 78, size: 30 }], guestNameVisible: true, guestNameX: 50, guestNameY: 88, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 39, guestBadgeY: 78, guestBadgeSize: 9 }
+      article16x9: { iconX: 50, iconY: 76, iconSize: 24, iconSlots: [{ x: 50, y: 76, size: 24 }], guestNameVisible: true, guestNameX: 50, guestNameY: 90, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 41, guestBadgeY: 77, guestBadgeSize: 10 },
+      standfm1x1: { iconX: 50, iconY: 81, iconSize: 22, iconSlots: [{ x: 50, y: 81, size: 22 }], guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 81, guestBadgeSize: 9 },
+      stream9x16: { iconX: 50, iconY: 77, iconSize: 27, iconSlots: [{ x: 50, y: 77, size: 27 }], guestNameVisible: true, guestNameX: 50, guestNameY: 88, guestNameSize: 4, guestBadgeVisible: true, guestBadgeX: 39, guestBadgeY: 78, guestBadgeSize: 8 }
     }
   },
   {
@@ -417,6 +434,7 @@ const THUMBNAIL_ICON_LAYOUT_PRESETS = [
   }
 ];
 
+const THUMBNAIL_LAYOUT_PRESET_VERSION = 2;
 const getIconLayoutPresetTemplates = (preset) => preset?.templates ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0].templates;
 
 const applyIconLayoutPresetToTemplates = (templates = defaultThumbnailStudio.templates, preset) => {
@@ -441,6 +459,7 @@ const defaultThumbnailStudio = {
   guestIcon: { name: "", dataUrl: "" },
   guestIcons: [],
   activeLayoutPreset: "single",
+  layoutPresetVersion: THUMBNAIL_LAYOUT_PRESET_VERSION,
   customLayoutPresets: [],
   generated: {},
   autoGenerateRequestedAt: "",
@@ -515,6 +534,75 @@ const defaultImports = {
   personalityCsvUrl: "",
   bellboTrackUrl: "",
   lastLog: []
+};
+
+const defaultSocialPromo = {
+  guestName: "",
+  guestXHandle: "",
+  talkTheme: "",
+  postText: "",
+  comicTemplate: "",
+  comicPrompt: "",
+  comicImage: { name: "", dataUrl: "" }
+};
+
+const getShortTheme = (theme = "") => {
+  const normalized = String(theme || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "音楽づくりの裏側";
+  return normalized.length > 32 ? `${normalized.slice(0, 32)}...` : normalized;
+};
+
+const buildSocialPostText = ({ guestName, guestXHandle, date, talkTheme }) => {
+  const handle = formatXHandle(guestXHandle);
+  const guestLine = [guestName || "ゲストさん", handle].filter(Boolean).join(" ");
+  const dateLabel = formatJapaneseDate(date);
+  const theme = getShortTheme(talkTheme);
+  return compactLines([
+    "【Sunoパ！告知☂】",
+    `${dateLabel}のSunoパ！は、${guestLine}をお迎えします。`,
+    `今回は「${theme}」について語っていきます。`,
+    "音楽づくりの裏側や、作品に込めた想いをじっくり聞いていく回です。",
+    "リアタイでもアーカイブでも、ぜひ遊びに来てください＾＾",
+    "#Sunoパ #AI音楽 #standfm"
+  ]);
+};
+
+const buildComicTemplateText = ({ guestName, guestXHandle, date, talkTheme }) => {
+  const handle = formatXHandle(guestXHandle);
+  const guestLabel = [guestName || "ゲストさん", handle].filter(Boolean).join(" ");
+  const dateLabel = formatJapaneseDate(date);
+  const theme = getShortTheme(talkTheme);
+  return `タイトル：${theme}を、Sunoパ！でゆっくり聞いてみる夜
+サブコピー：Sunoパ！ ${dateLabel} 告知4コマ
+テーマ：${guestLabel}を迎えて、「${theme}」について語る配信告知
+狙い：ゲストの魅力とトークテーマの気になるポイントを、やわらかく伝えて配信への参加・アーカイブ視聴につなげる
+1コマ目：かなめとべるぼが配信準備をしている。テーブルにはマイク、ヘッドホン、Sunoパ！のロゴ、メモが置かれている。
+セリフ：かなめ「次回のSunoパ！は、${guestName || "ゲストさん"}をお迎えします＾＾」
+2コマ目：ゲストの雰囲気を表す音符や光、作品イメージがふわっと広がる。Xアカウント${handle || "未設定"}の表示が小さく入っている。
+セリフ：べるぼ「今回は『${theme}』について、じっくり聞いていきます☂」
+3コマ目：トークテーマに関する象徴的な場面。制作メモ、音源波形、サムネ、歌詞の断片などが重なり、話が深まっていく。
+セリフ：ゲスト「そこは、作品を作る時にすごく大事にしているところなんです。」
+4コマ目：3人が配信画面の前で笑顔。背景にSunoパ！らしい夜景と花火、傘、音符がある。明るく楽しそうな締め。
+セリフ：かなめ「${dateLabel}、Sunoパ！で一緒に楽しみましょう＾＾」`;
+};
+
+const buildComicPromptText = ({ guestName, guestXHandle, date, talkTheme, comicTemplate }) => {
+  const handle = formatXHandle(guestXHandle);
+  return `以下の4コマ漫画テンプレをもとに、SNS告知用の4コマ漫画画像を作ってください。
+
+条件：
+- 日本語の4コマ漫画
+- 明るく親しみやすいSunoパ！告知
+- ゲスト名: ${guestName || "未設定"}
+- Xアカウント: ${handle || "未設定"}
+- 配信日: ${formatJapaneseDate(date)}
+- トークテーマ: ${talkTheme || "未設定"}
+- 文字は読みやすく、1コマあたり短め
+- 4コマの順番が分かるレイアウト
+- できればSunoパ！らしい音楽、ラジオ、夜景、傘、花火の雰囲気
+
+テンプレ：
+${comicTemplate || buildComicTemplateText({ guestName, guestXHandle, date, talkTheme })}`;
 };
 
 const newId = (prefix) => {
@@ -1315,6 +1403,7 @@ const sampleData = {
   },
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
+  socialPromos: {},
   episodes: [
     {
       id: "ep_yui_2026_07_10",
@@ -1608,33 +1697,56 @@ function migrateData(input) {
       articleUrl: episode.articleUrl || buildArticleUrl(settings.wordpressSite, articleSlug)
     };
   });
+  const rawThumbnailStudio = input.thumbnailStudio ?? {};
+  const activeLayoutPresetId = rawThumbnailStudio.activeLayoutPreset ?? defaultThumbnailStudio.activeLayoutPreset;
+  const builtInLayoutPreset = THUMBNAIL_ICON_LAYOUT_PRESETS.find((preset) => preset.id === activeLayoutPresetId);
+  const normalizedThumbnailTemplates = Object.fromEntries(
+    THUMBNAIL_PRESETS.map((preset) => [
+      preset.key,
+      {
+        ...defaultThumbnailStudio.templates[preset.key],
+        ...(rawThumbnailStudio.templates?.[preset.key] ?? {})
+      }
+    ])
+  );
+  const shouldRefreshBuiltInLayout =
+    Boolean(builtInLayoutPreset) && rawThumbnailStudio.layoutPresetVersion !== THUMBNAIL_LAYOUT_PRESET_VERSION;
+  const thumbnailTemplates = shouldRefreshBuiltInLayout
+    ? applyIconLayoutPresetToTemplates(normalizedThumbnailTemplates, builtInLayoutPreset)
+    : normalizedThumbnailTemplates;
 
   return {
     ...sampleData,
     ...input,
     settings,
     imports: { ...defaultImports, ...(input.imports ?? {}) },
+    socialPromos: Object.fromEntries(
+      Object.entries(input.socialPromos ?? {}).map(([episodeId, promo]) => [
+        episodeId,
+        {
+          ...defaultSocialPromo,
+          ...(promo ?? {}),
+          comicImage: {
+            ...defaultSocialPromo.comicImage,
+            ...(promo?.comicImage ?? {})
+          }
+        }
+      ])
+    ),
     thumbnailStudio: {
       ...defaultThumbnailStudio,
-      ...(input.thumbnailStudio ?? {}),
-      templates: Object.fromEntries(
-        THUMBNAIL_PRESETS.map((preset) => [
-          preset.key,
-          {
-            ...defaultThumbnailStudio.templates[preset.key],
-            ...(input.thumbnailStudio?.templates?.[preset.key] ?? {})
-          }
-        ])
-      ),
+      ...rawThumbnailStudio,
+      layoutPresetVersion: THUMBNAIL_LAYOUT_PRESET_VERSION,
+      templates: thumbnailTemplates,
       guestIcon: {
         ...defaultThumbnailStudio.guestIcon,
-        ...(input.thumbnailStudio?.guestIcon ?? {})
+        ...(rawThumbnailStudio.guestIcon ?? {})
       },
-      guestIcons: normalizeGuestIconList(input.thumbnailStudio?.guestIcon, input.thumbnailStudio?.guestIcons),
-      activeLayoutPreset: input.thumbnailStudio?.activeLayoutPreset ?? defaultThumbnailStudio.activeLayoutPreset,
-      customLayoutPresets: input.thumbnailStudio?.customLayoutPresets ?? [],
-      generated: input.thumbnailStudio?.generated ?? {},
-      autoGenerateRequestedAt: input.thumbnailStudio?.autoGenerateRequestedAt ?? ""
+      guestIcons: normalizeGuestIconList(rawThumbnailStudio.guestIcon, rawThumbnailStudio.guestIcons),
+      activeLayoutPreset: activeLayoutPresetId,
+      customLayoutPresets: rawThumbnailStudio.customLayoutPresets ?? [],
+      generated: shouldRefreshBuiltInLayout ? {} : rawThumbnailStudio.generated ?? {},
+      autoGenerateRequestedAt: shouldRefreshBuiltInLayout ? "" : rawThumbnailStudio.autoGenerateRequestedAt ?? ""
     },
     episodes,
     forms,
@@ -1735,6 +1847,40 @@ function App() {
 
   const episodeResponses = data.responses.filter((response) => response.episodeId === selectedEpisode?.id);
   const episodePeriods = data.applicationPeriods.filter((period) => period.episodeId === selectedEpisode?.id);
+  const inferredGuestXHandle = useMemo(
+    () => episodeResponses.map((response) => extractXHandleFromText(response.publicInfo)).find(Boolean) || "",
+    [episodeResponses]
+  );
+  const currentSocialPromo = selectedEpisode
+    ? {
+        ...defaultSocialPromo,
+        ...(data.socialPromos?.[selectedEpisode.id] ?? {}),
+        guestName: data.socialPromos?.[selectedEpisode.id]?.guestName || selectedEpisode.guestName || "",
+        guestXHandle: data.socialPromos?.[selectedEpisode.id]?.guestXHandle || inferredGuestXHandle,
+        talkTheme: data.socialPromos?.[selectedEpisode.id]?.talkTheme || episodeResponses[0]?.articleUse || ""
+      }
+    : { ...defaultSocialPromo };
+
+  const updateSocialPromo = (patchOrUpdater) => {
+    if (!selectedEpisode) return;
+    setData((current) => {
+      const currentPromo = {
+        ...defaultSocialPromo,
+        ...(current.socialPromos?.[selectedEpisode.id] ?? {})
+      };
+      const patch = typeof patchOrUpdater === "function" ? patchOrUpdater(currentPromo) : patchOrUpdater;
+      return {
+        ...current,
+        socialPromos: {
+          ...(current.socialPromos ?? {}),
+          [selectedEpisode.id]: {
+            ...currentPromo,
+            ...patch
+          }
+        }
+      };
+    });
+  };
 
   useEffect(() => {
     const requestId = data.thumbnailStudio?.autoGenerateRequestedAt;
@@ -2312,6 +2458,14 @@ ${response.constraints || "-"}`
           `- ${period.title || period.id}: ${formatDateRange(period.startDate, period.endDate)} / フォーム: ${period.formId || "-"} / CSV: ${period.csvUrl || "-"} / 状態: ${period.status || "-"}`
       )
       .join("\n");
+    const socialPromo = selectedEpisode ? data.socialPromos?.[selectedEpisode.id] : null;
+    const socialRows = socialPromo
+      ? compactLines([
+          socialPromo.postText && `SNS告知文:\n${socialPromo.postText}`,
+          socialPromo.comicTemplate && `4コマ漫画テンプレ:\n${socialPromo.comicTemplate}`,
+          socialPromo.comicImage?.name && `保存済み漫画画像: ${socialPromo.comicImage.name}`
+        ])
+      : "";
     const articleUrl = selectedEpisode.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode.articleSlug);
 
     return `Obsidianの以下フォルダーを読んで、今回のラジオ放送回を記事化してください。
@@ -2353,12 +2507,15 @@ ${trackRows || "-"}
 ${thumbnailRows || "-"}
 ※サムネPNGそのものは、この画面の「本文+サムネ画像データをコピー」または「サムネ画像JSONをコピー」で渡します。dataUrlをPNGとして保存して使ってください。
 
+SNS告知/漫画素材:
+${socialRows || "-"}
+
 厳守ルール:
 - かなめ🦐、べるぼ☂はパーソナリティなので原則「さん」なし。
 - 記事本文に内部確認メモやNG回答そのものを載せない。
 - 主催/出演/参加/プロデュースなどの関係性を混同しない。
 - WordPress認証情報はチャットで別途共有する。`;
-  }, [data.settings, data.thumbnailStudio, episodePeriods, episodeResponses, episodeTracks, selectedEpisode]);
+  }, [data.settings, data.thumbnailStudio, data.socialPromos, episodePeriods, episodeResponses, episodeTracks, selectedEpisode]);
 
   const copyPack = async () => {
     await navigator.clipboard.writeText(codexPack);
@@ -2496,6 +2653,7 @@ ${thumbnailRows || "-"}
           ["forms", "フォーム", ListChecks],
           ["tracks", "楽曲", Music],
           ["assets", "素材", Image],
+          ["social", "SNS告知", Share2],
           ["pack", "Codexパック", FileText],
           ["settings", "設定", Settings]
         ].map(([key, label, Icon]) => (
@@ -2580,6 +2738,13 @@ ${thumbnailRows || "-"}
               updateThumbnailStudio={updateThumbnailStudio}
               guestName={selectedEpisode?.guestName ?? ""}
               episodeDate={selectedEpisode?.date ?? ""}
+            />
+          )}
+          {active === "social" && (
+            <SocialPromo
+              selectedEpisode={selectedEpisode}
+              promo={currentSocialPromo}
+              updatePromo={updateSocialPromo}
             />
           )}
           {active === "pack" && (
@@ -4730,6 +4895,161 @@ function Assets({ thumbnailStudio, updateThumbnailStudio, guestName, episodeDate
     <div className="view-stack">
       <SectionTitle title="サムネ/素材管理" subtitle="記事16:9、stand.fm 1:1、配信背景9:16を放送回に紐づけて作成します。" />
       <ThumbnailComposer studio={thumbnailStudio} updateStudio={updateThumbnailStudio} guestName={guestName} episodeDate={episodeDate} />
+    </div>
+  );
+}
+
+function SocialPromo({ selectedEpisode, promo, updatePromo }) {
+  const [copiedTarget, setCopiedTarget] = useState("");
+  const guestName = promo.guestName || selectedEpisode?.guestName || "";
+  const guestXHandle = promo.guestXHandle || "";
+  const talkTheme = promo.talkTheme || "";
+  const context = {
+    guestName,
+    guestXHandle,
+    talkTheme,
+    date: selectedEpisode?.date || ""
+  };
+
+  const copyText = async (target, text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // The text remains visible in the textarea when clipboard access is blocked.
+    }
+    setCopiedTarget(target);
+    window.setTimeout(() => setCopiedTarget(""), 1600);
+  };
+
+  const generatePost = () => {
+    updatePromo({ postText: buildSocialPostText(context) });
+  };
+
+  const generateComicTemplate = () => {
+    const comicTemplate = buildComicTemplateText(context);
+    updatePromo({
+      comicTemplate,
+      comicPrompt: buildComicPromptText({ ...context, comicTemplate })
+    });
+  };
+
+  const generateComicPrompt = () => {
+    updatePromo({ comicPrompt: buildComicPromptText({ ...context, comicTemplate: promo.comicTemplate }) });
+  };
+
+  const generateAll = () => {
+    const postText = buildSocialPostText(context);
+    const comicTemplate = buildComicTemplateText(context);
+    const comicPrompt = buildComicPromptText({ ...context, comicTemplate });
+    updatePromo({ postText, comicTemplate, comicPrompt });
+  };
+
+  const handleComicImageFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    updatePromo({
+      comicImage: {
+        name: file.name,
+        dataUrl: await fileToDataUrl(file),
+        savedAt: new Date().toISOString()
+      }
+    });
+    event.target.value = "";
+  };
+
+  const clearComicImage = () => {
+    updatePromo({ comicImage: { ...defaultSocialPromo.comicImage } });
+  };
+
+  const downloadComicImage = () => {
+    if (!promo.comicImage?.dataUrl) return;
+    const anchor = document.createElement("a");
+    anchor.href = promo.comicImage.dataUrl;
+    anchor.download = promo.comicImage.name || `${guestName || "sunopa"}-sns-comic.png`;
+    anchor.click();
+  };
+
+  return (
+    <div className="view-stack">
+      <SectionTitle title="SNS告知/4コマ漫画" subtitle="ゲスト告知文、ChatGPT用4コマ漫画テンプレ、生成した漫画画像を放送回ごとに保存します。" />
+      <article className="panel social-promo-panel">
+        <div className="form-grid">
+          <Field label="ゲスト名" value={guestName} onChange={(value) => updatePromo({ guestName: value })} />
+          <Field label="Xアカウント" value={formatXHandle(guestXHandle)} onChange={(value) => updatePromo({ guestXHandle: normalizeXHandle(value) })} placeholder="@account" />
+          <Field label="配信日" value={selectedEpisode?.date || ""} readOnly />
+          <TextArea label="トークテーマ" value={talkTheme} onChange={(value) => updatePromo({ talkTheme: value })} />
+        </div>
+        <div className="button-row">
+          <button className="primary" onClick={generateAll}><Share2 size={16} />告知素材をまとめて生成</button>
+          <button className="secondary" onClick={generatePost}>告知文生成</button>
+          <button className="secondary" onClick={generateComicTemplate}>4コマテンプレ生成</button>
+          <button className="secondary" onClick={generateComicPrompt}>ChatGPT用依頼生成</button>
+        </div>
+      </article>
+
+      <article className="panel">
+        <div className="record-head">
+          <div>
+            <h2>SNS投稿文</h2>
+            <p className="muted">X/Threadsなどに投稿する告知文です。必要に応じて手直しして使えます。</p>
+          </div>
+          <button className="secondary" onClick={() => copyText("post", promo.postText)} disabled={!promo.postText}>
+            <ClipboardCopy size={16} />{copiedTarget === "post" ? "コピー済み" : "コピー"}
+          </button>
+        </div>
+        <textarea className="pack-output social-output" value={promo.postText} onChange={(event) => updatePromo({ postText: event.target.value })} />
+      </article>
+
+      <article className="panel">
+        <div className="record-head">
+          <div>
+            <h2>4コマ漫画テンプレ</h2>
+            <p className="muted">このテンプレを元に、ChatGPTで漫画画像を作るための設計メモです。</p>
+          </div>
+          <button className="secondary" onClick={() => copyText("comicTemplate", promo.comicTemplate)} disabled={!promo.comicTemplate}>
+            <ClipboardCopy size={16} />{copiedTarget === "comicTemplate" ? "コピー済み" : "コピー"}
+          </button>
+        </div>
+        <textarea className="pack-output social-output tall" value={promo.comicTemplate} onChange={(event) => updatePromo({ comicTemplate: event.target.value })} />
+      </article>
+
+      <article className="panel">
+        <div className="record-head">
+          <div>
+            <h2>ChatGPT用漫画生成依頼</h2>
+            <p className="muted">ChatGPTに貼る用です。漫画画像を生成したら下の保存欄に登録できます。</p>
+          </div>
+          <button className="secondary" onClick={() => copyText("comicPrompt", promo.comicPrompt)} disabled={!promo.comicPrompt}>
+            <ClipboardCopy size={16} />{copiedTarget === "comicPrompt" ? "コピー済み" : "コピー"}
+          </button>
+        </div>
+        <textarea className="pack-output social-output tall" value={promo.comicPrompt} onChange={(event) => updatePromo({ comicPrompt: event.target.value })} />
+      </article>
+
+      <article className="panel">
+        <div className="record-head">
+          <div>
+            <h2>漫画画像保存</h2>
+            <p className="muted">ChatGPTで生成した4コマ漫画画像をここに保存して、放送回と一緒に管理します。</p>
+          </div>
+          <label className="secondary file-button">
+            <Upload size={16} />漫画画像を保存
+            <input type="file" accept="image/*" onChange={handleComicImageFile} />
+          </label>
+        </div>
+        {promo.comicImage?.dataUrl ? (
+          <div className="comic-image-preview">
+            <img src={promo.comicImage.dataUrl} alt="保存済みSNS告知漫画" />
+            <div className="button-row">
+              <button className="secondary" onClick={downloadComicImage}>PNG保存</button>
+              <button className="secondary" onClick={clearComicImage}><X size={16} />画像解除</button>
+            </div>
+            <p className="muted">{promo.comicImage.name}</p>
+          </div>
+        ) : (
+          <div className="empty-preview">ChatGPTで生成した漫画画像を保存するとここに表示されます</div>
+        )}
+      </article>
     </div>
   );
 }
