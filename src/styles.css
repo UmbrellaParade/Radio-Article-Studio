@@ -759,6 +759,15 @@ textarea {
   background: #fff8ee;
 }
 
+.share-box.short-share {
+  border-color: #8bd7df;
+  background: #eefbfd;
+}
+
+.share-box.short-share strong {
+  color: #0a6670;
+}
+
 .song-card-title {
   display: flex;
   flex-wrap: wrap;

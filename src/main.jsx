@@ -27,6 +27,7 @@ import "./styles.css";
 const STORAGE_KEY = "radio-article-studio:v1";
 const THUMBNAIL_IMAGE_DB_NAME = "radio-article-studio-thumbnails";
 const THUMBNAIL_IMAGE_STORE = "generated";
+const SHARED_FORMS_DIR = "shared-forms";
 const DEFAULT_OBSIDIAN_PATH = "C:\\Users\\myabe\\OneDrive\\Desktop\\Obsidian Folder\\Umbrella Parade\\Sunoパ！記事";
 const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
 const DEFAULT_KANAME_X_HANDLE = "kaname_mbembe";
@@ -711,6 +712,49 @@ const decodeCompressedSharePayload = (value) => {
   return JSON.parse(json);
 };
 
+const normalizeShareSlug = (value = "", fallback = "form") => {
+  const fallbackSlug =
+    String(fallback || "form")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "form";
+  return (
+    String(value || fallbackSlug)
+      .trim()
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || fallbackSlug
+  );
+};
+
+const getFormPublishedSlug = (form) => normalizeShareSlug(form?.shareSlug || form?.id, form?.id || "form");
+
+const getPeriodPublishedSlug = (period, episode, form) =>
+  normalizeShareSlug(
+    period?.shareSlug || [episode?.date, form?.id || period?.formId, period?.id].filter(Boolean).join("-"),
+    period?.id || "period"
+  );
+
+const getPublishedSharePayloadUrl = (slug) => publicAsset(`${SHARED_FORMS_DIR}/${normalizeShareSlug(slug)}.json`);
+
+const makePublishedShareUrl = (slug) =>
+  `${window.location.origin}${window.location.pathname}#/r/${encodeURIComponent(normalizeShareSlug(slug))}`;
+
+const downloadTextFile = (content, fileName, type = "text/plain") => {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
 const getRawStoredDataForShare = () => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -737,6 +781,14 @@ const resolvePeriodReferencePayload = (periodId) => {
 };
 
 const readSharedFormPayload = () => {
+  const publishedMatch = window.location.hash.match(/^#\/r\/([^/?#]+)$/);
+  if (publishedMatch) {
+    return {
+      loading: true,
+      publishedSlug: normalizeShareSlug(decodeURIComponent(publishedMatch[1]))
+    };
+  }
+
   const periodReferenceMatch = window.location.hash.match(/^#\/p\/([^/?#]+)$/);
   if (periodReferenceMatch) return resolvePeriodReferencePayload(decodeURIComponent(periodReferenceMatch[1]));
 
@@ -759,6 +811,16 @@ const readSharedFormPayload = () => {
   } catch {
     return { error: true };
   }
+};
+
+const loadPublishedSharePayload = async (slug) => {
+  const response = await fetch(getPublishedSharePayloadUrl(slug), { cache: "no-store" });
+  if (!response.ok) throw new Error(`published-share-not-found:${response.status}`);
+  const payload = await response.json();
+  if (payload?.type !== "radio-article-studio-form" || !payload?.form) {
+    throw new Error("published-share-invalid");
+  }
+  return payload;
 };
 
 const readRestorePayload = () => {
@@ -822,6 +884,15 @@ const makeLegacyShareUrl = (form, settings = sampleData.settings, context = {}) 
 const makeRestoreUrl = (data) =>
   `${window.location.origin}${window.location.pathname}#/restore/${encodeCompressedSharePayload(data)}`;
 
+const downloadPublishedShareJson = (form, settings = sampleData.settings, context = {}, slug) => {
+  const shareSlug = normalizeShareSlug(slug);
+  downloadTextFile(
+    JSON.stringify(makeSharePayload(form, settings, context), null, 2),
+    `${shareSlug}.json`,
+    "application/json"
+  );
+};
+
 const formatDateRange = (startDate = "", endDate = "") => {
   if (startDate && endDate) return `${startDate} - ${endDate}`;
   return startDate || endDate || "期間未設定";
@@ -860,6 +931,7 @@ const sampleData = {
       name: "ゲスト回アンケート",
       type: "ゲスト",
       status: "受付中",
+      shareSlug: "guest-form",
       description: "ゲスト紹介、紹介楽曲、NG/注意事項を集めるフォーム。",
       questions: [
         { id: "q_guest_name", label: "ゲスト名 正式表記", kind: "short", required: true, use: "public" },
@@ -877,6 +949,7 @@ const sampleData = {
       name: "リスナー楽曲応募フォーム",
       type: "リスナー",
       status: "準備中",
+      shareSlug: "listener-tracks",
       description: "送って頂く楽曲の楽曲名、楽曲URL、WAV/MP3音源、記事掲載可否を集めるフォーム。",
       questions: [
         { id: "q_artist", label: "アーティスト名 正式表記", kind: "short", required: true, use: "article" },
@@ -890,6 +963,7 @@ const sampleData = {
       name: "パーソナリティ曲入力",
       type: "運営",
       status: "運用中",
+      shareSlug: "personality-tracks",
       description: "かなめ🦐/べるぼ☂の紹介曲を運営側で入力するフォーム。",
       questions: [
         { id: "q_owner", label: "担当", kind: "choice", required: true, use: "article" },
@@ -908,6 +982,7 @@ const sampleData = {
       startDate: "2026-07-01",
       endDate: "2026-07-09",
       status: "受付終了",
+      shareSlug: "listener-2026-07-10",
       csvUrl: "",
       notes: "放送回に載せるリスナー応募曲を期間でまとめるサンプル。"
     }
@@ -1102,7 +1177,7 @@ function migrateData(input) {
       }
     }
 
-    return { ...form, questions };
+    return { ...form, shareSlug: form.shareSlug || getFormPublishedSlug(form), questions };
   });
 
   const settings = { ...sampleData.settings, ...(input.settings ?? {}) };
@@ -1155,7 +1230,8 @@ function migrateData(input) {
       status: "準備中",
       csvUrl: "",
       notes: "",
-      ...period
+      ...period,
+      shareSlug: period.shareSlug || getPeriodPublishedSlug(period, episodes.find((episode) => episode.id === period.episodeId), forms.find((form) => form.id === period.formId))
     })),
     responses: (input.responses ?? sampleData.responses).map((response) => ({
       attachments: [],
@@ -1207,6 +1283,21 @@ function App() {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
+
+  useEffect(() => {
+    if (!sharedPayload?.publishedSlug) return undefined;
+    let active = true;
+    loadPublishedSharePayload(sharedPayload.publishedSlug)
+      .then((payload) => {
+        if (active) setSharedPayload(payload);
+      })
+      .catch(() => {
+        if (active) setSharedPayload({ error: true, publishedSlug: sharedPayload.publishedSlug });
+      });
+    return () => {
+      active = false;
+    };
+  }, [sharedPayload?.publishedSlug]);
 
   const selectedEpisode = useMemo(
     () => data.episodes.find((episode) => episode.id === selectedEpisodeId) ?? data.episodes[0],
@@ -1307,6 +1398,7 @@ function App() {
         name: "新しいフォーム",
         type: "自由フォーム",
         status: "準備中",
+        shareSlug: "",
         description: "",
         questions: [
           { id: newId("q"), label: "質問文", kind: "short", required: false, use: "article" }
@@ -1329,6 +1421,7 @@ function App() {
       startDate: today,
       endDate: episode?.date ?? today,
       status: "準備中",
+      shareSlug: "",
       csvUrl: "",
       notes: ""
     };
@@ -1964,13 +2057,29 @@ function PublicSubmissionForm({ logoSrc, payload }) {
   const [copied, setCopied] = useState(false);
   const [formError, setFormError] = useState("");
 
+  if (payload?.loading) {
+    return (
+      <main className="app-shell public-shell">
+        <Header logoSrc={logoSrc} />
+        <article className="panel">
+          <h2>公開フォームを読み込んでいます</h2>
+          <p className="muted">少し待ってから、フォームが表示されるか確認してください。</p>
+        </article>
+      </main>
+    );
+  }
+
   if (payload?.error || !form) {
     return (
       <main className="app-shell public-shell">
         <Header logoSrc={logoSrc} />
         <article className="panel">
           <h2>共有フォームを開けませんでした</h2>
-          <p className="muted">URLが途中で切れている可能性があります。管理画面から共有リンクを作り直してください。</p>
+          <p className="muted">
+            {payload?.publishedSlug
+              ? `公開JSON public/shared-forms/${payload.publishedSlug}.json がまだ配置されていないか、公開IDが違う可能性があります。`
+              : "URLが途中で切れている可能性があります。管理画面から共有リンクを作り直してください。"}
+          </p>
           <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
         </article>
       </main>
@@ -2726,6 +2835,33 @@ function ApplicationPeriods({
     window.setTimeout(() => setCopiedPeriodId(""), 1800);
   };
 
+  const copyPublishedPeriodShareUrl = async (period) => {
+    const form = forms.find((item) => item.id === period.formId);
+    if (!form) return;
+    const episode = episodes.find((item) => item.id === period.episodeId);
+    const slug = getPeriodPublishedSlug(period, episode, form);
+    await navigator.clipboard.writeText(makePublishedShareUrl(slug));
+    setCopiedPeriodId(`${period.id}:published`);
+    window.setTimeout(() => setCopiedPeriodId(""), 1800);
+  };
+
+  const downloadPublishedPeriodJson = (period) => {
+    const form = forms.find((item) => item.id === period.formId);
+    if (!form) return;
+    const episode = episodes.find((item) => item.id === period.episodeId);
+    const slug = getPeriodPublishedSlug(period, episode, form);
+    downloadPublishedShareJson(form, settings, { period, episode }, slug);
+  };
+
+  const copyPublishedPeriodJson = async (period) => {
+    const form = forms.find((item) => item.id === period.formId);
+    if (!form) return;
+    const episode = episodes.find((item) => item.id === period.episodeId);
+    await navigator.clipboard.writeText(JSON.stringify(makeSharePayload(form, settings, { period, episode }), null, 2));
+    setCopiedPeriodId(`${period.id}:json`);
+    window.setTimeout(() => setCopiedPeriodId(""), 1800);
+  };
+
   return (
     <div className="view-stack">
       <SectionTitle
@@ -2738,6 +2874,8 @@ function ApplicationPeriods({
           const form = forms.find((item) => item.id === period.formId);
           const episode = episodes.find((item) => item.id === period.episodeId);
           const shareUrl = form ? makePortableShareUrl(form, settings, { period, episode }) : "";
+          const publishedSlug = form ? getPeriodPublishedSlug(period, episode, form) : "";
+          const publishedUrl = publishedSlug ? makePublishedShareUrl(publishedSlug) : "";
           return (
             <article className="record" key={period.id}>
               <div className="record-head">
@@ -2757,13 +2895,32 @@ function ApplicationPeriods({
                 <Field label="受付開始" type="date" value={period.startDate} onChange={(value) => patchItem("applicationPeriods", period.id, { startDate: value })} />
                 <Field label="受付終了" type="date" value={period.endDate} onChange={(value) => patchItem("applicationPeriods", period.id, { endDate: value })} />
                 <SelectField label="状態" value={period.status} options={["準備中", "受付中", "受付終了", "取り込み済み", "保留"]} onChange={(value) => patchItem("applicationPeriods", period.id, { status: value })} />
+                <Field label="短縮公開ID" value={period.shareSlug} onChange={(value) => patchItem("applicationPeriods", period.id, { shareSlug: value })} placeholder="例: yui-20260723" />
                 <Field label="Google Sheets / CSV URL" value={period.csvUrl} onChange={(value) => patchItem("applicationPeriods", period.id, { csvUrl: value })} />
                 <TextArea label="メモ" value={period.notes} onChange={(value) => patchItem("applicationPeriods", period.id, { notes: value })} />
               </div>
+              <div className="share-box short-share">
+                <div>
+                  <strong><Share2 size={16} />公開後に使える短いURL</strong>
+                  <span>ゲストさんやSNSに渡す用です。先に「公開JSONを保存」して、Codexに public/shared-forms/{publishedSlug || "id"}.json へ配置してもらうと、このURLで開けます。</span>
+                </div>
+                <input readOnly value={publishedUrl} onFocus={(event) => event.target.select()} />
+                <div className="inline-actions">
+                  <button className="secondary" onClick={() => copyPublishedPeriodShareUrl(period)} disabled={!publishedUrl}>
+                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:published` ? "コピー済み" : "短い公開URLをコピー"}
+                  </button>
+                  <button className="secondary" onClick={() => downloadPublishedPeriodJson(period)} disabled={!publishedUrl}>
+                    <Download size={16} />公開JSONを保存
+                  </button>
+                  <button className="secondary" onClick={() => copyPublishedPeriodJson(period)} disabled={!publishedUrl}>
+                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:json` ? "JSONコピー済み" : "公開JSONをコピー"}
+                  </button>
+                </div>
+              </div>
               <div className="share-box">
                 <div>
-                  <strong><Share2 size={16} />外部共有用 応募フォームURL</strong>
-                  <span>外部の人に渡すURLです。フォーム内容をURLに含めるので、相手の端末にこのツールのデータがなくても開けます。</span>
+                  <strong><Share2 size={16} />長い外部URL（即時用）</strong>
+                  <span>公開JSONを置かなくても今すぐ使える予備URLです。フォーム内容をURLに含めるため長くなります。</span>
                 </div>
                 <input readOnly value={shareUrl} onFocus={(event) => event.target.select()} />
                 <div className="inline-actions">
@@ -2771,7 +2928,7 @@ function ApplicationPeriods({
                     <ClipboardCopy size={16} />{copiedPeriodId === period.id ? "コピー済み" : "外部URLをコピー"}
                   </button>
                   <button className="secondary" onClick={() => copyShortPeriodShareUrl(period)} disabled={!shareUrl}>
-                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:short` ? "コピー済み" : "短い管理用URLをコピー"}
+                    <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:short` ? "コピー済み" : "管理端末用URLをコピー"}
                   </button>
                   <button className="primary" onClick={() => importPeriodCsvUrl(period)}>
                     <Upload size={16} />この期間のCSVを取り込み
@@ -2805,6 +2962,24 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
     window.setTimeout(() => setCopiedFormId(""), 1800);
   };
 
+  const copyPublishedShareUrl = async (form) => {
+    const slug = getFormPublishedSlug(form);
+    await navigator.clipboard.writeText(makePublishedShareUrl(slug));
+    setCopiedFormId(`${form.id}:published`);
+    window.setTimeout(() => setCopiedFormId(""), 1800);
+  };
+
+  const downloadPublishedFormJson = (form) => {
+    const slug = getFormPublishedSlug(form);
+    downloadPublishedShareJson(form, settings, {}, slug);
+  };
+
+  const copyPublishedFormJson = async (form) => {
+    await navigator.clipboard.writeText(JSON.stringify(makeSharePayload(form, settings), null, 2));
+    setCopiedFormId(`${form.id}:json`);
+    window.setTimeout(() => setCopiedFormId(""), 1800);
+  };
+
   return (
     <div className="view-stack">
       <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、外部共有URLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
@@ -2817,12 +2992,31 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
             </div>
             <div className="form-grid">
               <Field label="フォーム名" value={form.name} onChange={(value) => patchItem("forms", form.id, { name: value })} />
+              <Field label="短縮公開ID" value={form.shareSlug} onChange={(value) => patchItem("forms", form.id, { shareSlug: value })} placeholder="例: guest-form" />
               <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
+            </div>
+            <div className="share-box short-share">
+              <div>
+              <strong><Share2 size={16} />公開後に使える短いURL</strong>
+                <span>ゲストさんやSNSに渡す用です。先に「公開JSONを保存」して、Codexに public/shared-forms/{getFormPublishedSlug(form)}.json へ配置してもらうと、このURLで開けます。</span>
+              </div>
+              <input readOnly value={makePublishedShareUrl(getFormPublishedSlug(form))} onFocus={(event) => event.target.select()} />
+              <div className="inline-actions">
+                <button className="secondary" onClick={() => copyPublishedShareUrl(form)}>
+                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:published` ? "コピー済み" : "短い公開URLをコピー"}
+                </button>
+                <button className="secondary" onClick={() => downloadPublishedFormJson(form)}>
+                  <Download size={16} />公開JSONを保存
+                </button>
+                <button className="secondary" onClick={() => copyPublishedFormJson(form)}>
+                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:json` ? "JSONコピー済み" : "公開JSONをコピー"}
+                </button>
+              </div>
             </div>
             <div className="share-box">
               <div>
-                <strong><Share2 size={16} />外部共有用フォームURL</strong>
-                <span>外部の人に渡すURLです。フォーム内容をURLに含めるので、相手の端末にこのツールのデータがなくても開けます。期間を指定する場合は「応募期間管理」のURLを使います。</span>
+                <strong><Share2 size={16} />長い外部URL（即時用）</strong>
+                <span>公開JSONを置かなくても今すぐ使える予備URLです。フォーム内容をURLに含めるため長くなります。期間を指定する場合は「応募期間管理」のURLを使います。</span>
               </div>
               <input readOnly value={makePortableShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
               <div className="inline-actions">
@@ -2830,7 +3024,7 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
                   <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "外部URLをコピー"}
                 </button>
                 <button className="secondary" onClick={() => copyShortShareUrl(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:short` ? "コピー済み" : "短い管理用URLをコピー"}
+                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:short` ? "コピー済み" : "管理端末用URLをコピー"}
                 </button>
               </div>
             </div>
