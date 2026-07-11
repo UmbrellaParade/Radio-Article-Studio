@@ -59,10 +59,11 @@ Implemented:
 14. JSON export/import backup.
 15. Responsive mobile layout for management screens and shared forms.
 16. PWA app shell with install metadata, home-screen icon, and basic offline app-shell caching.
+17. One-time device transfer links for moving the current browser data to another phone or desktop browser.
 
 The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Application periods connect a date range, target episode, form, and listener submission sheet. Shared forms use short reference URLs such as `#/p/...` and `#/f/...`, with compressed `#/s/...` URLs available as portable fallbacks. Forms can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. They can also use an internal X contact block that normalizes handles into profile URLs and links respondents to the Bellbo/Kaname operating accounts before DM contact. The operator can import the response JSON, preview/download attached audio, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
 
-The PWA version can be added to a smartphone home screen or installed from desktop browsers. Data still lives in each browser's localStorage, so automatic smartphone/PC synchronization requires a future cloud storage layer such as Google Drive, Firebase, or Supabase. Until then, use JSON export/import to move work between devices.
+The PWA version can be added to a smartphone home screen or installed from desktop browsers. Data still lives in each browser's localStorage, so automatic smartphone/PC synchronization requires a future cloud storage layer such as Google Drive, Firebase, or Supabase. Until then, use device transfer links for small browser states or JSON export/import for larger states with images and audio.
 
 ## Development
 

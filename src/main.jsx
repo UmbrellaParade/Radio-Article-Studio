@@ -621,6 +621,16 @@ const readSharedFormPayload = () => {
   }
 };
 
+const readRestorePayload = () => {
+  const match = window.location.hash.match(/^#\/restore\/(.+)$/);
+  if (!match) return null;
+  try {
+    return { data: migrateData(decodeCompressedSharePayload(match[1])) };
+  } catch {
+    return { error: true };
+  }
+};
+
 const makeSharePayload = (form, settings = sampleData.settings, context = {}) => {
   const payload = {
     version: 1,
@@ -668,6 +678,9 @@ const makePortableShareUrl = (form, settings = sampleData.settings, context = {}
 
 const makeLegacyShareUrl = (form, settings = sampleData.settings, context = {}) =>
   `${window.location.origin}${window.location.pathname}#/submit/${encodeSharePayload(makeSharePayload(form, settings, context))}`;
+
+const makeRestoreUrl = (data) =>
+  `${window.location.origin}${window.location.pathname}#/restore/${encodeCompressedSharePayload(data)}`;
 
 const formatDateRange = (startDate = "", endDate = "") => {
   if (startDate && endDate) return `${startDate} - ${endDate}`;
@@ -1018,19 +1031,24 @@ function App() {
   const [active, setActive] = useState("dashboard");
   const [selectedEpisodeId, setSelectedEpisodeId] = useState(data.episodes[0]?.id ?? "");
   const [copied, setCopied] = useState(false);
+  const [transferCopied, setTransferCopied] = useState(false);
   const [sharedPayload, setSharedPayload] = useState(readSharedFormPayload);
+  const [restorePayload, setRestorePayload] = useState(readRestorePayload);
 
   useEffect(() => {
-    if (sharedPayload) return;
+    if (sharedPayload || restorePayload) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch {
       console.warn("Radio Article Studio: browser storage quota exceeded. Export JSON to preserve current data.");
     }
-  }, [data, sharedPayload]);
+  }, [data, sharedPayload, restorePayload]);
 
   useEffect(() => {
-    const onHashChange = () => setSharedPayload(readSharedFormPayload());
+    const onHashChange = () => {
+      setSharedPayload(readSharedFormPayload());
+      setRestorePayload(readRestorePayload());
+    };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
@@ -1457,6 +1475,12 @@ ${assetRows || "-"}
     window.setTimeout(() => setCopied(false), 1800);
   };
 
+  const copyTransferLink = async () => {
+    await navigator.clipboard.writeText(makeRestoreUrl(data));
+    setTransferCopied(true);
+    window.setTimeout(() => setTransferCopied(false), 1800);
+  };
+
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1540,6 +1564,25 @@ ${assetRows || "-"}
     setData(sampleData);
     setSelectedEpisodeId(sampleData.episodes[0].id);
   };
+
+  const restoreData = (incomingData) => {
+    try {
+      const next = migrateData(incomingData);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      setData(next);
+      setSelectedEpisodeId(next.episodes?.[0]?.id ?? "");
+      setSharedPayload(null);
+      setRestorePayload(null);
+      setActive("settings");
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    } catch {
+      alert("データを取り込めませんでした。JSON書き出し/読み込みを使ってください。");
+    }
+  };
+
+  if (restorePayload) {
+    return <RestoreDataView logoSrc={logoSrc} payload={restorePayload} restoreData={restoreData} />;
+  }
 
   if (sharedPayload) {
     return <PublicSubmissionForm logoSrc={logoSrc} payload={sharedPayload} />;
@@ -1684,10 +1727,62 @@ ${assetRows || "-"}
               exportJson={exportJson}
               importJson={importJson}
               resetSample={resetSample}
+              copyTransferLink={copyTransferLink}
+              transferCopied={transferCopied}
             />
           )}
         </section>
       </div>
+    </main>
+  );
+}
+
+function RestoreDataView({ logoSrc, payload, restoreData }) {
+  const incoming = payload?.data;
+
+  if (payload?.error || !incoming) {
+    return (
+      <main className="app-shell public-shell">
+        <Header logoSrc={logoSrc} />
+        <article className="panel">
+          <h2>引き継ぎデータを開けませんでした</h2>
+          <p className="muted">URLが途中で切れている可能性があります。PC側で引き継ぎリンクを作り直すか、JSON読み込みを使ってください。</p>
+          <button className="secondary" onClick={() => { window.location.hash = ""; }}>管理画面へ戻る</button>
+        </article>
+      </main>
+    );
+  }
+
+  return (
+    <main className="app-shell public-shell">
+      <Header logoSrc={logoSrc} />
+      <article className="panel restore-panel">
+        <div className="public-head">
+          <div>
+            <p className="eyebrow slim">Device Transfer</p>
+            <h2>この端末に制作データを取り込みますか？</h2>
+            <p className="muted">
+              PC側で作成したRadio Article Studioのデータを、このブラウザに保存します。
+              取り込むと、この端末にある現在のデータは上書きされます。
+            </p>
+          </div>
+        </div>
+        <div className="restore-summary">
+          <div><b>{incoming.episodes?.length ?? 0}</b><span>放送回</span></div>
+          <div><b>{incoming.forms?.length ?? 0}</b><span>フォーム</span></div>
+          <div><b>{incoming.tracks?.length ?? 0}</b><span>楽曲</span></div>
+          <div><b>{incoming.applicationPeriods?.length ?? 0}</b><span>応募期間</span></div>
+        </div>
+        <dl className="detail-list">
+          <div><dt>WordPress</dt><dd>{incoming.settings?.wordpressSite || "未設定"}</dd></div>
+          <div><dt>Obsidian</dt><dd>{incoming.settings?.obsidianFolderName || incoming.settings?.obsidianPath || "未設定"}</dd></div>
+          <div><dt>X</dt><dd>べるぼ☂ @{incoming.settings?.bellboXHandle || DEFAULT_BELLBO_X_HANDLE} / かなめ🦐 @{incoming.settings?.kanameXHandle || DEFAULT_KANAME_X_HANDLE}</dd></div>
+        </dl>
+        <div className="button-row">
+          <button className="primary" onClick={() => restoreData(incoming)}><Upload size={16} />この端末に取り込む</button>
+          <button className="secondary" onClick={() => { window.location.hash = ""; }}>キャンセル</button>
+        </div>
+      </article>
     </main>
   );
 }
@@ -2986,7 +3081,7 @@ function CodexPack({ codexPack, copyPack, copied, selectedEpisode }) {
   );
 }
 
-function SettingsPanel({ settings, updateSettings, exportJson, importJson, resetSample }) {
+function SettingsPanel({ settings, updateSettings, exportJson, importJson, resetSample, copyTransferLink, transferCopied }) {
   const [folderMessage, setFolderMessage] = useState("");
 
   const chooseFolder = async () => {
@@ -3047,6 +3142,7 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
         </div>
         {folderMessage && <p className="hint-text">{folderMessage}</p>}
         <div className="button-row">
+          <button className="secondary" onClick={copyTransferLink}><ClipboardCopy size={16} />{transferCopied ? "コピー済み" : "引き継ぎリンクをコピー"}</button>
           <button className="secondary" onClick={exportJson}><Download size={16} />JSONを書き出し</button>
           <label className="secondary file-button">
             <Upload size={16} />JSONを読み込み
@@ -3054,6 +3150,7 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           </label>
           <button className="danger" onClick={resetSample}><Trash2 size={16} />サンプルに戻す</button>
         </div>
+        <p className="hint-text">スマホへ一度だけ移す場合は、PCで引き継ぎリンクをコピーしてスマホで開きます。画像や音源を多く含む場合はJSON書き出し/読み込みを使ってください。</p>
       </article>
     </div>
   );
