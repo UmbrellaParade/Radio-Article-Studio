@@ -2668,7 +2668,7 @@ function Forms({
               <span>{form.questions.length}項目</span>
               <span>{formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>
               {form.submissionLimit ? <span>上限 {form.submissionLimit}件</span> : <span>上限なし</span>}
-              <span>添付 {normalizeAttachmentLimitMb(form.attachmentLimitMb)}MB</span>
+              <span>添付 1件{normalizeAttachmentLimitMb(form.attachmentLimitMb)}MB</span>
             </summary>
             <div className="record-body">
               <div className="record-head compact">
@@ -2715,7 +2715,7 @@ function Forms({
               </PersistentDetails>
               <PersistentDetails {...detailsProps(`form:${form.id}:availability`, true)} className="collapsible-section">
                 <summary><strong>受付条件</strong><span>期間・応募数・添付容量</span></summary>
-                <p className="hint-text">日付と応募数は空欄なら制限なしです。期間外、または応募数上限に達したフォームは回答画面に表示されません。添付上限は1回の回答に添付できる合計サイズです。</p>
+                <p className="hint-text">日付と応募数は空欄なら制限なしです。期間外、または応募数上限に達したフォームは回答画面に表示されません。添付上限は1ファイルあたりのサイズです。楽曲項目では1曲の音源ごとにこの上限を適用します。</p>
                 <div className="form-grid">
                   <Field
                     label="受付開始"
@@ -2737,13 +2737,13 @@ function Forms({
                     placeholder="未指定"
                   />
                   <Field
-                    label="添付上限（合計MB）"
+                    label="添付上限（1ファイルMB）"
                     type="number"
                     value={form.attachmentLimitMb || ""}
                     onChange={(value) => patchItem("forms", form.id, { attachmentLimitMb: sanitizeAttachmentLimitInput(value) })}
                     placeholder={String(DEFAULT_ATTACHMENT_LIMIT_MB)}
                   />
-                  <p className="hint-text wide">1〜{MAX_ATTACHMENT_LIMIT_MB}MBで指定できます。WAVを受けたいフォームは200MBがおすすめです。</p>
+                  <p className="hint-text wide">1〜{MAX_ATTACHMENT_LIMIT_MB}MBで指定できます。WAVを受けたいフォームは1曲あたり200MBがおすすめです。</p>
                 </div>
               </PersistentDetails>
               <PersistentDetails {...detailsProps(`form:${form.id}:share`)} className="collapsible-section">

@@ -316,7 +316,6 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
   const submissionLimit = normalizeSubmissionLimit(form?.submissionLimit);
   const attachmentLimitMb = normalizeAttachmentLimitMb(form?.attachmentLimitMb);
   const attachmentLimitBytes = attachmentLimitMb * 1024 * 1024;
-  const submissionBytesLimit = Math.ceil(attachmentLimitBytes * 1.45) + 1024 * 1024;
   const draftLoadingRef = useRef(false);
 
   useEffect(() => {
@@ -438,7 +437,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             {(form.receptionStartDate || form.receptionEndDate) && <span>受付条件: {formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>}
             {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
             {submissionLimit ? <span>応募数: {submissionStatus.count ?? "-"} / {submissionLimit}</span> : <span>応募数: 制限なし</span>}
-            <span>添付: 合計{attachmentLimitMb}MBまで</span>
+            <span>添付: 1ファイルあたり{attachmentLimitMb}MBまで</span>
           </div>
         </article>
       </main>
@@ -526,12 +525,12 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     });
   };
 
-  const validateAttachmentFile = (file, event) => {
+  const validateAttachmentFile = (file, event, label = "添付ファイル") => {
     if (!file || file.size <= attachmentLimitBytes) {
       setFormError("");
       return true;
     }
-    setFormError(`添付ファイルは合計${attachmentLimitMb}MBまでです。「${file.name}」は${formatFileSizeMb(file.size)}あります。`);
+    setFormError(`${label}は1ファイルあたり${attachmentLimitMb}MBまでです。「${file.name}」は${formatFileSizeMb(file.size)}あります。`);
     event.target.value = "";
     return false;
   };
@@ -544,7 +543,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       event.target.value = "";
       return;
     }
-    if (!validateAttachmentFile(file, event)) return;
+    if (!validateAttachmentFile(file, event, "音源ファイル")) return;
     try {
       const dataUrl = await fileToDataUrl(file);
       updateAnswer(questionId, {
@@ -567,7 +566,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       event.target.value = "";
       return;
     }
-    if (!validateAttachmentFile(file, event)) return;
+    if (!validateAttachmentFile(file, event, "画像ファイル")) return;
     try {
       const dataUrl = await fileToDataUrl(file);
       updateAnswer(questionId, {
@@ -590,7 +589,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       event.target.value = "";
       return;
     }
-    if (!validateAttachmentFile(file, event)) return;
+    if (!validateAttachmentFile(file, event, "楽曲音源")) return;
     try {
       const dataUrl = await fileToDataUrl(file);
       updateTrackAnswer(questionId, {
@@ -730,22 +729,16 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     setFormError("");
     setSubmitStatus("");
     const responsePayload = buildResponsePayload();
-    const totalAttachmentBytes = (responsePayload.response.attachments || []).reduce(
-      (sum, attachment) => sum + Number(attachment.size || 0),
-      0
+    const oversizedAttachment = (responsePayload.response.attachments || []).find(
+      (attachment) => Number(attachment.size || 0) > attachmentLimitBytes
     );
-    const json = JSON.stringify(responsePayload);
     const endpointUrl = String(submission.endpointUrl || "").trim();
     if (!endpointUrl) {
       setSubmitStatus("送信先の設定に不備があります。URLを送ってくれた運営側へご連絡ください。");
       return;
     }
-    if (totalAttachmentBytes > attachmentLimitBytes) {
-      setFormError(`添付ファイルの合計が${attachmentLimitMb}MBを超えています（現在 ${formatFileSizeMb(totalAttachmentBytes)}）。ファイルを減らすか小さくして再度お試しください。`);
-      return;
-    }
-    if (json.length > submissionBytesLimit) {
-      setFormError(`添付ファイルが大きすぎて送信できません。設定されている添付上限は合計${attachmentLimitMb}MBです。ファイルを小さくして再度お試しください。`);
+    if (oversizedAttachment) {
+      setFormError(`添付ファイルは1ファイルあたり${attachmentLimitMb}MBまでです。「${oversizedAttachment.fileName || "添付ファイル"}」は${formatFileSizeMb(oversizedAttachment.size)}あります。`);
       return;
     }
     setSubmitBusy(true);
@@ -849,7 +842,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               <small>
                 {answers[question.id]?.audio?.fileName
                   ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}`
-                  : `${audioField.help || "WAVまたはMP3をアップロードしてください。"}（合計${attachmentLimitMb}MBまで）`}
+                  : `${audioField.help || "WAVまたはMP3をアップロードしてください。"}（1曲あたり${attachmentLimitMb}MBまで）`}
               </small>
             </label>
             <TrackPreview track={answers[question.id]} />
@@ -874,7 +867,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               <div className="public-context">
                 {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
                 {episode && <span>放送回: {episode.date || "-"} {episode.title || ""}</span>}
-                <span>添付: 合計{attachmentLimitMb}MBまで</span>
+                <span>添付: 1ファイルあたり{attachmentLimitMb}MBまで</span>
                 {submissionLimit > 0 && (
                   <span>応募数: {submissionStatus.loading ? "確認中" : submissionStatus.count !== null ? `${submissionStatus.count} / ${submissionLimit}` : `上限 ${submissionLimit}件`}</span>
                 )}
@@ -924,7 +917,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                     accept={AUDIO_FILE_ACCEPT}
                     onChange={(event) => updateFileAnswer(question.id, event)}
                   />
-                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `WAVまたはMP3をアップロード（合計${attachmentLimitMb}MBまで）`}</small>
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `WAVまたはMP3をアップロード（1ファイルあたり${attachmentLimitMb}MBまで）`}</small>
                 </div>
               ) : question.kind === "image" ? (
                 <div className="upload-field">
@@ -934,7 +927,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                     accept={IMAGE_FILE_ACCEPT}
                     onChange={(event) => updateImageAnswer(question.id, event)}
                   />
-                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `PNG、JPG、WebP、GIFをアップロード（合計${attachmentLimitMb}MBまで）`}</small>
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `PNG、JPG、WebP、GIFをアップロード（1ファイルあたり${attachmentLimitMb}MBまで）`}</small>
                   {answers[question.id]?.dataUrl && (
                     <img className="image-answer-preview" src={answers[question.id].dataUrl} alt={`${question.label} preview`} />
                   )}
