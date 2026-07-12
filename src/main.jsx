@@ -5,7 +5,6 @@ import {
   ArrowDown,
   ArrowUp,
   CalendarDays,
-  ChevronDown,
   ChevronRight,
   ClipboardCopy,
   Database,
@@ -1485,6 +1484,7 @@ ${socialRows || "-"}
               <span>{selectedEpisode.status}</span>
             </div>
           )}
+          <SideNavigator active={active} setActive={setActive} />
         </aside>
 
         <section className="content-panel">
@@ -1607,29 +1607,28 @@ ${socialRows || "-"}
   );
 }
 
-function FloatingNavigator({ active, setActive }) {
+function SideNavigator({ active, setActive }) {
   const goToPanel = (key) => {
     setActive(key);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
   };
 
   return (
-    <div className="floating-nav" aria-label="ツール内ナビゲーション">
-      <details>
-        <summary>
-          <FileText size={16} />
-          <span>目次</span>
-          <ChevronDown size={14} />
-        </summary>
-        <div className="floating-nav-menu">
-          {MAIN_NAV_ITEMS.map(([key, label, Icon]) => (
-            <button key={key} className={active === key ? "active" : ""} onClick={() => goToPanel(key)}>
-              <Icon size={15} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </div>
-      </details>
+    <nav className="side-nav" aria-label="ツール目次">
+      <div className="side-title">目次</div>
+      {MAIN_NAV_ITEMS.map(([key, label, Icon]) => (
+        <button key={key} className={active === key ? "active" : ""} onClick={() => goToPanel(key)}>
+          <Icon size={15} />
+          <span>{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function FloatingNavigator() {
+  return (
+    <div className="floating-nav" aria-label="ページ操作">
       <button className="floating-top-button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
         <ArrowUp size={16} />
         <span>上へ</span>
@@ -2327,157 +2326,176 @@ function Forms({
       {publishMessage && <p className="hint-text">{publishMessage}</p>}
       <div className="records">
         {forms.map((form) => (
-          <article className="record" key={form.id}>
-            <div className="record-head">
-              <strong>{form.name}</strong>
-              <button className="icon-danger" onClick={() => removeItem("forms", form.id)}><Trash2 size={16} /></button>
-            </div>
-            <div className="form-grid">
-              <Field label="フォーム名" value={form.name} onChange={(value) => patchItem("forms", form.id, { name: value })} />
-              <Field label="短縮ID" value={form.shareSlug} onChange={(value) => patchItem("forms", form.id, { shareSlug: value })} placeholder="例: guest-form" />
-              <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
-            </div>
-            <div className="form-availability-panel">
-              <div className="subhead">受付条件</div>
-              <p className="hint-text">日付と応募数は空欄なら制限なしです。期間外、または応募数上限に達したフォームは回答画面に表示されません。</p>
-              <div className="form-grid">
-                <Field
-                  label="受付開始"
-                  type="date"
-                  value={form.receptionStartDate || ""}
-                  onChange={(value) => patchItem("forms", form.id, { receptionStartDate: value })}
-                />
-                <Field
-                  label="受付終了"
-                  type="date"
-                  value={form.receptionEndDate || ""}
-                  onChange={(value) => patchItem("forms", form.id, { receptionEndDate: value })}
-                />
-                <Field
-                  label="応募数上限"
-                  type="number"
-                  value={form.submissionLimit || ""}
-                  onChange={(value) => patchItem("forms", form.id, { submissionLimit: sanitizeLimitInput(value) })}
-                  placeholder="未指定"
-                />
+          <details className="record collapsible-record form-record" key={form.id}>
+            <summary className="record-summary">
+              <strong>{form.name || "フォーム名未入力"}</strong>
+              <span>{form.questions.length}項目</span>
+              <span>{formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>
+              {form.submissionLimit ? <span>上限 {form.submissionLimit}件</span> : <span>上限なし</span>}
+            </summary>
+            <div className="record-body">
+              <div className="record-head compact">
+                <strong>フォーム編集</strong>
+                <button className="icon-danger" onClick={() => removeItem("forms", form.id)}><Trash2 size={16} /></button>
               </div>
-            </div>
-            <div className="share-box short-share">
-              <div>
-                <strong><Share2 size={16} />短いURL</strong>
-                <span>ゲストさんやSNSに渡す用です。まだ開けない時は「Codex用依頼をコピー」をそのままCodexに貼ってください。</span>
-              </div>
-              <input readOnly value={makePublishedShareUrl(getFormPublishedSlug(form))} onFocus={(event) => event.target.select()} />
-              <div className="inline-actions">
-                <button className="primary" onClick={() => publishFormShortUrl(form)} disabled={publishingFormId === form.id}>
-                  <Send size={16} />{publishingFormId === form.id ? "公開中…" : "短いURLを公開/更新"}
-                </button>
-                <button className="secondary" onClick={() => copyPublishedShareUrl(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:published` ? "コピー済み" : "短いURLをコピー"}
-                </button>
-                <button className="secondary" onClick={() => downloadPublishedFormJson(form)}>
-                  <Download size={16} />URL用JSONを保存
-                </button>
-                <button className="secondary" onClick={() => copyPublishedFormJson(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:json` ? "JSONコピー済み" : "URL用JSONをコピー"}
-                </button>
-                <button className="secondary" onClick={() => copyFormActivationRequest(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:activation` ? "依頼文コピー済み" : "Codex用依頼をコピー"}
-                </button>
-              </div>
-            </div>
-            <details className="share-box collapsible-share">
-              <summary>
-                <strong><Share2 size={16} />長いURL（予備）</strong>
-                <span>必要な時だけ開く</span>
-              </summary>
-              <p className="hint-text">短いURLを有効化する前に使える予備URLです。フォーム内容をURLに含めるため長くなります。期間を指定する場合は「応募期間管理」のURLを使います。</p>
-              <input readOnly value={makePortableShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
-              <div className="inline-actions">
-                <button className="secondary" onClick={() => copyShareUrl(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "外部URLをコピー"}
-                </button>
-                <button className="secondary" onClick={() => copyShortShareUrl(form)}>
-                  <ClipboardCopy size={16} />{copiedFormId === `${form.id}:short` ? "コピー済み" : "管理端末用URLをコピー"}
-                </button>
-              </div>
-            </details>
-            <div className="question-list">
-              <div className="subhead">質問項目</div>
-              <p className="hint-text">入力形式: 楽曲を選ぶと「音源アップロード・楽曲名・アーティスト名・楽曲URL」のまとまりが表示されます。質問と楽曲内項目は上下ボタンで並び替えできます。</p>
-              {form.questions.map((question, questionIndex) => {
-                const trackFields = question.kind === "track" ? normalizeTrackFields(question.trackFields) : [];
-                return (
-                  <div className="question-editor" key={question.id}>
-                    <div className="question-row">
-                      <input value={question.label} onChange={(event) => patchQuestion(form.id, question.id, { label: event.target.value })} />
-                      <select value={question.kind} onChange={(event) => patchQuestion(form.id, question.id, { kind: event.target.value })}>
-                        {QUESTION_KIND_OPTIONS.map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </select>
-                      <select value={question.use} onChange={(event) => patchQuestion(form.id, question.id, { use: event.target.value })}>
-                        {QUESTION_USE_OPTIONS.map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </select>
-                      <label className="mini-check">
-                        <input type="checkbox" checked={Boolean(question.required)} onChange={(event) => patchQuestion(form.id, question.id, { required: event.target.checked })} />
-                        必須
-                      </label>
-                      <div className="move-buttons" aria-label={`${question.label || "質問"}の並び替え`}>
-                        <button className="icon-secondary" onClick={() => moveQuestion(form.id, question.id, -1)} disabled={questionIndex === 0} aria-label="質問を上へ" title="上へ"><ArrowUp size={16} /></button>
-                        <button className="icon-secondary" onClick={() => moveQuestion(form.id, question.id, 1)} disabled={questionIndex === form.questions.length - 1} aria-label="質問を下へ" title="下へ"><ArrowDown size={16} /></button>
-                      </div>
-                      <button className="icon-danger" onClick={() => removeQuestion(form.id, question.id)} aria-label="質問を削除" title="削除"><Trash2 size={16} /></button>
-                    </div>
-                    {question.kind === "track" && (
-                      <div className="track-field-editor">
-                        <div className="track-field-editor-head">
-                          <div>
-                            <strong>楽曲内の項目</strong>
-                            <span>回答フォームではこの順番で表示され、音源プレビューは音源アップロードの直下に出ます。</span>
-                          </div>
-                          <button className="secondary" onClick={() => resetTrackFields(form.id, question.id)}><RotateCcw size={16} />既定に戻す</button>
-                        </div>
-                        {trackFields.map((field, fieldIndex) => (
-                          <div className="track-field-row" key={field.type}>
-                            <div className="track-field-kind">{TRACK_FIELD_TYPE_LABELS[field.type] || field.type}</div>
-                            <label>
-                              <span>表示名</span>
-                              <input value={field.label || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { label: event.target.value })} />
-                            </label>
-                            <label>
-                              <span>補足文</span>
-                              <input value={field.help || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { help: event.target.value })} />
-                            </label>
-                            {field.type === "url" ? (
-                              <label>
-                                <span>入力例</span>
-                                <input value={field.placeholder || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { placeholder: event.target.value })} />
-                              </label>
-                            ) : field.type === "audio" ? (
-                              <label>
-                                <span>音源後の案内</span>
-                                <input value={field.note || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { note: event.target.value })} />
-                              </label>
-                            ) : (
-                              <span className="track-field-spacer" />
-                            )}
-                            <div className="move-buttons" aria-label={`${field.label || "楽曲内項目"}の並び替え`}>
-                              <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, -1)} disabled={fieldIndex === 0} aria-label="楽曲内項目を上へ" title="上へ"><ArrowUp size={16} /></button>
-                              <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, 1)} disabled={fieldIndex === trackFields.length - 1} aria-label="楽曲内項目を下へ" title="下へ"><ArrowDown size={16} /></button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+              <details className="collapsible-section" open>
+                <summary><strong>基本設定</strong><span>フォーム名・説明</span></summary>
+                <div className="form-grid">
+                  <Field label="フォーム名" value={form.name} onChange={(value) => patchItem("forms", form.id, { name: value })} />
+                  <Field label="短縮ID" value={form.shareSlug} onChange={(value) => patchItem("forms", form.id, { shareSlug: value })} placeholder="例: guest-form" />
+                  <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
+                </div>
+              </details>
+              <details className="collapsible-section" open>
+                <summary><strong>受付条件</strong><span>期間・応募数</span></summary>
+                <p className="hint-text">日付と応募数は空欄なら制限なしです。期間外、または応募数上限に達したフォームは回答画面に表示されません。</p>
+                <div className="form-grid">
+                  <Field
+                    label="受付開始"
+                    type="date"
+                    value={form.receptionStartDate || ""}
+                    onChange={(value) => patchItem("forms", form.id, { receptionStartDate: value })}
+                  />
+                  <Field
+                    label="受付終了"
+                    type="date"
+                    value={form.receptionEndDate || ""}
+                    onChange={(value) => patchItem("forms", form.id, { receptionEndDate: value })}
+                  />
+                  <Field
+                    label="応募数上限"
+                    type="number"
+                    value={form.submissionLimit || ""}
+                    onChange={(value) => patchItem("forms", form.id, { submissionLimit: sanitizeLimitInput(value) })}
+                    placeholder="未指定"
+                  />
+                </div>
+              </details>
+              <details className="collapsible-section">
+                <summary><strong><Share2 size={16} />共有URL</strong><span>公開・コピー</span></summary>
+                <div className="share-box short-share">
+                  <div>
+                    <strong><Share2 size={16} />短いURL</strong>
+                    <span>ゲストさんやSNSに渡す用です。まだ開けない時は「Codex用依頼をコピー」をそのままCodexに貼ってください。</span>
                   </div>
-                );
-              })}
-              <button className="secondary" onClick={() => addQuestion(form.id)}><Plus size={16} />質問追加</button>
+                  <input readOnly value={makePublishedShareUrl(getFormPublishedSlug(form))} onFocus={(event) => event.target.select()} />
+                  <div className="inline-actions">
+                    <button className="primary" onClick={() => publishFormShortUrl(form)} disabled={publishingFormId === form.id}>
+                      <Send size={16} />{publishingFormId === form.id ? "公開中…" : "短いURLを公開/更新"}
+                    </button>
+                    <button className="secondary" onClick={() => copyPublishedShareUrl(form)}>
+                      <ClipboardCopy size={16} />{copiedFormId === `${form.id}:published` ? "コピー済み" : "短いURLをコピー"}
+                    </button>
+                    <button className="secondary" onClick={() => downloadPublishedFormJson(form)}>
+                      <Download size={16} />URL用JSONを保存
+                    </button>
+                    <button className="secondary" onClick={() => copyPublishedFormJson(form)}>
+                      <ClipboardCopy size={16} />{copiedFormId === `${form.id}:json` ? "JSONコピー済み" : "URL用JSONをコピー"}
+                    </button>
+                    <button className="secondary" onClick={() => copyFormActivationRequest(form)}>
+                      <ClipboardCopy size={16} />{copiedFormId === `${form.id}:activation` ? "依頼文コピー済み" : "Codex用依頼をコピー"}
+                    </button>
+                  </div>
+                </div>
+                <details className="share-box collapsible-share">
+                  <summary>
+                    <strong><Share2 size={16} />長いURL（予備）</strong>
+                    <span>必要な時だけ開く</span>
+                  </summary>
+                  <p className="hint-text">短いURLを有効化する前に使える予備URLです。フォーム内容をURLに含めるため長くなります。</p>
+                  <input readOnly value={makePortableShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
+                  <div className="inline-actions">
+                    <button className="secondary" onClick={() => copyShareUrl(form)}>
+                      <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "外部URLをコピー"}
+                    </button>
+                    <button className="secondary" onClick={() => copyShortShareUrl(form)}>
+                      <ClipboardCopy size={16} />{copiedFormId === `${form.id}:short` ? "コピー済み" : "管理端末用URLをコピー"}
+                    </button>
+                  </div>
+                </details>
+              </details>
+              <details className="collapsible-section" open>
+                <summary><strong>質問項目</strong><span>{form.questions.length}項目</span></summary>
+                <div className="question-list">
+                  <p className="hint-text">入力形式: 楽曲を選ぶと「音源アップロード・楽曲名・アーティスト名・楽曲URL」のまとまりが表示されます。質問と楽曲内項目は上下ボタンで並び替えできます。</p>
+                  {form.questions.map((question, questionIndex) => {
+                    const trackFields = question.kind === "track" ? normalizeTrackFields(question.trackFields) : [];
+                    return (
+                      <div className="question-editor" key={question.id}>
+                        <div className="question-row">
+                          <input value={question.label} onChange={(event) => patchQuestion(form.id, question.id, { label: event.target.value })} />
+                          <select value={question.kind} onChange={(event) => patchQuestion(form.id, question.id, { kind: event.target.value })}>
+                            {QUESTION_KIND_OPTIONS.map(([value, label]) => (
+                              <option key={value} value={value}>{label}</option>
+                            ))}
+                          </select>
+                          <select value={question.use} onChange={(event) => patchQuestion(form.id, question.id, { use: event.target.value })}>
+                            {QUESTION_USE_OPTIONS.map(([value, label]) => (
+                              <option key={value} value={value}>{label}</option>
+                            ))}
+                          </select>
+                          <label className="mini-check">
+                            <input type="checkbox" checked={Boolean(question.required)} onChange={(event) => patchQuestion(form.id, question.id, { required: event.target.checked })} />
+                            必須
+                          </label>
+                          <div className="move-buttons" aria-label={`${question.label || "質問"}の並び替え`}>
+                            <button className="icon-secondary" onClick={() => moveQuestion(form.id, question.id, -1)} disabled={questionIndex === 0} aria-label="質問を上へ" title="上へ"><ArrowUp size={16} /></button>
+                            <button className="icon-secondary" onClick={() => moveQuestion(form.id, question.id, 1)} disabled={questionIndex === form.questions.length - 1} aria-label="質問を下へ" title="下へ"><ArrowDown size={16} /></button>
+                          </div>
+                          <button className="icon-danger" onClick={() => removeQuestion(form.id, question.id)} aria-label="質問を削除" title="削除"><Trash2 size={16} /></button>
+                        </div>
+                        {question.kind === "track" && (
+                          <details className="track-field-editor collapsible-share">
+                            <summary>
+                              <strong>楽曲内の項目</strong>
+                              <span>開いて編集</span>
+                            </summary>
+                            <div className="track-field-editor-head">
+                              <div>
+                                <span>回答フォームではこの順番で表示され、音源プレビューは音源アップロードの直下に出ます。</span>
+                              </div>
+                              <button className="secondary" onClick={() => resetTrackFields(form.id, question.id)}><RotateCcw size={16} />既定に戻す</button>
+                            </div>
+                            {trackFields.map((field, fieldIndex) => (
+                              <div className="track-field-row" key={field.type}>
+                                <div className="track-field-kind">{TRACK_FIELD_TYPE_LABELS[field.type] || field.type}</div>
+                                <label>
+                                  <span>表示名</span>
+                                  <input value={field.label || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { label: event.target.value })} />
+                                </label>
+                                <label>
+                                  <span>補足文</span>
+                                  <input value={field.help || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { help: event.target.value })} />
+                                </label>
+                                {field.type === "url" ? (
+                                  <label>
+                                    <span>入力例</span>
+                                    <input value={field.placeholder || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { placeholder: event.target.value })} />
+                                  </label>
+                                ) : field.type === "audio" ? (
+                                  <label>
+                                    <span>音源後の案内</span>
+                                    <input value={field.note || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { note: event.target.value })} />
+                                  </label>
+                                ) : (
+                                  <span className="track-field-spacer" />
+                                )}
+                                <div className="move-buttons" aria-label={`${field.label || "楽曲内項目"}の並び替え`}>
+                                  <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, -1)} disabled={fieldIndex === 0} aria-label="楽曲内項目を上へ" title="上へ"><ArrowUp size={16} /></button>
+                                  <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, 1)} disabled={fieldIndex === trackFields.length - 1} aria-label="楽曲内項目を下へ" title="下へ"><ArrowDown size={16} /></button>
+                                </div>
+                              </div>
+                            ))}
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <button className="secondary" onClick={() => addQuestion(form.id)}><Plus size={16} />質問追加</button>
+                </div>
+              </details>
             </div>
-          </article>
+          </details>
         ))}
       </div>
     </div>

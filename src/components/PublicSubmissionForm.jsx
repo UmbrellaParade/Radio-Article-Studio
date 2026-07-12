@@ -374,6 +374,15 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     );
   }
 
+  const availabilityWindows = [
+    form.receptionStartDate || form.receptionEndDate
+      ? { label: "受付期間", startDate: form.receptionStartDate || "", endDate: form.receptionEndDate || "" }
+      : null,
+    period?.startDate || period?.endDate
+      ? { label: "応募期間", startDate: period.startDate || "", endDate: period.endDate || "" }
+      : null
+  ].filter(Boolean);
+
   const updateAnswer = (questionId, value) => {
     setAnswers((current) => ({ ...current, [questionId]: value }));
   };
@@ -751,7 +760,6 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             {form.description && <p className="muted">{form.description}</p>}
             {(period || episode || form.receptionStartDate || form.receptionEndDate || submissionLimit > 0) && (
               <div className="public-context">
-                {(form.receptionStartDate || form.receptionEndDate) && <span>受付条件: {formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>}
                 {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
                 {episode && <span>放送回: {episode.date || "-"} {episode.title || ""}</span>}
                 {submissionLimit > 0 && (
@@ -761,6 +769,17 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             )}
           </div>
         </div>
+
+        {availabilityWindows.length > 0 && (
+          <div className="availability-banner" aria-label="受付期間">
+            <strong><CalendarDays size={16} />受付中</strong>
+            <div>
+              {availabilityWindows.map((item) => (
+                <span key={item.label}>{item.label}: {formatDateRange(item.startDate, item.endDate)}</span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {formError && <p className="form-error">{formError}</p>}
         {submitStatus && <p className="submit-status">{submitStatus}</p>}
