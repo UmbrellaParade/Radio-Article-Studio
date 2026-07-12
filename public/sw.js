@@ -1,4 +1,4 @@
-const CACHE_VERSION = "radio-article-studio-v8";
+const CACHE_VERSION = "radio-article-studio-v9";
 const BASE_PATH = new URL(self.registration.scope).pathname;
 const APP_SHELL = [
   BASE_PATH,

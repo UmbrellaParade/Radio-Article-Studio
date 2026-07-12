@@ -2103,6 +2103,7 @@ export const sampleData = {
     }
   ],
   formPresets: [],
+  formPresetOverrides: {},
   applicationPeriods: [
     {
       id: "period_listener_2026_07_10",
@@ -2359,6 +2360,24 @@ export function migrateData(input) {
     };
   });
 
+  const formPresetOverrides = Object.fromEntries(
+    Object.entries(input.formPresetOverrides ?? {}).map(([formId, presetForm], presetIndex) => [
+      formId,
+      {
+        name: presetForm?.name || "フォームプリセット",
+        type: presetForm?.type || "自由フォーム",
+        status: presetForm?.status || "準備中",
+        shareSlug: "",
+        description: presetForm?.description || "",
+        receptionStartDate: presetForm?.receptionStartDate || "",
+        receptionEndDate: presetForm?.receptionEndDate || "",
+        submissionLimit: normalizeSubmissionLimit(presetForm?.submissionLimit) || "",
+        color: normalizeFormColor(presetForm?.color, FORM_COLOR_PALETTE[presetIndex % FORM_COLOR_PALETTE.length]),
+        questions: normalizePresetQuestions(presetForm?.questions)
+      }
+    ])
+  );
+
   const settings = { ...sampleData.settings, ...(input.settings ?? {}) };
   if (!settings.bellboXHandle) settings.bellboXHandle = DEFAULT_BELLBO_X_HANDLE;
   if (!settings.kanameXHandle) settings.kanameXHandle = DEFAULT_KANAME_X_HANDLE;
@@ -2458,6 +2477,7 @@ export function migrateData(input) {
     episodes,
     forms,
     formPresets,
+    formPresetOverrides,
     applicationPeriods: (input.applicationPeriods ?? sampleData.applicationPeriods).map((period) => ({
       title: "",
       type: "リスナー応募曲",

@@ -739,6 +739,22 @@ function App() {
     updateData("formPresets", (presets = []) => presets.filter((preset) => preset.id !== presetId));
   };
 
+  const overwriteBuiltInFormPreset = (sourceFormId, form) => {
+    if (!sourceFormId || !form) return;
+    updateData("formPresetOverrides", (overrides = {}) => ({
+      ...overrides,
+      [sourceFormId]: makeFormSnapshot(form)
+    }));
+  };
+
+  const resetBuiltInFormPreset = (sourceFormId) => {
+    updateData("formPresetOverrides", (overrides = {}) => {
+      const next = { ...overrides };
+      delete next[sourceFormId];
+      return next;
+    });
+  };
+
   const removeFormWithBackup = (form) => {
     if (!form) return;
     setData((current) => ({
@@ -1676,12 +1692,15 @@ ${socialRows || "-"}
             <Forms
               forms={data.forms}
               formPresets={data.formPresets ?? []}
+              formPresetOverrides={data.formPresetOverrides ?? {}}
               settings={data.settings}
               patchItem={patchItem}
               addForm={addForm}
               addFormFromPreset={addFormFromPreset}
               saveFormPreset={saveFormPreset}
               removeFormPreset={removeFormPreset}
+              overwriteBuiltInFormPreset={overwriteBuiltInFormPreset}
+              resetBuiltInFormPreset={resetBuiltInFormPreset}
               removeFormWithBackup={removeFormWithBackup}
               addQuestion={addQuestion}
               patchQuestion={patchQuestion}
@@ -2447,12 +2466,15 @@ function ApplicationPeriods({
 function Forms({
   forms,
   formPresets = [],
+  formPresetOverrides = {},
   settings,
   patchItem,
   addForm,
   addFormFromPreset,
   saveFormPreset,
   removeFormPreset,
+  overwriteBuiltInFormPreset,
+  resetBuiltInFormPreset,
   removeFormWithBackup,
   addQuestion,
   patchQuestion,
@@ -2472,12 +2494,18 @@ function Forms({
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetMessage, setPresetMessage] = useState("");
   const trackFieldDefaults = getTrackFieldDefaults(settings);
-  const builtInFormPresets = sampleData.forms.map((form) => ({
-    id: `builtin:${form.id}`,
-    name: `標準: ${form.name}`,
-    builtIn: true,
-    form
-  }));
+  const builtInFormPresets = sampleData.forms.map((form) => {
+    const override = formPresetOverrides?.[form.id];
+    const presetForm = override ? { ...form, ...override, id: form.id, shareSlug: form.shareSlug } : form;
+    return {
+      id: `builtin:${form.id}`,
+      sourceId: form.id,
+      name: `標準: ${presetForm.name}${override ? "（上書き済み）" : ""}`,
+      builtIn: true,
+      overwritten: Boolean(override),
+      form: presetForm
+    };
+  });
   const allFormPresets = [...builtInFormPresets, ...formPresets];
   const selectedPreset = allFormPresets.find((preset) => preset.id === selectedPresetId) ?? allFormPresets[0];
 
@@ -2508,11 +2536,25 @@ function Forms({
   };
 
   const deleteSelectedPreset = () => {
-    if (!selectedPreset || selectedPreset.builtIn) return;
+    if (!selectedPreset) return;
+    if (selectedPreset.builtIn) {
+      if (!selectedPreset.overwritten) return;
+      resetBuiltInFormPreset(selectedPreset.sourceId);
+      setPresetMessage(`「${selectedPreset.name.replace("（上書き済み）", "")}」を初期標準に戻しました。`);
+      window.setTimeout(() => setPresetMessage(""), 2400);
+      return;
+    }
     removeFormPreset(selectedPreset.id);
     setSelectedPresetId("");
     setPresetMessage(`「${selectedPreset.name}」をプリセットから削除しました。`);
     window.setTimeout(() => setPresetMessage(""), 2400);
+  };
+
+  const overwriteSelectedBuiltInPreset = (form) => {
+    if (!selectedPreset?.builtIn) return;
+    overwriteBuiltInFormPreset(selectedPreset.sourceId, form);
+    setPresetMessage(`「${selectedPreset.name.replace("（上書き済み）", "")}」を現在のフォームで上書きしました。`);
+    window.setTimeout(() => setPresetMessage(""), 3000);
   };
 
   const deleteForm = (form) => {
@@ -2588,8 +2630,14 @@ function Forms({
         <button className="secondary" onClick={addSelectedPreset} disabled={!selectedPreset}>
           <Plus size={16} />プリセットから追加
         </button>
-        <button className="icon-danger" onClick={deleteSelectedPreset} disabled={!selectedPreset || selectedPreset.builtIn} title="保存プリセットを削除">
-          <Trash2 size={16} />
+        <button
+          className={selectedPreset?.builtIn ? "secondary" : "icon-danger"}
+          onClick={deleteSelectedPreset}
+          disabled={!selectedPreset || (selectedPreset.builtIn && !selectedPreset.overwritten)}
+          title={selectedPreset?.builtIn ? "上書き済み標準プリセットを初期に戻す" : "保存プリセットを削除"}
+        >
+          {selectedPreset?.builtIn ? <RotateCcw size={16} /> : <Trash2 size={16} />}
+          {selectedPreset?.builtIn ? "初期に戻す" : ""}
         </button>
       </div>
       {presetMessage && <p className="hint-text">{presetMessage}</p>}
@@ -2608,6 +2656,9 @@ function Forms({
                 <strong>フォーム編集</strong>
                 <div className="inline-actions">
                   <button className="secondary" onClick={() => savePreset(form)}><Save size={16} />プリセット保存</button>
+                  <button className="secondary" onClick={() => overwriteSelectedBuiltInPreset(form)} disabled={!selectedPreset?.builtIn}>
+                    <Save size={16} />選択中の標準に上書き
+                  </button>
                   <button className="icon-danger" onClick={() => deleteForm(form)} title="削除バックアップを残してフォームを削除"><Trash2 size={16} /></button>
                 </div>
               </div>
