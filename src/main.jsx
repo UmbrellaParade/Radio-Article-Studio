@@ -272,9 +272,38 @@ const MAIN_NAV_ITEMS = [
   ["settings", "設定", Settings]
 ];
 
+const MAIN_NAV_KEYS = new Set(MAIN_NAV_ITEMS.map(([key]) => key));
+const UI_STATE_KEY = `${STORAGE_KEY}:ui`;
 const formAnchorId = (formId) => `form-section-${formId}`;
 
 const getTrackFieldDefaults = (settings = {}) => normalizeTrackFields(settings.trackFieldDefaults);
+
+function readUiState() {
+  try {
+    const raw = localStorage.getItem(UI_STATE_KEY);
+    if (!raw) return { active: "", selectedEpisodeId: "", collapsibles: {} };
+    const parsed = JSON.parse(raw);
+    const collapsibles =
+      parsed?.collapsibles && typeof parsed.collapsibles === "object" && !Array.isArray(parsed.collapsibles)
+        ? parsed.collapsibles
+        : {};
+    return {
+      active: typeof parsed?.active === "string" ? parsed.active : "",
+      selectedEpisodeId: typeof parsed?.selectedEpisodeId === "string" ? parsed.selectedEpisodeId : "",
+      collapsibles
+    };
+  } catch {
+    return { active: "", selectedEpisodeId: "", collapsibles: {} };
+  }
+}
+
+function saveUiState(payload) {
+  try {
+    localStorage.setItem(UI_STATE_KEY, JSON.stringify(payload));
+  } catch {
+    // UI state is helpful, but losing it should not block the main app data.
+  }
+}
 
 const sanitizeLimitInput = (value) => {
   const text = String(value || "").trim();
@@ -286,8 +315,14 @@ const sanitizeLimitInput = (value) => {
 function App() {
   const logoSrc = `${import.meta.env.BASE_URL}assets/umbrella-parade-logo.png`;
   const [data, setData] = useState(loadData);
-  const [active, setActive] = useState("dashboard");
-  const [selectedEpisodeId, setSelectedEpisodeId] = useState(data.episodes[0]?.id ?? "");
+  const [initialUiState] = useState(readUiState);
+  const [active, setActive] = useState(() => (MAIN_NAV_KEYS.has(initialUiState.active) ? initialUiState.active : "dashboard"));
+  const [selectedEpisodeId, setSelectedEpisodeId] = useState(() =>
+    data.episodes.some((episode) => episode.id === initialUiState.selectedEpisodeId)
+      ? initialUiState.selectedEpisodeId
+      : data.episodes[0]?.id ?? ""
+  );
+  const [collapsibleState, setCollapsibleState] = useState(() => initialUiState.collapsibles);
   const [copied, setCopied] = useState(false);
   const [thumbnailBundleCopied, setThumbnailBundleCopied] = useState(false);
   const [fullPackCopied, setFullPackCopied] = useState(false);
@@ -302,6 +337,22 @@ function App() {
   const [packExportMessage, setPackExportMessage] = useState("");
   const autoThumbnailGenerationRef = useRef("");
   const pendingSaveRef = useRef(null);
+
+  const setCollapsibleOpen = (key, open) => {
+    setCollapsibleState((current) => (current[key] === open ? current : { ...current, [key]: open }));
+  };
+
+  useEffect(() => {
+    if (sharedPayload || restorePayload) return;
+    saveUiState({ active, selectedEpisodeId, collapsibles: collapsibleState });
+  }, [active, selectedEpisodeId, collapsibleState, sharedPayload, restorePayload]);
+
+  useEffect(() => {
+    if (!data.episodes.length) return;
+    if (!data.episodes.some((episode) => episode.id === selectedEpisodeId)) {
+      setSelectedEpisodeId(data.episodes[0].id);
+    }
+  }, [data.episodes, selectedEpisodeId]);
 
   // ブラウザ保存はLZ圧縮が重く、スライダー操作のたびに実行するとUIがカクつくため
   // 350msデバウンスする。タブを閉じる/離れる時はpagehideで即時保存する。
@@ -1547,6 +1598,8 @@ ${socialRows || "-"}
               resetTrackFields={resetTrackFields}
               saveTrackFieldsAsDefault={saveTrackFieldsAsDefault}
               removeQuestion={removeQuestion}
+              collapsibleState={collapsibleState}
+              setCollapsibleOpen={setCollapsibleOpen}
             />
           )}
           {active === "responses" && (
@@ -1665,6 +1718,22 @@ function FloatingNavigator() {
         <span>上へ</span>
       </button>
     </div>
+  );
+}
+
+function PersistentDetails({ persistKey, defaultOpen = false, collapsibleState = {}, setCollapsibleOpen, children, ...props }) {
+  const isOpen = hasOwn(collapsibleState, persistKey) ? Boolean(collapsibleState[persistKey]) : defaultOpen;
+  return (
+    <details
+      {...props}
+      open={isOpen}
+      onToggle={(event) => {
+        if (event.target !== event.currentTarget) return;
+        setCollapsibleOpen?.(persistKey, event.currentTarget.open);
+      }}
+    >
+      {children}
+    </details>
   );
 }
 
@@ -2295,7 +2364,9 @@ function Forms({
   moveTrackField,
   resetTrackFields,
   saveTrackFieldsAsDefault,
-  removeQuestion
+  removeQuestion,
+  collapsibleState,
+  setCollapsibleOpen
 }) {
   const [copiedFormId, setCopiedFormId] = useState("");
   const [publishMessage, setPublishMessage] = useState("");
@@ -2308,6 +2379,13 @@ function Forms({
     setSavedDefaultQuestionId(`${formId}:${questionId}`);
     window.setTimeout(() => setSavedDefaultQuestionId(""), 1800);
   };
+
+  const detailsProps = (persistKey, defaultOpen = false) => ({
+    persistKey,
+    defaultOpen,
+    collapsibleState,
+    setCollapsibleOpen
+  });
 
   const publishFormShortUrl = async (form) => {
     const slug = getFormPublishedSlug(form);
@@ -2366,7 +2444,7 @@ function Forms({
       {publishMessage && <p className="hint-text">{publishMessage}</p>}
       <div className="records">
         {forms.map((form) => (
-          <details className="record collapsible-record form-record" key={form.id} id={formAnchorId(form.id)}>
+          <PersistentDetails {...detailsProps(`form:${form.id}:record`)} className="record collapsible-record form-record" key={form.id} id={formAnchorId(form.id)}>
             <summary className="record-summary">
               <strong>{form.name || "フォーム名未入力"}</strong>
               <span>{form.questions.length}項目</span>
@@ -2378,15 +2456,15 @@ function Forms({
                 <strong>フォーム編集</strong>
                 <button className="icon-danger" onClick={() => removeItem("forms", form.id)}><Trash2 size={16} /></button>
               </div>
-              <details className="collapsible-section" open>
+              <PersistentDetails {...detailsProps(`form:${form.id}:basic`, true)} className="collapsible-section">
                 <summary><strong>基本設定</strong><span>フォーム名・説明</span></summary>
                 <div className="form-grid">
                   <Field label="フォーム名" value={form.name} onChange={(value) => patchItem("forms", form.id, { name: value })} />
                   <Field label="短縮ID" value={form.shareSlug} onChange={(value) => patchItem("forms", form.id, { shareSlug: value })} placeholder="例: guest-form" />
                   <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
                 </div>
-              </details>
-              <details className="collapsible-section" open>
+              </PersistentDetails>
+              <PersistentDetails {...detailsProps(`form:${form.id}:availability`, true)} className="collapsible-section">
                 <summary><strong>受付条件</strong><span>期間・応募数</span></summary>
                 <p className="hint-text">日付と応募数は空欄なら制限なしです。期間外、または応募数上限に達したフォームは回答画面に表示されません。</p>
                 <div className="form-grid">
@@ -2410,8 +2488,8 @@ function Forms({
                     placeholder="未指定"
                   />
                 </div>
-              </details>
-              <details className="collapsible-section">
+              </PersistentDetails>
+              <PersistentDetails {...detailsProps(`form:${form.id}:share`)} className="collapsible-section">
                 <summary><strong><Share2 size={16} />共有URL</strong><span>公開・コピー</span></summary>
                 <div className="share-box short-share">
                   <div>
@@ -2442,7 +2520,7 @@ function Forms({
                     </button>
                   </div>
                 </div>
-                <details className="share-box collapsible-share">
+                <PersistentDetails {...detailsProps(`form:${form.id}:long-share`)} className="share-box collapsible-share">
                   <summary>
                     <strong><Share2 size={16} />長いURL（予備）</strong>
                     <span>必要な時だけ開く</span>
@@ -2457,9 +2535,9 @@ function Forms({
                       <ClipboardCopy size={16} />{copiedFormId === `${form.id}:short` ? "コピー済み" : "管理端末用URLをコピー"}
                     </button>
                   </div>
-                </details>
-              </details>
-              <details className="collapsible-section" open>
+                </PersistentDetails>
+              </PersistentDetails>
+              <PersistentDetails {...detailsProps(`form:${form.id}:questions`, true)} className="collapsible-section">
                 <summary><strong>質問項目</strong><span>{form.questions.length}項目</span></summary>
                 <div className="question-list">
                   <p className="hint-text">入力形式: 楽曲を選ぶと「音源アップロード・楽曲名・アーティスト名・楽曲URL」のまとまりが表示されます。質問と楽曲内項目は上下ボタンで並び替えできます。</p>
@@ -2504,7 +2582,7 @@ function Forms({
                           />
                         </label>
                         {question.kind === "track" && (
-                          <details className="track-field-editor collapsible-share">
+                          <PersistentDetails {...detailsProps(`form:${form.id}:question:${question.id}:track-fields`)} className="track-field-editor collapsible-share">
                             <summary>
                               <strong>楽曲内の項目</strong>
                               <span>開いて編集</span>
@@ -2550,16 +2628,16 @@ function Forms({
                                 </div>
                               </div>
                             ))}
-                          </details>
+                          </PersistentDetails>
                         )}
                       </div>
                     );
                   })}
                   <button className="secondary" onClick={() => addQuestion(form.id)}><Plus size={16} />質問追加</button>
                 </div>
-              </details>
+              </PersistentDetails>
             </div>
-          </details>
+          </PersistentDetails>
         ))}
       </div>
     </div>
