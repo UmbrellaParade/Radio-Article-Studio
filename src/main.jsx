@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import LZString from "lz-string";
 import {
+  ArrowDown,
+  ArrowUp,
   CalendarDays,
   ChevronDown,
   ChevronRight,
@@ -16,6 +18,7 @@ import {
   Music,
   Plus,
   Radio,
+  RotateCcw,
   Save,
   Send,
   Settings,
@@ -53,6 +56,8 @@ import {
   QUESTION_USE_OPTIONS,
   QUESTION_USE_LABELS,
   QUESTION_KIND_OPTIONS,
+  TRACK_FIELD_TYPE_OPTIONS,
+  normalizeTrackFields,
   TRACK_URL_ERROR_MESSAGE,
   TRACK_URL_PATTERN,
   detectUrlType,
@@ -244,6 +249,16 @@ import {
   ThumbnailComposer,
   Assets
 } from "./components/thumbnail.jsx";
+
+const moveArrayItem = (items = [], fromIndex, toIndex) => {
+  if (fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length || fromIndex === toIndex) return items;
+  const next = [...items];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+};
+
+const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 
 function App() {
   const logoSrc = `${import.meta.env.BASE_URL}assets/umbrella-parade-logo.png`;
@@ -617,6 +632,64 @@ function App() {
           : form
       )
     );
+  };
+
+  const moveQuestion = (formId, questionId, direction) => {
+    updateData("forms", (forms) =>
+      forms.map((form) => {
+        if (form.id !== formId) return form;
+        const currentIndex = form.questions.findIndex((question) => question.id === questionId);
+        return {
+          ...form,
+          questions: moveArrayItem(form.questions, currentIndex, currentIndex + direction)
+        };
+      })
+    );
+  };
+
+  const patchTrackField = (formId, questionId, fieldType, patch) => {
+    updateData("forms", (forms) =>
+      forms.map((form) => {
+        if (form.id !== formId) return form;
+        return {
+          ...form,
+          questions: form.questions.map((question) =>
+            question.id === questionId
+              ? {
+                  ...question,
+                  trackFields: normalizeTrackFields(question.trackFields).map((field) =>
+                    field.type === fieldType ? { ...field, ...patch, id: field.id, type: field.type } : field
+                  )
+                }
+              : question
+          )
+        };
+      })
+    );
+  };
+
+  const moveTrackField = (formId, questionId, fieldType, direction) => {
+    updateData("forms", (forms) =>
+      forms.map((form) => {
+        if (form.id !== formId) return form;
+        return {
+          ...form,
+          questions: form.questions.map((question) => {
+            if (question.id !== questionId) return question;
+            const trackFields = normalizeTrackFields(question.trackFields);
+            const currentIndex = trackFields.findIndex((field) => field.type === fieldType);
+            return {
+              ...question,
+              trackFields: moveArrayItem(trackFields, currentIndex, currentIndex + direction)
+            };
+          })
+        };
+      })
+    );
+  };
+
+  const resetTrackFields = (formId, questionId) => {
+    patchQuestion(formId, questionId, { trackFields: normalizeTrackFields([]) });
   };
 
   const removeQuestion = (formId, questionId) => {
@@ -1447,6 +1520,10 @@ ${socialRows || "-"}
               addForm={addForm}
               addQuestion={addQuestion}
               patchQuestion={patchQuestion}
+              moveQuestion={moveQuestion}
+              patchTrackField={patchTrackField}
+              moveTrackField={moveTrackField}
+              resetTrackFields={resetTrackFields}
               removeQuestion={removeQuestion}
             />
           )}
@@ -2145,7 +2222,20 @@ function ApplicationPeriods({
   );
 }
 
-function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, patchQuestion, removeQuestion }) {
+function Forms({
+  forms,
+  settings,
+  patchItem,
+  removeItem,
+  addForm,
+  addQuestion,
+  patchQuestion,
+  moveQuestion,
+  patchTrackField,
+  moveTrackField,
+  resetTrackFields,
+  removeQuestion
+}) {
   const [copiedFormId, setCopiedFormId] = useState("");
   const [publishMessage, setPublishMessage] = useState("");
   const [publishingFormId, setPublishingFormId] = useState("");
@@ -2258,27 +2348,77 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
             </div>
             <div className="question-list">
               <div className="subhead">質問項目</div>
-              <p className="hint-text">入力形式: 楽曲を選ぶと「楽曲名・楽曲URL・WAV/MP3アップロード」の3点セットになります。画像はゲストアイコンやプロフィール画像用、ファイル単体はWAV/MP3の音源添付用です。</p>
-              {form.questions.map((question) => (
-                <div className="question-row" key={question.id}>
-                  <input value={question.label} onChange={(event) => patchQuestion(form.id, question.id, { label: event.target.value })} />
-                  <select value={question.kind} onChange={(event) => patchQuestion(form.id, question.id, { kind: event.target.value })}>
-                    {QUESTION_KIND_OPTIONS.map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
-                  <select value={question.use} onChange={(event) => patchQuestion(form.id, question.id, { use: event.target.value })}>
-                    {QUESTION_USE_OPTIONS.map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
-                  <label className="mini-check">
-                    <input type="checkbox" checked={Boolean(question.required)} onChange={(event) => patchQuestion(form.id, question.id, { required: event.target.checked })} />
-                    必須
-                  </label>
-                  <button className="icon-danger" onClick={() => removeQuestion(form.id, question.id)} aria-label="質問を削除"><Trash2 size={16} /></button>
-                </div>
-              ))}
+              <p className="hint-text">入力形式: 楽曲を選ぶと「音源アップロード・楽曲名・アーティスト名・楽曲URL」のまとまりが表示されます。質問と楽曲内項目は上下ボタンで並び替えできます。</p>
+              {form.questions.map((question, questionIndex) => {
+                const trackFields = question.kind === "track" ? normalizeTrackFields(question.trackFields) : [];
+                return (
+                  <div className="question-editor" key={question.id}>
+                    <div className="question-row">
+                      <input value={question.label} onChange={(event) => patchQuestion(form.id, question.id, { label: event.target.value })} />
+                      <select value={question.kind} onChange={(event) => patchQuestion(form.id, question.id, { kind: event.target.value })}>
+                        {QUESTION_KIND_OPTIONS.map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <select value={question.use} onChange={(event) => patchQuestion(form.id, question.id, { use: event.target.value })}>
+                        {QUESTION_USE_OPTIONS.map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <label className="mini-check">
+                        <input type="checkbox" checked={Boolean(question.required)} onChange={(event) => patchQuestion(form.id, question.id, { required: event.target.checked })} />
+                        必須
+                      </label>
+                      <div className="move-buttons" aria-label={`${question.label || "質問"}の並び替え`}>
+                        <button className="icon-secondary" onClick={() => moveQuestion(form.id, question.id, -1)} disabled={questionIndex === 0} aria-label="質問を上へ" title="上へ"><ArrowUp size={16} /></button>
+                        <button className="icon-secondary" onClick={() => moveQuestion(form.id, question.id, 1)} disabled={questionIndex === form.questions.length - 1} aria-label="質問を下へ" title="下へ"><ArrowDown size={16} /></button>
+                      </div>
+                      <button className="icon-danger" onClick={() => removeQuestion(form.id, question.id)} aria-label="質問を削除" title="削除"><Trash2 size={16} /></button>
+                    </div>
+                    {question.kind === "track" && (
+                      <div className="track-field-editor">
+                        <div className="track-field-editor-head">
+                          <div>
+                            <strong>楽曲内の項目</strong>
+                            <span>回答フォームではこの順番で表示され、音源プレビューは音源アップロードの直下に出ます。</span>
+                          </div>
+                          <button className="secondary" onClick={() => resetTrackFields(form.id, question.id)}><RotateCcw size={16} />既定に戻す</button>
+                        </div>
+                        {trackFields.map((field, fieldIndex) => (
+                          <div className="track-field-row" key={field.type}>
+                            <div className="track-field-kind">{TRACK_FIELD_TYPE_LABELS[field.type] || field.type}</div>
+                            <label>
+                              <span>表示名</span>
+                              <input value={field.label || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { label: event.target.value })} />
+                            </label>
+                            <label>
+                              <span>補足文</span>
+                              <input value={field.help || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { help: event.target.value })} />
+                            </label>
+                            {field.type === "url" ? (
+                              <label>
+                                <span>入力例</span>
+                                <input value={field.placeholder || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { placeholder: event.target.value })} />
+                              </label>
+                            ) : field.type === "audio" ? (
+                              <label>
+                                <span>音源後の案内</span>
+                                <input value={field.note || ""} onChange={(event) => patchTrackField(form.id, question.id, field.type, { note: event.target.value })} />
+                              </label>
+                            ) : (
+                              <span className="track-field-spacer" />
+                            )}
+                            <div className="move-buttons" aria-label={`${field.label || "楽曲内項目"}の並び替え`}>
+                              <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, -1)} disabled={fieldIndex === 0} aria-label="楽曲内項目を上へ" title="上へ"><ArrowUp size={16} /></button>
+                              <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, 1)} disabled={fieldIndex === trackFields.length - 1} aria-label="楽曲内項目を下へ" title="下へ"><ArrowDown size={16} /></button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <button className="secondary" onClick={() => addQuestion(form.id)}><Plus size={16} />質問追加</button>
             </div>
           </article>

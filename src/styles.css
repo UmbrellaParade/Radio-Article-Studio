@@ -652,11 +652,80 @@ textarea {
   margin-top: -6px;
 }
 
+.question-editor {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #eadfce;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
 .question-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 140px minmax(220px, 260px) 86px 40px;
+  grid-template-columns: minmax(220px, 1fr) 140px minmax(220px, 260px) 86px auto 40px;
   gap: 8px;
   align-items: center;
+}
+
+.move-buttons {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.track-field-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.track-field-editor-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.track-field-editor-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.track-field-editor-head strong {
+  color: #241f2f;
+}
+
+.track-field-editor-head span,
+.track-field-kind,
+.track-field-row label span {
+  color: #6b6175;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.track-field-row {
+  display: grid;
+  grid-template-columns: 120px minmax(160px, 1fr) minmax(200px, 1.3fr) minmax(200px, 1.3fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.track-field-row label {
+  display: grid;
+  gap: 5px;
+}
+
+.track-field-kind {
+  align-self: center;
+}
+
+.track-field-spacer {
+  min-height: 1px;
 }
 
 .upload-field {
@@ -1443,6 +1512,7 @@ textarea {
 .primary,
 .secondary,
 .danger,
+.icon-secondary,
 .icon-danger,
 .file-button {
   display: inline-flex;
@@ -1462,6 +1532,7 @@ textarea {
 }
 
 .secondary,
+.icon-secondary,
 .file-button {
   border: 1px solid #d6ccbd;
   background: #f4efe6;
@@ -1475,6 +1546,7 @@ textarea {
   color: #b43d3d;
 }
 
+.icon-secondary,
 .icon-danger {
   min-width: 36px;
   padding: 8px;
@@ -1741,6 +1813,7 @@ textarea {
   .form-grid,
   .track-meta-grid,
   .question-row,
+  .track-field-row,
   .attachment-item,
   .x-account-row {
     grid-template-columns: 1fr;
@@ -1780,9 +1853,20 @@ textarea {
   .primary,
   .secondary,
   .danger,
+  .icon-secondary,
   .file-button {
     width: 100%;
     min-height: 44px;
+  }
+
+  .move-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .track-field-editor-head {
+    display: grid;
   }
 
   .icon-danger {
@@ -1803,6 +1887,7 @@ textarea {
   .result-box,
   .song-card,
   .track-question-fields,
+  .track-field-editor,
   .x-contact-block,
   .track-preview {
     padding: 10px;

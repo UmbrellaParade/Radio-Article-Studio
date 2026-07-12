@@ -119,6 +119,70 @@ export const QUESTION_KIND_OPTIONS = [
   ["file", "音源ファイル単体"]
 ];
 
+export const TRACK_FIELD_TYPE_OPTIONS = [
+  ["audio", "音源アップロード"],
+  ["title", "楽曲名"],
+  ["artist", "アーティスト名"],
+  ["url", "楽曲URL"]
+];
+
+export const DEFAULT_TRACK_FIELDS = [
+  {
+    id: "audio",
+    type: "audio",
+    label: "楽曲をWAVかMP3でアップロード",
+    help: "WAVまたはMP3をアップロードしてください。",
+    note: "音源を選んだあとも、楽曲名・アーティスト名は手動で入力や修正ができます。",
+    placeholder: ""
+  },
+  {
+    id: "title",
+    type: "title",
+    label: "楽曲名",
+    help: "正式な楽曲名を入力してください。あとから修正できます。",
+    note: "",
+    placeholder: ""
+  },
+  {
+    id: "artist",
+    type: "artist",
+    label: "アーティスト名",
+    help: "記事や紹介欄に載せる正式表記を入力してください。",
+    note: "",
+    placeholder: ""
+  },
+  {
+    id: "url",
+    type: "url",
+    label: "楽曲URL（YouTube / Suno）",
+    help: "YouTubeまたはSunoの共有URLだけ受け付けます。",
+    note: "",
+    placeholder: "https://youtu.be/... または https://suno.com/..."
+  }
+];
+
+const TRACK_FIELD_DEFAULTS_BY_TYPE = Object.fromEntries(DEFAULT_TRACK_FIELDS.map((field) => [field.type, field]));
+
+export const normalizeTrackFields = (fields) => {
+  const inputFields = Array.isArray(fields) ? fields : [];
+  const usedTypes = new Set();
+  const normalized = [];
+
+  inputFields.forEach((field) => {
+    const type = String(field?.type || field?.id || "").trim();
+    const defaults = TRACK_FIELD_DEFAULTS_BY_TYPE[type];
+    if (!defaults || usedTypes.has(type)) return;
+    normalized.push({ ...defaults, ...field, id: defaults.id, type });
+    usedTypes.add(type);
+  });
+
+  DEFAULT_TRACK_FIELDS.forEach((defaults) => {
+    if (!usedTypes.has(defaults.type)) normalized.push({ ...defaults });
+  });
+
+  return normalized;
+};
+
 export const TRACK_URL_ERROR_MESSAGE = "楽曲URLはYouTubeまたはSunoのURLを入力してください。";
 export const TRACK_URL_PATTERN = "https?://([A-Za-z0-9-]+\\.)?(youtube\\.com|suno\\.com)(/.*)?|https?://youtu\\.be(/.*)?";
 
@@ -1868,7 +1932,9 @@ export const makeSharePayload = (form, settings = sampleData.settings, context =
       name: form.name,
       type: form.type,
       description: form.description,
-      questions: form.questions
+      questions: (form.questions ?? []).map((question) =>
+        question.kind === "track" ? { ...question, trackFields: normalizeTrackFields(question.trackFields) } : question
+      )
     }
   };
   if (context.period) {
@@ -2211,9 +2277,12 @@ export function migrateData(input) {
       }
     }
 
-    questions = questions.map((question) =>
-      question.kind === "x_contact" && question.use === "internal" ? { ...question, use: "public" } : question
-    );
+    questions = questions.map((question) => {
+      const nextQuestion = question.kind === "x_contact" && question.use === "internal" ? { ...question, use: "public" } : question;
+      return nextQuestion.kind === "track"
+        ? { ...nextQuestion, trackFields: normalizeTrackFields(nextQuestion.trackFields) }
+        : nextQuestion;
+    });
 
     return { ...form, shareSlug: form.shareSlug || getFormPublishedSlug(form), questions };
   });
