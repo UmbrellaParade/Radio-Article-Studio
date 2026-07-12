@@ -21,7 +21,7 @@ const SECRET_TOKEN = "ここを好きな合言葉に変更";
 // このサイズ以下の画像（ゲストアイコンなど）は、Drive保存に加えて回答JSONにも残す。
 // サムネ合成でそのまま使えるようにするため。音源はDrive保存のみ。
 const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
-const SCRIPT_VERSION = "2026-07-13-google-form-style-sheet";
+const SCRIPT_VERSION = "2026-07-13-all-questions-columns";
 
 const RESPONSES_DIR = "_responses";
 const FORMS_DIR = "_forms";
@@ -300,21 +300,58 @@ function buildReceiptRow(payload, savedFiles, jsonName, jsonUrl, receivedAt) {
 
 // ---- フォームごとのGoogleフォーム形式シート ----
 // タブ名＝フォーム名。1行＝1回答。1列目は受信日時、2列目以降は質問。
+// 列はツールで設定した「フォームの全質問」（_forms/の公開定義）を基準に作るため、
+// まだ回答が無い質問も最初から列として並ぶ。
 
-function getFormSheetName(payload) {
-  const form = payload.form || {};
-  const response = payload.response || {};
-  return sanitizeName(form.name || response.formId || "回答", "回答");
+// _forms/ の公開済みフォーム定義を読み、フォームIDごとの「フォーム名＋全質問ラベル」を返す
+function loadPublishedFormDefinitions(root) {
+  const formsFolder = getOrCreateFolder(root, FORMS_DIR);
+  const definitions = {};
+  const files = formsFolder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    if (file.getName().slice(-5) !== ".json") continue;
+    try {
+      const payload = JSON.parse(file.getBlob().getDataAsString("UTF-8"));
+      const form = payload && payload.form;
+      if (!form || !form.id) continue;
+      const updatedAt = file.getLastUpdated().getTime();
+      if (definitions[form.id] && definitions[form.id].updatedAt >= updatedAt) continue;
+      definitions[form.id] = {
+        name: form.name || form.id,
+        labels: (form.questions || []).map(function (question) {
+          return String(question.label || question.id || "質問");
+        }),
+        updatedAt: updatedAt
+      };
+    } catch (error) {
+      // 壊れた定義はスキップ
+    }
+  }
+  return definitions;
 }
 
-function appendFormAnswerRow(root, payload, receivedAt) {
+function appendFormAnswerRow(root, payload, receivedAt, definitionsInput) {
   const rawAnswers = Array.isArray(payload.rawAnswers) ? payload.rawAnswers : [];
   const answers = rawAnswers.length ? rawAnswers : buildFallbackAnswersFromResponse(payload.response || {});
   if (!answers.length) return;
-  const sheet = getResponseSheet(root, getFormSheetName(payload));
-  const labels = answers.map(function (answer) {
-    return String(answer.label || answer.id || "質問");
-  });
+  const response = payload.response || {};
+  const form = payload.form || {};
+  const definitions = definitionsInput || loadPublishedFormDefinitions(root);
+  const definition = definitions[response.formId || form.id || ""];
+  // 全質問の列順は「公開済みフォーム定義」→「送信ペイロードのフォーム定義」→「回答に含まれる質問」の順で決める
+  const formQuestionLabels = definition
+    ? definition.labels
+    : (form.questions || []).map(function (question) {
+        return String(question.label || question.id || "質問");
+      });
+  const sheetName = sanitizeName((definition && definition.name) || form.name || response.formId || "回答", "回答");
+  const sheet = getResponseSheet(root, sheetName);
+  const labels = formQuestionLabels.concat(
+    answers.map(function (answer) {
+      return String(answer.label || answer.id || "質問");
+    })
+  );
   const headers = upsertFormSheetHeader(sheet, labels);
   const answerByLabel = {};
   answers.forEach(function (answer) {
@@ -416,17 +453,26 @@ function rebuildResponseLogFromJson() {
     return a.receivedAt - b.receivedAt;
   });
 
+  // 公開済みの全フォームのタブを、回答が無くても全質問ヘッダー付きで先に作る
+  const definitions = loadPublishedFormDefinitions(root);
+  Object.keys(definitions).forEach(function (formId) {
+    const definition = definitions[formId];
+    if (!definition.labels.length) return;
+    const sheet = getResponseSheet(root, sanitizeName(definition.name, "回答"));
+    upsertFormSheetHeader(sheet, definition.labels);
+  });
+
   const receiptSheet = getResponseSheet(root, RECEIPT_SHEET_NAME);
   ensureSheetHeader(receiptSheet, RECEIPT_HEADERS);
   items.forEach(function (item) {
-    appendFormAnswerRow(root, item.payload, item.receivedAt);
+    appendFormAnswerRow(root, item.payload, item.receivedAt, definitions);
     receiptSheet.appendRow(
       buildReceiptRow(item.payload, collectSavedFilesFromPayload(item.payload), item.name, item.url, item.receivedAt)
     );
   });
 
   spreadsheet.deleteSheet(placeholder);
-  return "回答" + items.length + "件からシートを作り直しました。";
+  return "フォーム" + Object.keys(definitions).length + "件・回答" + items.length + "件からシートを作り直しました。";
 }
 
 function getResponseSpreadsheet(root) {
