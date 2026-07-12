@@ -112,3 +112,9 @@ Google Drive response receiving setup:
 ```text
 docs/google-drive-response-endpoint.md
 ```
+
+Operations and troubleshooting runbook:
+
+```text
+docs/troubleshooting-runbook.md
+```
