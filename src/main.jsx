@@ -42,7 +42,8 @@ import {
   DEFAULT_X_CONTACT_MESSAGE,
   DEFAULT_RESPONSE_ENDPOINT_URL,
   DEFAULT_RESPONSE_DRIVE_FOLDER_URL,
-  MAX_SUBMISSION_BYTES,
+  DEFAULT_ATTACHMENT_LIMIT_MB,
+  MAX_ATTACHMENT_LIMIT_MB,
   DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
   DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
   DEFAULT_AUDIO_SAVE_MEMO,
@@ -59,6 +60,7 @@ import {
   FORM_COLOR_PALETTE,
   normalizeFormColor,
   normalizeTrackFields,
+  normalizeAttachmentLimitMb,
   TRACK_URL_ERROR_MESSAGE,
   TRACK_URL_PATTERN,
   detectUrlType,
@@ -312,6 +314,7 @@ const makeFormSnapshot = (form) => ({
   receptionStartDate: form.receptionStartDate || "",
   receptionEndDate: form.receptionEndDate || "",
   submissionLimit: form.submissionLimit || "",
+  attachmentLimitMb: normalizeAttachmentLimitMb(form.attachmentLimitMb),
   color: normalizeFormColor(form.color),
   questions: (form.questions || []).map((question) => ({
     ...question,
@@ -371,6 +374,12 @@ const sanitizeLimitInput = (value) => {
   if (!text) return "";
   const limit = Math.floor(Number(text));
   return Number.isFinite(limit) && limit > 0 ? String(limit) : "";
+};
+
+const sanitizeAttachmentLimitInput = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return String(normalizeAttachmentLimitMb(text));
 };
 
 function App() {
@@ -713,6 +722,7 @@ function App() {
         receptionStartDate: "",
         receptionEndDate: "",
         submissionLimit: "",
+        attachmentLimitMb: DEFAULT_ATTACHMENT_LIMIT_MB,
         questions: [
           { id: newId("q"), label: "質問文", kind: "short", required: false, use: "article", help: "" }
         ]
@@ -2650,6 +2660,7 @@ function Forms({
               <span>{form.questions.length}項目</span>
               <span>{formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>
               {form.submissionLimit ? <span>上限 {form.submissionLimit}件</span> : <span>上限なし</span>}
+              <span>添付 {normalizeAttachmentLimitMb(form.attachmentLimitMb)}MB</span>
             </summary>
             <div className="record-body">
               <div className="record-head compact">
@@ -2690,8 +2701,8 @@ function Forms({
                 </div>
               </PersistentDetails>
               <PersistentDetails {...detailsProps(`form:${form.id}:availability`, true)} className="collapsible-section">
-                <summary><strong>受付条件</strong><span>期間・応募数</span></summary>
-                <p className="hint-text">日付と応募数は空欄なら制限なしです。期間外、または応募数上限に達したフォームは回答画面に表示されません。</p>
+                <summary><strong>受付条件</strong><span>期間・応募数・添付容量</span></summary>
+                <p className="hint-text">日付と応募数は空欄なら制限なしです。期間外、または応募数上限に達したフォームは回答画面に表示されません。添付上限は1回の回答に添付できる合計サイズです。</p>
                 <div className="form-grid">
                   <Field
                     label="受付開始"
@@ -2712,6 +2723,14 @@ function Forms({
                     onChange={(value) => patchItem("forms", form.id, { submissionLimit: sanitizeLimitInput(value) })}
                     placeholder="未指定"
                   />
+                  <Field
+                    label="添付上限（合計MB）"
+                    type="number"
+                    value={form.attachmentLimitMb || ""}
+                    onChange={(value) => patchItem("forms", form.id, { attachmentLimitMb: sanitizeAttachmentLimitInput(value) })}
+                    placeholder={String(DEFAULT_ATTACHMENT_LIMIT_MB)}
+                  />
+                  <p className="hint-text wide">1〜{MAX_ATTACHMENT_LIMIT_MB}MBで指定できます。WAVを受けたいフォームは200MBがおすすめです。</p>
                 </div>
               </PersistentDetails>
               <PersistentDetails {...detailsProps(`form:${form.id}:share`)} className="collapsible-section">

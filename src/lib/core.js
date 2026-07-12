@@ -14,8 +14,10 @@ export const DEFAULT_X_CONTACT_MESSAGE =
   "Xでご連絡するため、べるぼ☂とかなめ🦐のアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。";
 export const DEFAULT_RESPONSE_ENDPOINT_URL = "";
 export const DEFAULT_RESPONSE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1FnQ0knOIUKnTOYisf7JdKJNORsTgDwza";
-// GASのPOST受信上限（約50MB）をbase64の膨張分込みで超えないための送信前チェック値。
-export const MAX_SUBMISSION_BYTES = 45 * 1024 * 1024;
+export const DEFAULT_ATTACHMENT_LIMIT_MB = 200;
+export const MAX_ATTACHMENT_LIMIT_MB = 200;
+// 旧コード互換用。公開フォームではフォームごとの添付上限を優先する。
+export const MAX_SUBMISSION_BYTES = DEFAULT_ATTACHMENT_LIMIT_MB * 1024 * 1024;
 export const DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL = "";
 export const DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL = "";
 export const DEFAULT_AUDIO_SAVE_MEMO = "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー";
@@ -205,6 +207,15 @@ export const normalizeTrackFields = (fields) => {
 export const normalizeSubmissionLimit = (value) => {
   const limit = Math.floor(Number(value || 0));
   return Number.isFinite(limit) && limit > 0 ? limit : 0;
+};
+
+export const normalizeAttachmentLimitMb = (value, fallback = DEFAULT_ATTACHMENT_LIMIT_MB) => {
+  const limit = Math.floor(Number(value || 0));
+  if (Number.isFinite(limit) && limit > 0) return Math.min(limit, MAX_ATTACHMENT_LIMIT_MB);
+  const fallbackLimit = Math.floor(Number(fallback || DEFAULT_ATTACHMENT_LIMIT_MB));
+  return Number.isFinite(fallbackLimit) && fallbackLimit > 0
+    ? Math.min(fallbackLimit, MAX_ATTACHMENT_LIMIT_MB)
+    : DEFAULT_ATTACHMENT_LIMIT_MB;
 };
 
 export const TRACK_URL_ERROR_MESSAGE = "楽曲URLはYouTubeまたはSunoのURLを入力してください。";
@@ -1959,6 +1970,7 @@ export const makeSharePayload = (form, settings = sampleData.settings, context =
       receptionStartDate: form.receptionStartDate || "",
       receptionEndDate: form.receptionEndDate || "",
       submissionLimit: normalizeSubmissionLimit(form.submissionLimit),
+      attachmentLimitMb: normalizeAttachmentLimitMb(form.attachmentLimitMb),
       questions: (form.questions ?? []).map((question) =>
         question.kind === "track" ? { ...question, trackFields: normalizeTrackFields(question.trackFields) } : question
       )
@@ -2061,6 +2073,7 @@ export const sampleData = {
       shareSlug: "guest-form",
       color: "#8bd7df",
       description: "ゲスト紹介、紹介楽曲、NG/注意事項を集めるフォーム。",
+      attachmentLimitMb: DEFAULT_ATTACHMENT_LIMIT_MB,
       questions: [
         { id: "q_guest_name", label: "ゲスト名 正式表記", kind: "short", required: true, use: "public" },
         { id: "q_guest_x", label: "X URL", kind: "url", required: true, use: "public" },
@@ -2080,6 +2093,7 @@ export const sampleData = {
       shareSlug: "listener-tracks",
       color: "#f3c96b",
       description: "送って頂く楽曲の楽曲名、楽曲URL、WAV/MP3音源、記事掲載可否を集めるフォーム。",
+      attachmentLimitMb: DEFAULT_ATTACHMENT_LIMIT_MB,
       questions: [
         { id: "q_artist", label: "アーティスト名 正式表記", kind: "short", required: true, use: "article" },
         { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: true, use: "public" },
@@ -2095,6 +2109,7 @@ export const sampleData = {
       shareSlug: "personality-tracks",
       color: "#bfa7f2",
       description: "かなめ🦐/べるぼ☂の紹介曲を運営側で入力するフォーム。",
+      attachmentLimitMb: DEFAULT_ATTACHMENT_LIMIT_MB,
       questions: [
         { id: "q_owner", label: "担当", kind: "choice", required: true, use: "article" },
         { id: "q_track", label: "送って頂く楽曲", kind: "track", required: true, use: "article" },
@@ -2332,6 +2347,7 @@ export function migrateData(input) {
       receptionStartDate: form.receptionStartDate || "",
       receptionEndDate: form.receptionEndDate || "",
       submissionLimit: normalizeSubmissionLimit(form.submissionLimit) || "",
+      attachmentLimitMb: normalizeAttachmentLimitMb(form.attachmentLimitMb),
       shareSlug: form.shareSlug || getFormPublishedSlug(form),
       color: normalizeFormColor(form.color, FORM_COLOR_PALETTE[formIndex % FORM_COLOR_PALETTE.length]),
       questions
@@ -2354,6 +2370,7 @@ export function migrateData(input) {
         receptionStartDate: presetForm.receptionStartDate || "",
         receptionEndDate: presetForm.receptionEndDate || "",
         submissionLimit: normalizeSubmissionLimit(presetForm.submissionLimit) || "",
+        attachmentLimitMb: normalizeAttachmentLimitMb(presetForm.attachmentLimitMb),
         color: normalizeFormColor(presetForm.color, FORM_COLOR_PALETTE[presetIndex % FORM_COLOR_PALETTE.length]),
         questions: normalizePresetQuestions(presetForm.questions)
       }
@@ -2372,6 +2389,7 @@ export function migrateData(input) {
         receptionStartDate: presetForm?.receptionStartDate || "",
         receptionEndDate: presetForm?.receptionEndDate || "",
         submissionLimit: normalizeSubmissionLimit(presetForm?.submissionLimit) || "",
+        attachmentLimitMb: normalizeAttachmentLimitMb(presetForm?.attachmentLimitMb),
         color: normalizeFormColor(presetForm?.color, FORM_COLOR_PALETTE[presetIndex % FORM_COLOR_PALETTE.length]),
         questions: normalizePresetQuestions(presetForm?.questions)
       }

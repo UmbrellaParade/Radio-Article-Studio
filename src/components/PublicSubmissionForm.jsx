@@ -37,7 +37,6 @@ import {
   DEFAULT_X_CONTACT_MESSAGE,
   DEFAULT_RESPONSE_ENDPOINT_URL,
   DEFAULT_RESPONSE_DRIVE_FOLDER_URL,
-  MAX_SUBMISSION_BYTES,
   DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
   DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
   DEFAULT_AUDIO_SAVE_MEMO,
@@ -52,6 +51,7 @@ import {
   QUESTION_KIND_OPTIONS,
   normalizeTrackFields,
   normalizeSubmissionLimit,
+  normalizeAttachmentLimitMb,
   TRACK_URL_ERROR_MESSAGE,
   TRACK_URL_PATTERN,
   detectUrlType,
@@ -235,6 +235,62 @@ import {
   SelectField
 } from "./ui.jsx";
 
+const PUBLIC_DRAFT_KEY_PREFIX = `${STORAGE_KEY}:public-draft`;
+
+const formatFileSizeMb = (bytes = 0) => {
+  const mb = Number(bytes || 0) / 1024 / 1024;
+  if (!Number.isFinite(mb) || mb <= 0) return "0MB";
+  return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10}MB`;
+};
+
+const makePublicDraftKey = (formId = "", periodId = "", episodeId = "") =>
+  `${PUBLIC_DRAFT_KEY_PREFIX}:${formId || "form"}:${periodId || ""}:${episodeId || ""}`;
+
+const stripFileDataForDraft = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (value.dataUrl || (value.fileName && value.mimeType)) return undefined;
+  const next = { ...value };
+  if (next.audio) delete next.audio;
+  return next;
+};
+
+const makeDraftAnswers = (answers = {}) =>
+  Object.fromEntries(
+    Object.entries(answers)
+      .map(([questionId, value]) => [questionId, stripFileDataForDraft(value)])
+      .filter(([, value]) => value !== undefined && value !== "")
+  );
+
+const readPublicDraftAnswers = (draftKey) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(draftKey) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const savePublicDraftAnswers = (draftKey, answers) => {
+  try {
+    const draft = makeDraftAnswers(answers);
+    if (Object.keys(draft).length) {
+      localStorage.setItem(draftKey, JSON.stringify(draft));
+    } else {
+      localStorage.removeItem(draftKey);
+    }
+  } catch {
+    // 下書き保存は補助機能なので、保存に失敗しても入力や送信を止めない。
+  }
+};
+
+const clearPublicDraftAnswers = (draftKey) => {
+  try {
+    localStorage.removeItem(draftKey);
+  } catch {
+    // 送信成功後の後始末なので、削除に失敗しても完了表示を優先する。
+  }
+};
+
 export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }) {
   const form = payload?.form;
   const period = payload?.period;
@@ -251,19 +307,33 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     endpointUrl: payload?.submission?.endpointUrl || operatorSettings.responseEndpointUrl || "",
     driveFolderUrl: payload?.submission?.driveFolderUrl || operatorSettings.responseDriveFolderUrl || ""
   };
-  const [answers, setAnswers] = useState({});
+  const draftKey = makePublicDraftKey(form?.id, period?.id, episode?.id);
+  const [answers, setAnswers] = useState(() => readPublicDraftAnswers(draftKey));
   const [formError, setFormError] = useState("");
   const [submitStatus, setSubmitStatus] = useState("");
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submissionStatus, setSubmissionStatus] = useState({ loading: false, count: null, error: "" });
   const submissionLimit = normalizeSubmissionLimit(form?.submissionLimit);
+  const attachmentLimitMb = normalizeAttachmentLimitMb(form?.attachmentLimitMb);
+  const attachmentLimitBytes = attachmentLimitMb * 1024 * 1024;
+  const submissionBytesLimit = Math.ceil(attachmentLimitBytes * 1.45) + 1024 * 1024;
+  const draftLoadingRef = useRef(false);
 
   useEffect(() => {
-    setAnswers({});
+    draftLoadingRef.current = true;
+    setAnswers(readPublicDraftAnswers(draftKey));
     setFormError("");
     setSubmitStatus("");
     setSubmitBusy(false);
-  }, [form?.id, period?.id, episode?.id]);
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (draftLoadingRef.current) {
+      draftLoadingRef.current = false;
+      return;
+    }
+    savePublicDraftAnswers(draftKey, answers);
+  }, [draftKey, answers]);
 
   useEffect(() => {
     const endpointUrl = String(submission.endpointUrl || "").trim();
@@ -368,6 +438,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             {(form.receptionStartDate || form.receptionEndDate) && <span>受付条件: {formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>}
             {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
             {submissionLimit ? <span>応募数: {submissionStatus.count ?? "-"} / {submissionLimit}</span> : <span>応募数: 制限なし</span>}
+            <span>添付: 合計{attachmentLimitMb}MBまで</span>
           </div>
         </article>
       </main>
@@ -455,6 +526,16 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     });
   };
 
+  const validateAttachmentFile = (file, event) => {
+    if (!file || file.size <= attachmentLimitBytes) {
+      setFormError("");
+      return true;
+    }
+    setFormError(`添付ファイルは合計${attachmentLimitMb}MBまでです。「${file.name}」は${formatFileSizeMb(file.size)}あります。`);
+    event.target.value = "";
+    return false;
+  };
+
   const updateFileAnswer = async (questionId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -463,13 +544,19 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       event.target.value = "";
       return;
     }
-    const dataUrl = await fileToDataUrl(file);
-    updateAnswer(questionId, {
-      fileName: file.name,
-      mimeType: file.type || (file.name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg"),
-      size: file.size,
-      dataUrl
-    });
+    if (!validateAttachmentFile(file, event)) return;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      updateAnswer(questionId, {
+        fileName: file.name,
+        mimeType: file.type || (file.name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg"),
+        size: file.size,
+        dataUrl
+      });
+    } catch {
+      setFormError("ファイルを読み込めませんでした。もう一度ファイルを選び直してください。");
+      event.target.value = "";
+    }
   };
 
   const updateImageAnswer = async (questionId, event) => {
@@ -480,13 +567,19 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       event.target.value = "";
       return;
     }
-    const dataUrl = await fileToDataUrl(file);
-    updateAnswer(questionId, {
-      fileName: file.name,
-      mimeType: file.type || "image/png",
-      size: file.size,
-      dataUrl
-    });
+    if (!validateAttachmentFile(file, event)) return;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      updateAnswer(questionId, {
+        fileName: file.name,
+        mimeType: file.type || "image/png",
+        size: file.size,
+        dataUrl
+      });
+    } catch {
+      setFormError("画像を読み込めませんでした。もう一度ファイルを選び直してください。");
+      event.target.value = "";
+    }
   };
 
   const updateTrackFileAnswer = async (questionId, event) => {
@@ -497,15 +590,21 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       event.target.value = "";
       return;
     }
-    const dataUrl = await fileToDataUrl(file);
-    updateTrackAnswer(questionId, {
-      audio: {
-        fileName: file.name,
-        mimeType: file.type || (file.name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg"),
-        size: file.size,
-        dataUrl
-      }
-    });
+    if (!validateAttachmentFile(file, event)) return;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      updateTrackAnswer(questionId, {
+        audio: {
+          fileName: file.name,
+          mimeType: file.type || (file.name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg"),
+          size: file.size,
+          dataUrl
+        }
+      });
+    } catch {
+      setFormError("音源ファイルを読み込めませんでした。もう一度ファイルを選び直してください。");
+      event.target.value = "";
+    }
   };
 
   const formatAnswers = (uses) =>
@@ -569,7 +668,8 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
         type: form.type,
         receptionStartDate: form.receptionStartDate || "",
         receptionEndDate: form.receptionEndDate || "",
-        submissionLimit
+        submissionLimit,
+        attachmentLimitMb
       },
       period: period
         ? {
@@ -630,14 +730,22 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     setFormError("");
     setSubmitStatus("");
     const responsePayload = buildResponsePayload();
+    const totalAttachmentBytes = (responsePayload.response.attachments || []).reduce(
+      (sum, attachment) => sum + Number(attachment.size || 0),
+      0
+    );
     const json = JSON.stringify(responsePayload);
     const endpointUrl = String(submission.endpointUrl || "").trim();
     if (!endpointUrl) {
       setSubmitStatus("送信先の設定に不備があります。URLを送ってくれた運営側へご連絡ください。");
       return;
     }
-    if (json.length > MAX_SUBMISSION_BYTES) {
-      setFormError("添付ファイルが大きすぎて送信できません。音源はMP3（合計30MBまで目安）にするか、ファイルを小さくして再度お試しください。");
+    if (totalAttachmentBytes > attachmentLimitBytes) {
+      setFormError(`添付ファイルの合計が${attachmentLimitMb}MBを超えています（現在 ${formatFileSizeMb(totalAttachmentBytes)}）。ファイルを減らすか小さくして再度お試しください。`);
+      return;
+    }
+    if (json.length > submissionBytesLimit) {
+      setFormError(`添付ファイルが大きすぎて送信できません。設定されている添付上限は合計${attachmentLimitMb}MBです。ファイルを小さくして再度お試しください。`);
       return;
     }
     setSubmitBusy(true);
@@ -651,6 +759,8 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       setSubmitStatus(
         `回答を受け付けました。ありがとうございます！（受付番号: ${result.savedAs || responsePayload.response.id}${savedFiles ? ` / 添付ファイル${savedFiles}件保存済み` : ""}）`
       );
+      clearPublicDraftAnswers(draftKey);
+      setAnswers({});
     } catch (error) {
       setSubmitStatus(
         `送信できませんでした（${error?.message || "不明なエラー"}）。時間を置いて再送信するか、URLを送ってくれた運営側へご連絡ください。`
@@ -736,9 +846,11 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                 accept={AUDIO_FILE_ACCEPT}
                 onChange={(event) => updateTrackFileAnswer(question.id, event)}
               />
-              {(answers[question.id]?.audio?.fileName || audioField.help) && (
-                <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : audioField.help}</small>
-              )}
+              <small>
+                {answers[question.id]?.audio?.fileName
+                  ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}`
+                  : `${audioField.help || "WAVまたはMP3をアップロードしてください。"}（合計${attachmentLimitMb}MBまで）`}
+              </small>
             </label>
             <TrackPreview track={answers[question.id]} />
             {audioField.note && <p className="hint-text track-entry-help">{audioField.note}</p>}
@@ -758,10 +870,11 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             <p className="eyebrow slim">Shared Form</p>
             <h2>{form.name}</h2>
             {form.description && <p className="muted">{form.description}</p>}
-            {(period || episode || form.receptionStartDate || form.receptionEndDate || submissionLimit > 0) && (
+            {(period || episode || form.receptionStartDate || form.receptionEndDate || submissionLimit > 0 || attachmentLimitMb > 0) && (
               <div className="public-context">
                 {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
                 {episode && <span>放送回: {episode.date || "-"} {episode.title || ""}</span>}
+                <span>添付: 合計{attachmentLimitMb}MBまで</span>
                 {submissionLimit > 0 && (
                   <span>応募数: {submissionStatus.loading ? "確認中" : submissionStatus.count !== null ? `${submissionStatus.count} / ${submissionLimit}` : `上限 ${submissionLimit}件`}</span>
                 )}
@@ -811,7 +924,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                     accept={AUDIO_FILE_ACCEPT}
                     onChange={(event) => updateFileAnswer(question.id, event)}
                   />
-                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : "WAVまたはMP3をアップロード"}</small>
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `WAVまたはMP3をアップロード（合計${attachmentLimitMb}MBまで）`}</small>
                 </div>
               ) : question.kind === "image" ? (
                 <div className="upload-field">
@@ -821,7 +934,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                     accept={IMAGE_FILE_ACCEPT}
                     onChange={(event) => updateImageAnswer(question.id, event)}
                   />
-                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : "PNG、JPG、WebP、GIFをアップロード"}</small>
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `PNG、JPG、WebP、GIFをアップロード（合計${attachmentLimitMb}MBまで）`}</small>
                   {answers[question.id]?.dataUrl && (
                     <img className="image-answer-preview" src={answers[question.id].dataUrl} alt={`${question.label} preview`} />
                   )}
