@@ -2560,10 +2560,15 @@ function Forms({
     window.setTimeout(() => setPresetMessage(""), 2400);
   };
 
-  const overwriteSelectedBuiltInPreset = (form) => {
-    if (!selectedPreset?.builtIn) return;
-    overwriteBuiltInFormPreset(selectedPreset.sourceId, form);
-    setPresetMessage(`「${selectedPreset.name.replace("（上書き済み）", "")}」を現在のフォームで上書きしました。`);
+  const getBuiltInPresetForForm = (form) =>
+    builtInFormPresets.find((preset) => preset.sourceId === form.id) ?? null;
+
+  const overwriteFormBuiltInPreset = (form) => {
+    const targetPreset = getBuiltInPresetForForm(form);
+    if (!targetPreset) return;
+    const presetName = targetPreset.name.replace(/^標準: /, "").replace("（上書き済み）", "");
+    overwriteBuiltInFormPreset(targetPreset.sourceId, form);
+    setPresetMessage(`標準プリセット「${presetName}」を、このフォーム内容で上書きしました。`);
     window.setTimeout(() => setPresetMessage(""), 3000);
   };
 
@@ -2653,7 +2658,10 @@ function Forms({
       {presetMessage && <p className="hint-text">{presetMessage}</p>}
       {publishMessage && <p className="hint-text">{publishMessage}</p>}
       <div className="records">
-        {forms.map((form) => (
+        {forms.map((form) => {
+          const builtInTarget = getBuiltInPresetForForm(form);
+          const builtInTargetName = builtInTarget?.name.replace(/^標準: /, "").replace("（上書き済み）", "") || "";
+          return (
           <PersistentDetails {...detailsProps(`form:${form.id}:record`)} className="record collapsible-record form-record" key={form.id} id={formAnchorId(form.id)} style={getFormColorStyle(form.color)}>
             <summary className="record-summary">
               <strong><i className="form-color-dot" aria-hidden="true" />{form.name || "フォーム名未入力"}</strong>
@@ -2667,8 +2675,13 @@ function Forms({
                 <strong>フォーム編集</strong>
                 <div className="inline-actions">
                   <button className="secondary" onClick={() => savePreset(form)}><Save size={16} />プリセット保存</button>
-                  <button className="secondary" onClick={() => overwriteSelectedBuiltInPreset(form)} disabled={!selectedPreset?.builtIn}>
-                    <Save size={16} />選択中の標準に上書き
+                  <button
+                    className="secondary"
+                    onClick={() => overwriteFormBuiltInPreset(form)}
+                    disabled={!builtInTarget}
+                    title={builtInTarget ? `標準プリセット「${builtInTargetName}」をこのフォーム内容で上書き` : "標準プリセットと対応するフォームだけ上書きできます"}
+                  >
+                    <Save size={16} />このフォームを標準へ上書き
                   </button>
                   <button className="icon-danger" onClick={() => deleteForm(form)} title="削除バックアップを残してフォームを削除"><Trash2 size={16} /></button>
                 </div>
@@ -2882,7 +2895,8 @@ function Forms({
               </PersistentDetails>
             </div>
           </PersistentDetails>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
