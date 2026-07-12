@@ -417,6 +417,55 @@ const THUMBNAIL_PRESETS = [
 const ARTICLE_THUMBNAIL_KEY = "article16x9";
 const CODEX_THUMBNAIL_PRESETS = THUMBNAIL_PRESETS.filter((preset) => preset.key === ARTICLE_THUMBNAIL_KEY);
 
+const IMPORT_PREVIEW_FIELDS = [
+  {
+    key: "ownerName",
+    label: "名前/応募者",
+    canonical: {
+      guest: "ゲスト名",
+      listener: "応募者名",
+      personality: "パーソナリティ名"
+    }
+  },
+  { key: "aiArtist", label: "AIアーティスト", canonical: "AIアーティスト名" },
+  { key: "trackTitle", label: "曲名", canonical: "曲名" },
+  { key: "trackUrl", label: "楽曲URL", canonical: "楽曲URL" },
+  { key: "audioFile", label: "音源", canonical: "音源ファイル" },
+  { key: "articlePoint", label: "曲への想い", canonical: "曲に込めた想い" },
+  {
+    key: "iconUrl",
+    label: "アイコン",
+    canonical: {
+      guest: "ゲストアイコン画像",
+      listener: "応募者アイコン画像",
+      personality: "アイコン画像"
+    }
+  },
+  { key: "constraints", label: "NG事項", canonical: "表記注意" }
+];
+
+const IMPORT_KIND_LABELS = {
+  guest: "ゲストアンケート",
+  listener: "リスナー応募曲",
+  personality: "パーソナリティ曲"
+};
+
+const getImportPreviewKey = (kind, periodId = "") => (periodId ? `${kind}:${periodId}` : kind);
+
+const getImportCanonicalColumn = (field, kind) =>
+  typeof field.canonical === "string" ? field.canonical : field.canonical?.[kind] || field.label;
+
+const applyColumnMappingToRows = (rows = [], kind = "", mapping = {}) =>
+  rows.map((row) => {
+    const mapped = { ...row };
+    IMPORT_PREVIEW_FIELDS.forEach((field) => {
+      const sourceColumn = mapping?.[field.key];
+      if (!sourceColumn) return;
+      mapped[getImportCanonicalColumn(field, kind)] = row[sourceColumn] ?? "";
+    });
+    return mapped;
+  });
+
 const THUMBNAIL_ICON_LAYOUT_PRESETS = [
   {
     id: "single",
@@ -1227,6 +1276,53 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId
   };
 };
 
+const getPreviewTrackSource = (kind = "") =>
+  kind === "listener" ? "リスナー応募曲" : kind === "personality" ? "パーソナリティ曲" : "ゲスト曲";
+
+const pickPreviewOwnerName = (row, kind, fallback = "") =>
+  pickImportValue(
+    row,
+    kind === "listener"
+      ? ["応募者名", "応募者のお名前", "お名前", "名前", "活動名", "ラジオネーム", "クリエイター名"]
+      : kind === "personality"
+        ? ["パーソナリティ名", "担当", "お名前", "名前", "活動名"]
+        : ["ゲスト名", "ゲスト名 正式表記", "お名前", "名前", "活動名", "クリエイター名", "アーティスト名"],
+    kind === "listener"
+      ? [/応募者|お名前|名前|活動名|名義|ラジオネーム|クリエイター名/]
+      : kind === "personality"
+        ? [/パーソナリティ|担当|お名前|名前|活動名/]
+        : [/ゲスト.*(名|名前|表記)|お名前|名前|活動名|名義|クリエイター名|アーティスト名/],
+    [/AI\s*アーティスト|AI artist|AI名義/i]
+  ) || fallback;
+
+const shortenPreviewValue = (value = "", max = 72) => {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+};
+
+const buildImportPreviewRows = (rows = [], kind = "", mapping = {}) => {
+  const mappedRows = applyColumnMappingToRows(rows, kind, mapping);
+  return mappedRows.map((row, index) => {
+    const response =
+      kind === "guest"
+        ? buildResponseFromRow(row, "preview", "form_guest", `ゲスト回答${index + 1}`)
+        : null;
+    const track = buildTrackFromRow(row, "preview", getPreviewTrackSource(kind), response?.respondent || "");
+    const iconFromResponse = response?.attachments?.[0]?.sourceUrl || response?.attachments?.[0]?.dataUrl || "";
+    return {
+      rowNo: index + 1,
+      ownerName: response?.respondent || track?.artist || pickPreviewOwnerName(row, kind),
+      aiArtist: track?.aiArtist || pickImportValue(row, ["AIアーティスト名", "AIアーティスト"], [/AI\s*(アーティスト|名義|名前)|AI artist/i]),
+      trackTitle: track?.title || pickImportValue(row, ["曲名", "楽曲名", "紹介曲"], [/曲名|楽曲名|紹介曲|タイトル/]),
+      trackUrl: track?.url || pickImportValue(row, ["楽曲URL", "曲URL", "URL", "Suno URL", "YouTube URL"], [/(楽曲|曲|Suno|YouTube|Youtube).*(URL|リンク)|(URL|リンク).*(楽曲|曲|Suno|YouTube|Youtube)/i]),
+      audioFile: track?.audioFile || pickImportValue(row, ["音源ファイル", "音源URL", "Drive URL"], [/音源|mp3|wav|Drive|ドライブ/i]),
+      articlePoint: track?.articlePoint || pickImportValue(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "記事で触れてほしいポイント"], [/想い|思い|曲紹介|楽曲紹介|こだわり|おすすめ|ポイント|メッセージ|記事で触れて/]),
+      iconUrl: track?.ownerIconUrl || iconFromResponse,
+      constraints: response?.constraints || pickImportValue(row, ["触れないでほしいこと", "NG質問", "表記注意", "注意事項"], [/触れない|NG|表記注意|注意事項|伏せたい|非公開|禁止|避けて|表記ルール/])
+    };
+  });
+};
+
 const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "") => {
   if (!selectedEpisode || rows.length === 0) {
     return { data: current, result: { responses: 0, tracks: 0 } };
@@ -2030,6 +2126,7 @@ function App() {
   const [sharedPayload, setSharedPayload] = useState(readSharedFormPayload);
   const [restorePayload, setRestorePayload] = useState(readRestorePayload);
   const [importingSource, setImportingSource] = useState("");
+  const [importPreviews, setImportPreviews] = useState({});
   const autoThumbnailGenerationRef = useRef("");
 
   useEffect(() => {
@@ -2075,7 +2172,6 @@ function App() {
     .sort((a, b) => Number(a.slotNo) - Number(b.slotNo));
 
   const episodeResponses = data.responses.filter((response) => response.episodeId === selectedEpisode?.id);
-  const episodePeriods = data.applicationPeriods.filter((period) => period.episodeId === selectedEpisode?.id);
   const inferredGuestXHandle = useMemo(
     () => episodeResponses.map((response) => extractXHandleFromText(response.publicInfo)).find(Boolean) || "",
     [episodeResponses]
@@ -2416,8 +2512,35 @@ function App() {
     setData((current) => appendImportLogToData(current, message));
   };
 
-  const importCsvRows = (rows, kind, label = "CSV", periodId = "") => {
+  const stageImportRows = (rows, kind, label = "CSV", periodId = "") => {
     if (!selectedEpisode) {
+      appendImportLog(`${label}: 放送回を選んでから読み込んでください。`);
+      return;
+    }
+    if (!rows.length) {
+      appendImportLog(`${label}: CSVの回答行が見つかりませんでした。1行目に見出し、2行目以降に回答があるか確認してください。`);
+      return;
+    }
+
+    const previewKey = getImportPreviewKey(kind, periodId);
+    setImportPreviews((current) => ({
+      ...current,
+      [previewKey]: {
+        key: previewKey,
+        kind,
+        label,
+        periodId,
+        episodeId: selectedEpisode.id,
+        rows,
+        mapping: current[previewKey]?.mapping ?? {},
+        loadedAt: new Date().toISOString()
+      }
+    }));
+    appendImportLog(`${label}: ${rows.length}行をプレビューに読み込みました。内容を確認して「反映」を押してください。`);
+  };
+
+  const importCsvRows = (rows, kind, label = "CSV", periodId = "", targetEpisodeId = selectedEpisode?.id) => {
+    if (!targetEpisodeId) {
       appendImportLog(`${label}: 放送回を選んでから取り込んでください。`);
       return;
     }
@@ -2427,7 +2550,8 @@ function App() {
     }
 
     setData((current) => {
-      const currentEpisode = current.episodes.find((episode) => episode.id === selectedEpisode.id) ?? selectedEpisode;
+      const currentEpisode = current.episodes.find((episode) => episode.id === targetEpisodeId) ?? selectedEpisode;
+      if (!currentEpisode) return appendImportLogToData(current, `${label}: 対象の放送回が見つかりませんでした。`);
       const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, kind, periodId);
       const trackBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
       const emptyResultNote =
@@ -2441,9 +2565,9 @@ function App() {
     });
   };
 
-  const importCsvText = (text, kind, label = "CSV") => {
+  const importCsvText = (text, kind, label = "CSV", periodId = "") => {
     const rows = parseCsv(text);
-    importCsvRows(rows, kind, label);
+    stageImportRows(rows, kind, label, periodId);
   };
 
   const fetchCsvRows = async (url) => {
@@ -2477,10 +2601,10 @@ function App() {
       return;
     }
     setImportingSource(kind);
-    appendImportLog(`${label}: 読み込みを開始しました。`);
+    appendImportLog(`${label}: プレビュー読み込みを開始しました。`);
     try {
       const rows = await fetchRowsFromImportTarget(target);
-      importCsvRows(rows, kind, label);
+      stageImportRows(rows, kind, label);
     } catch (error) {
       appendImportLog(makeImportFailureMessage(label, error));
     } finally {
@@ -2497,6 +2621,45 @@ function App() {
       event.target.value = "";
     };
     reader.readAsText(file, "utf-8");
+  };
+
+  const updateImportPreviewMapping = (kind, patch, periodId = "") => {
+    const previewKey = getImportPreviewKey(kind, periodId);
+    setImportPreviews((current) => {
+      const preview = current[previewKey];
+      if (!preview) return current;
+      return {
+        ...current,
+        [previewKey]: {
+          ...preview,
+          mapping: {
+            ...(preview.mapping ?? {}),
+            ...patch
+          }
+        }
+      };
+    });
+  };
+
+  const clearImportPreview = (kind, periodId = "") => {
+    const previewKey = getImportPreviewKey(kind, periodId);
+    setImportPreviews((current) => {
+      const next = { ...current };
+      delete next[previewKey];
+      return next;
+    });
+  };
+
+  const applyImportPreview = (kind, periodId = "") => {
+    const previewKey = getImportPreviewKey(kind, periodId);
+    const preview = importPreviews[previewKey];
+    if (!preview) {
+      appendImportLog(`${IMPORT_KIND_LABELS[kind] || "取り込み"}: 反映できるプレビューがありません。`);
+      return;
+    }
+    const mappedRows = applyColumnMappingToRows(preview.rows, preview.kind, preview.mapping);
+    importCsvRows(mappedRows, preview.kind, preview.label, preview.periodId, preview.episodeId);
+    clearImportPreview(kind, periodId);
   };
 
   const importPeriodCsvText = (period, text, label = "応募期間CSV") => {
@@ -2634,16 +2797,24 @@ function App() {
         dataUrl
       });
     }
-    const listenerHeadingThumbnails = episodeTracks
-      .filter((track) => track.source === "リスナー応募曲" && track.ownerIconUrl)
-      .map((track) => ({
+    const listenerHeadingThumbnails = [];
+    for (const track of episodeTracks.filter((item) => item.source === "リスナー応募曲")) {
+      const dataUrl = await renderListenerHeadingThumbnail({ track, episode: selectedEpisode });
+      listenerHeadingThumbnails.push({
         trackId: track.id,
         slotNo: track.slotNo,
         trackTitle: track.title || "",
         applicantName: track.artist || "",
+        aiArtist: track.aiArtist || "",
         ownerIconUrl: track.ownerIconUrl,
-        usage: "記事内でこの応募曲を紹介する見出し直下に置く応募者サムネ素材"
-      }));
+        fileName: `${String(track.slotNo || "track").padStart(2, "0")}-${sanitizeDownloadName(track.artist || "listener")}-heading-thumbnail.png`,
+        width: 1280,
+        height: 720,
+        mimeType: "image/png",
+        dataUrl,
+        usage: "記事内でこの応募曲を紹介する見出し直下に置く応募者サムネPNG"
+      });
+    }
 
     return {
       type: "radio-article-studio-thumbnail-bundle",
@@ -2659,7 +2830,7 @@ function App() {
       instructions: [
         "このJSONのthumbnails[]は記事用16:9アイキャッチのみです。stand.fm 1:1 と配信背景9:16は含めません。",
         "thumbnails[].dataUrlはPNG画像です。Codex側ではdataUrlをPNGとして保存し、WordPressアイキャッチに使ってください。",
-        "listenerHeadingThumbnails[]は、リスナー応募曲の見出し直下に置く応募者サムネ用素材です。ownerIconUrlを使ってください。",
+        "listenerHeadingThumbnails[].dataUrlは、リスナー応募曲の見出し直下に置く1280x720 PNGです。ownerIconUrlが外部制約で読めない時も、曲名と応募者名入りのPNGを同梱します。",
         "PCへの手動ダウンロードを挟まないための受け渡しデータです。"
       ],
       thumbnails,
@@ -2682,7 +2853,7 @@ function App() {
 
   const copyFullPackWithThumbnails = async () => {
     const bundle = await buildThumbnailBundle();
-    const text = `${codexPack}\n\n---\n\n# 記事アイキャッチ16:9画像データJSON\n\n${JSON.stringify(bundle, null, 2)}`;
+    const text = `${codexPack}\n\n---\n\n# 記事画像データJSON\n\n${JSON.stringify(bundle, null, 2)}`;
     setThumbnailTransferText(text);
     try {
       await navigator.clipboard.writeText(text);
@@ -2716,7 +2887,7 @@ ${response.constraints || "-"}`
         const ownerIconNote = track.ownerIconUrl ? ` / 本人アイコン: ${track.ownerIconUrl}` : "";
         return (
           `${track.slotNo}. ${track.title || "曲名未入力"} / ${track.artist || "アーティスト未入力"}\n` +
-          `   種別: ${track.source} / 本人名の敬称: ${ownerHonorific} / 応募期間: ${track.periodId || "-"}${aiArtistNote}${ownerIconNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
+          `   種別: ${track.source} / 本人名の敬称: ${ownerHonorific}${aiArtistNote}${ownerIconNote} / 楽曲URL: ${track.url || "-"} / 音源ファイル: ${track.audioFile || "-"} / 埋め込み: ${track.embedUrl || "-"}\n` +
           `   記事ポイント: ${track.articlePoint || "-"}`
         );
       })
@@ -2735,14 +2906,8 @@ ${response.constraints || "-"}`
         compactLines([
           `- ${track.slotNo}. ${track.title || "曲名未入力"} / 応募者: ${track.artist || "-"}`,
           `  本人アイコン: ${track.ownerIconUrl || "未登録"}`,
-          "  用途: 記事内でこの応募曲を紹介する見出し直下に置く応募者サムネ素材"
+          "  用途: 記事内でこの応募曲を紹介する見出し直下に置く応募者サムネPNG。画像JSONのlistenerHeadingThumbnails[].dataUrlを保存して使ってください。"
         ])
-      )
-      .join("\n");
-    const periodRows = episodePeriods
-      .map(
-        (period) =>
-          `- ${period.title || period.id}: ${formatDateRange(period.startDate, period.endDate)} / フォーム: ${period.formId || "-"} / CSV: ${period.csvUrl || "-"} / 状態: ${period.status || "-"}`
       )
       .join("\n");
     const socialPromo = selectedEpisode ? data.socialPromos?.[selectedEpisode.id] : null;
@@ -2786,9 +2951,6 @@ ${data.settings.wordpressSite}
 ゲスト/回答情報:
 ${responseBlocks || "-"}
 
-応募期間:
-${periodRows || "-"}
-
 紹介楽曲:
 ${trackRows || "-"}
 
@@ -2799,7 +2961,7 @@ ${thumbnailRows || "-"}
 
 応募曲見出し下サムネ素材:
 ${listenerHeadingThumbnailRows || "-"}
-※リスナー応募曲では、本人アイコンを使った応募者サムネを該当曲の見出し直下に配置してください。
+※リスナー応募曲では、画像JSONに入っている1280x720 PNGを該当曲の見出し直下に配置してください。
 
 SNS告知/漫画素材:
 ${socialRows || "-"}
@@ -2809,7 +2971,7 @@ ${socialRows || "-"}
 - 記事本文に内部確認メモやNG回答そのものを載せない。
 - 主催/出演/参加/プロデュースなどの関係性を混同しない。
 - WordPress認証情報はチャットで別途共有する。`;
-  }, [data.settings, data.thumbnailStudio, data.socialPromos, episodePeriods, episodeResponses, episodeTracks, selectedEpisode]);
+  }, [data.settings, data.thumbnailStudio, data.socialPromos, episodeResponses, episodeTracks, selectedEpisode]);
 
   const copyPack = async () => {
     await navigator.clipboard.writeText(codexPack);
@@ -2995,6 +3157,10 @@ ${socialRows || "-"}
               updateImports={updateImports}
               importCsvUrl={importCsvUrl}
               importCsvFile={importCsvFile}
+              importPreviews={importPreviews}
+              updateImportPreviewMapping={updateImportPreviewMapping}
+              applyImportPreview={applyImportPreview}
+              clearImportPreview={clearImportPreview}
               applyBellboTrackUrl={applyBellboTrackUrl}
               importingSource={importingSource}
             />
@@ -3020,6 +3186,30 @@ ${socialRows || "-"}
               addQuestion={addQuestion}
               patchQuestion={patchQuestion}
               removeQuestion={removeQuestion}
+            />
+          )}
+          {active === "periods" && (
+            <ApplicationPeriods
+              periods={data.applicationPeriods}
+              episodes={data.episodes}
+              forms={data.forms}
+              settings={data.settings}
+              patchItem={patchItem}
+              removeItem={removeItem}
+              addPeriod={addApplicationPeriod}
+              importPeriodCsvUrl={importPeriodCsvUrl}
+              importPeriodCsvFile={importPeriodCsvFile}
+              importingSource={importingSource}
+            />
+          )}
+          {active === "responses" && (
+            <Responses
+              forms={data.forms}
+              responses={data.responses}
+              patchItem={patchItem}
+              removeItem={removeItem}
+              addResponse={addResponse}
+              importResponseJson={importResponseJson}
             />
           )}
           {active === "tracks" && (
@@ -3051,7 +3241,8 @@ ${socialRows || "-"}
               thumbnailBundleCopied={thumbnailBundleCopied}
               copyFullPackWithThumbnails={copyFullPackWithThumbnails}
               fullPackCopied={fullPackCopied}
-              thumbnailCount={CODEX_THUMBNAIL_PRESETS.filter((preset) => data.thumbnailStudio?.generated?.[preset.key]).length}
+              articleThumbnailCount={CODEX_THUMBNAIL_PRESETS.filter((preset) => data.thumbnailStudio?.generated?.[preset.key]).length}
+              listenerHeadingThumbnailCount={episodeTracks.filter((track) => track.source === "リスナー応募曲").length}
               thumbnailTransferText={thumbnailTransferText}
             />
           )}
@@ -3064,6 +3255,7 @@ ${socialRows || "-"}
               resetSample={resetSample}
               copyTransferLink={copyTransferLink}
               transferCopied={transferCopied}
+              setActive={setActive}
             />
           )}
         </section>
@@ -3783,18 +3975,30 @@ function StatusLine({ done, label }) {
   );
 }
 
-function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, importCsvFile, applyBellboTrackUrl, importingSource }) {
+function ImportsPanel({
+  imports,
+  selectedEpisode,
+  updateImports,
+  importCsvUrl,
+  importCsvFile,
+  importPreviews,
+  updateImportPreviewMapping,
+  applyImportPreview,
+  clearImportPreview,
+  applyBellboTrackUrl,
+  importingSource
+}) {
   return (
     <div className="view-stack">
       <SectionTitle
         title="自動取り込み"
-        subtitle="アンケートや応募フォームのスプレッドシートを取り込みます。べるぼ☂が手で入れるのは基本的に自分の曲URLだけです。"
+        subtitle="URL入力 → 読み込み → プレビュー → 反映 の順で、アンケートや応募曲シートを取り込みます。"
       />
 
-      <article className="panel">
-        <h2>今回の放送回</h2>
+      <article className="panel import-target-panel">
+        <p className="eyebrow slim">この放送回に取り込みます</p>
+        <h2>{selectedEpisode?.title || "放送回未選択"}</h2>
         <dl className="detail-list">
-          <div><dt>タイトル</dt><dd>{selectedEpisode?.title || "未選択"}</dd></div>
           <div><dt>放送日</dt><dd>{selectedEpisode?.date || "-"}</dd></div>
           <div><dt>ゲスト</dt><dd>{selectedEpisode?.guestName || "-"}</dd></div>
         </dl>
@@ -3808,7 +4012,12 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
           onChange={(value) => updateImports({ guestCsvUrl: value })}
           onImportUrl={() => importCsvUrl("guest", imports.guestCsvUrl, "ゲストアンケート")}
           onImportFile={(event) => importCsvFile(event, "guest", "ゲストアンケート")}
+          preview={importPreviews[getImportPreviewKey("guest")]}
+          onMappingChange={(patch) => updateImportPreviewMapping("guest", patch)}
+          onApplyPreview={() => applyImportPreview("guest")}
+          onClearPreview={() => clearImportPreview("guest")}
           loading={importingSource === "guest"}
+          kind="guest"
         />
         <SourceImportCard
           title="リスナー応募曲"
@@ -3817,7 +4026,12 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
           onChange={(value) => updateImports({ listenerCsvUrl: value })}
           onImportUrl={() => importCsvUrl("listener", imports.listenerCsvUrl, "リスナー応募曲")}
           onImportFile={(event) => importCsvFile(event, "listener", "リスナー応募曲")}
+          preview={importPreviews[getImportPreviewKey("listener")]}
+          onMappingChange={(patch) => updateImportPreviewMapping("listener", patch)}
+          onApplyPreview={() => applyImportPreview("listener")}
+          onClearPreview={() => clearImportPreview("listener")}
           loading={importingSource === "listener"}
+          kind="listener"
         />
         <SourceImportCard
           title="パーソナリティ曲シート"
@@ -3826,7 +4040,12 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
           onChange={(value) => updateImports({ personalityCsvUrl: value })}
           onImportUrl={() => importCsvUrl("personality", imports.personalityCsvUrl, "パーソナリティ曲")}
           onImportFile={(event) => importCsvFile(event, "personality", "パーソナリティ曲")}
+          preview={importPreviews[getImportPreviewKey("personality")]}
+          onMappingChange={(patch) => updateImportPreviewMapping("personality", patch)}
+          onApplyPreview={() => applyImportPreview("personality")}
+          onClearPreview={() => clearImportPreview("personality")}
           loading={importingSource === "personality"}
+          kind="personality"
         />
       </div>
 
@@ -3862,11 +4081,36 @@ function ImportsPanel({ imports, selectedEpisode, updateImports, importCsvUrl, i
   );
 }
 
-function SourceImportCard({ title, description, value, onChange, onImportUrl, onImportFile, loading = false }) {
+function SourceImportCard({
+  title,
+  description,
+  value,
+  onChange,
+  onImportUrl,
+  onImportFile,
+  preview,
+  onMappingChange,
+  onApplyPreview,
+  onClearPreview,
+  loading = false,
+  kind
+}) {
+  const columns = Object.keys(preview?.rows?.[0] ?? {}).filter(Boolean);
+  const previewRows = preview ? buildImportPreviewRows(preview.rows, kind, preview.mapping).slice(0, 8) : [];
+  const columnLabels = { "": "自動判定" };
+  columns.forEach((column) => {
+    columnLabels[column] = column;
+  });
+
   return (
     <article className="record import-card">
       <h2>{title}</h2>
       <p className="muted">{description}</p>
+      <div className="import-steps" aria-label="取り込み手順">
+        {["URL入力", "読み込み", "プレビュー", "反映"].map((step, index) => (
+          <span key={step} className={preview || index < 2 ? "active" : ""}>{step}</span>
+        ))}
+      </div>
       <Field
         label="Google Sheets / CSV URL"
         value={value}
@@ -3875,12 +4119,67 @@ function SourceImportCard({ title, description, value, onChange, onImportUrl, on
       />
       <p className="hint-text">GoogleフォームURLではなく、回答先スプレッドシートURLを入れてください。共有は「リンクを知っている全員が閲覧者」にします。</p>
       <div className="button-row">
-        <button className="primary" onClick={onImportUrl} disabled={loading}><Upload size={16} />{loading ? "取り込み中" : "URLから取り込み"}</button>
+        <button className="primary" onClick={onImportUrl} disabled={loading}><Upload size={16} />{loading ? "読み込み中" : "読み込み"}</button>
         <label className="secondary file-button">
           <Upload size={16} />CSVファイル
           <input type="file" accept=".csv,text/csv" onChange={onImportFile} />
         </label>
       </div>
+      {preview && (
+        <div className="import-preview">
+          <div className="record-head">
+            <div>
+              <strong>プレビュー</strong>
+              <p className="muted">{preview.rows.length}行を読み込み済み。内容を確認してから反映してください。</p>
+            </div>
+            <div className="button-row compact">
+              <button className="primary" onClick={onApplyPreview}><Save size={16} />反映</button>
+              <button className="secondary" onClick={onClearPreview}><X size={16} />取消</button>
+            </div>
+          </div>
+          {columns.length > 0 && (
+            <div className="import-mapping">
+              <strong>列名マッピング</strong>
+              <p className="hint-text">自動判定でずれている時だけ、対応する列を選んでください。</p>
+              <div className="import-mapping-grid">
+                {IMPORT_PREVIEW_FIELDS.map((field) => (
+                  <SelectField
+                    key={field.key}
+                    label={field.label}
+                    value={preview.mapping?.[field.key] || ""}
+                    options={["", ...columns]}
+                    labels={columnLabels}
+                    onChange={(column) => onMappingChange({ [field.key]: column })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="import-preview-table-wrap">
+            <table className="import-preview-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  {IMPORT_PREVIEW_FIELDS.map((field) => <th key={field.key}>{field.label}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {previewRows.map((row) => (
+                  <tr key={row.rowNo}>
+                    <td>{row.rowNo}</td>
+                    {IMPORT_PREVIEW_FIELDS.map((field) => (
+                      <td key={field.key}>{shortenPreviewValue(row[field.key]) || "-"}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {preview.rows.length > previewRows.length && (
+            <p className="hint-text">先頭{previewRows.length}行だけ表示しています。反映時は{preview.rows.length}行すべて取り込みます。</p>
+          )}
+        </div>
+      )}
     </article>
   );
 }
@@ -4642,6 +4941,103 @@ async function renderThumbnail({ preset, template, icon, icons = [], date, guest
   return canvas.toDataURL("image/png");
 }
 
+async function renderListenerHeadingThumbnail({ track, episode }) {
+  const width = 1280;
+  const height = 720;
+  const iconSrc = makeImagePreviewUrl(track.ownerIconUrl || "");
+  const iconImage = iconSrc ? await loadCanvasImage(iconSrc).catch(() => null) : null;
+
+  const draw = (useIcon = true) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, "#071b2c");
+    gradient.addColorStop(0.52, "#0e615f");
+    gradient.addColorStop(1, "#22182e");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = "rgba(255, 216, 41, .16)";
+    for (let i = 0; i < 12; i += 1) {
+      const x = 80 + i * 112;
+      const y = 90 + ((i * 67) % 460);
+      ctx.beginPath();
+      ctx.arc(x, y, 34 + (i % 3) * 12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = "rgba(0, 0, 0, .28)";
+    ctx.fillRect(0, height - 148, width, 148);
+
+    const iconDiameter = 272;
+    const iconX = 126;
+    const iconY = 224;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(iconX + iconDiameter / 2, iconY + iconDiameter / 2, iconDiameter / 2, 0, Math.PI * 2);
+    ctx.clip();
+    if (useIcon && iconImage) {
+      drawCoverAt(ctx, iconImage, iconX, iconY, iconDiameter, iconDiameter);
+    } else {
+      const placeholderGradient = ctx.createLinearGradient(iconX, iconY, iconX + iconDiameter, iconY + iconDiameter);
+      placeholderGradient.addColorStop(0, "#14b6c8");
+      placeholderGradient.addColorStop(1, "#d65285");
+      ctx.fillStyle = placeholderGradient;
+      ctx.fillRect(iconX, iconY, iconDiameter, iconDiameter);
+      ctx.fillStyle = "#fff8df";
+      ctx.font = '900 96px "Yu Gothic", "Hiragino Sans", Arial, sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(track.artist || "♪").trim().slice(0, 2), iconX + iconDiameter / 2, iconY + iconDiameter / 2);
+    }
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(iconX + iconDiameter / 2, iconY + iconDiameter / 2, iconDiameter / 2, 0, Math.PI * 2);
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = "rgba(255, 255, 255, .92)";
+    ctx.stroke();
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#ffd829";
+    ctx.font = '900 34px "Yu Gothic", "Hiragino Sans", Arial, sans-serif';
+    ctx.fillText("Sunoパ！応募曲", 456, 176);
+
+    ctx.fillStyle = "#fff8df";
+    ctx.shadowColor = "rgba(0, 0, 0, .52)";
+    ctx.shadowBlur = 10;
+    const title = String(track.title || "曲名未入力").trim();
+    let titleSize = 78;
+    while (titleSize > 42) {
+      ctx.font = `900 ${titleSize}px "Yu Gothic", "Hiragino Sans", Arial, sans-serif`;
+      if (ctx.measureText(title).width <= 720) break;
+      titleSize -= 4;
+    }
+    ctx.fillText(title, 456, 282);
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255, 255, 255, .88)";
+    ctx.font = '800 34px "Yu Gothic", "Hiragino Sans", Arial, sans-serif';
+    ctx.fillText(`応募者: ${track.artist || "-"}`, 456, 360);
+    if (track.aiArtist) {
+      ctx.fillText(`AIアーティスト: ${track.aiArtist}`, 456, 412);
+    }
+    ctx.fillStyle = "rgba(255, 248, 223, .76)";
+    ctx.font = '700 26px "Yu Gothic", "Hiragino Sans", Arial, sans-serif';
+    ctx.fillText(`${episode?.date || ""} ${episode?.title || ""}`.trim(), 456, 650);
+
+    return canvas.toDataURL("image/png");
+  };
+
+  try {
+    return draw(Boolean(iconImage));
+  } catch {
+    return draw(false);
+  }
+}
+
 async function saveThumbnailDataUrl(preset, dataUrl, guestName) {
   const fileName = `${guestName || "guest"}-${preset.fileName}`;
   const generatedAt = new Date().toISOString();
@@ -5106,38 +5502,6 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     setMessage("カスタム配置プリセットを削除しました。");
   };
 
-  const resetTemplate = (presetKey) => {
-    forgetTemplateBaseImages(presetKey);
-    forgetGeneratedImages(presetKey);
-    updateStudio((current) => ({
-      ...defaultThumbnailStudio,
-      ...current,
-      generated: removeGeneratedRecords(current.generated, [presetKey]),
-      templates: {
-        ...defaultThumbnailStudio.templates,
-        ...current.templates,
-        [presetKey]: {
-          ...defaultThumbnailStudio.templates[presetKey],
-          iconX: current.templates?.[presetKey]?.iconX ?? defaultThumbnailStudio.templates[presetKey].iconX,
-          iconY: current.templates?.[presetKey]?.iconY ?? defaultThumbnailStudio.templates[presetKey].iconY,
-          iconSize: current.templates?.[presetKey]?.iconSize ?? defaultThumbnailStudio.templates[presetKey].iconSize,
-          iconSlots: current.templates?.[presetKey]?.iconSlots ?? defaultThumbnailStudio.templates[presetKey].iconSlots,
-          guestNameVisible: current.templates?.[presetKey]?.guestNameVisible ?? defaultThumbnailStudio.templates[presetKey].guestNameVisible,
-          guestNameX: current.templates?.[presetKey]?.guestNameX ?? defaultThumbnailStudio.templates[presetKey].guestNameX,
-          guestNameY: current.templates?.[presetKey]?.guestNameY ?? defaultThumbnailStudio.templates[presetKey].guestNameY,
-          guestNameSize: current.templates?.[presetKey]?.guestNameSize ?? defaultThumbnailStudio.templates[presetKey].guestNameSize,
-          guestBadgeVisible: current.templates?.[presetKey]?.guestBadgeVisible ?? defaultThumbnailStudio.templates[presetKey].guestBadgeVisible,
-          guestBadgeX: current.templates?.[presetKey]?.guestBadgeX ?? defaultThumbnailStudio.templates[presetKey].guestBadgeX,
-          guestBadgeY: current.templates?.[presetKey]?.guestBadgeY ?? defaultThumbnailStudio.templates[presetKey].guestBadgeY,
-          guestBadgeSize: current.templates?.[presetKey]?.guestBadgeSize ?? defaultThumbnailStudio.templates[presetKey].guestBadgeSize,
-          source: "fixed",
-          dataUrl: ""
-        }
-      }
-    }));
-    setMessage("初期ベース画像に戻しました。");
-  };
-
   const generateOne = async (preset) => {
     setGeneratingKey(preset.key);
     setMessage(`${preset.label} を生成しています。`);
@@ -5163,7 +5527,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       }));
       setMessage(`${preset.label} を生成して保存しました。`);
     } catch {
-      setMessage("ベース画像を読み込めませんでした。初期ベースに戻すか、画像を登録し直してください。");
+      setMessage("ベース画像を読み込めませんでした。画像を登録し直してください。");
     } finally {
       setGeneratingKey("");
     }
@@ -5370,7 +5734,6 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
                 <Upload size={16} />ベース画像
                 <input type="file" accept="image/*" onChange={(event) => handleTemplateFile(preset.key, event)} />
               </label>
-              <button className="secondary" onClick={() => resetTemplate(preset.key)}>初期ベースに戻す</button>
               <p className="muted">{templateLabel}</p>
               {templateSource ? (
                 <div className="registered-template">
@@ -5609,21 +5972,34 @@ function SocialPromo({ selectedEpisode, promo, updatePromo, updateTalkTheme = ()
   );
 }
 
-function CodexPack({ codexPack, copyPack, copied, selectedEpisode, copyThumbnailBundle, thumbnailBundleCopied, copyFullPackWithThumbnails, fullPackCopied, thumbnailCount, thumbnailTransferText }) {
+function CodexPack({
+  codexPack,
+  copyPack,
+  copied,
+  selectedEpisode,
+  copyThumbnailBundle,
+  thumbnailBundleCopied,
+  copyFullPackWithThumbnails,
+  fullPackCopied,
+  articleThumbnailCount,
+  listenerHeadingThumbnailCount,
+  thumbnailTransferText
+}) {
+  const imageBundleCount = articleThumbnailCount + listenerHeadingThumbnailCount;
   return (
     <div className="view-stack">
       <SectionTitle title="Codex記事作成パック" subtitle="ここをコピーしてCodexへ渡せば、記事化に必要な情報がまとまります。" action={<button className="primary" onClick={copyPack}><ClipboardCopy size={16} />{copied ? "コピー済み" : "コピー"}</button>} />
       <article className="panel">
         <h2>{selectedEpisode?.title || "放送回未選択"}</h2>
         <div className="button-row">
-          <button className="primary" onClick={copyFullPackWithThumbnails} disabled={!thumbnailCount}>
+          <button className="primary" onClick={copyFullPackWithThumbnails} disabled={!imageBundleCount}>
             <ClipboardCopy size={16} />{fullPackCopied ? "画像込みコピー済み" : "本文+記事画像データをコピー"}
           </button>
-          <button className="secondary" onClick={copyThumbnailBundle} disabled={!thumbnailCount}>
+          <button className="secondary" onClick={copyThumbnailBundle} disabled={!imageBundleCount}>
             <ClipboardCopy size={16} />{thumbnailBundleCopied ? "記事画像JSONコピー済み" : "記事画像JSONをコピー"}
           </button>
         </div>
-        <p className="hint-text">Codexへ送る記事アイキャッチ16:9: {thumbnailCount}件。stand.fm 1:1 と配信背景9:16は記事作成パックには含めません。</p>
+        <p className="hint-text">Codexへ送る画像: 記事アイキャッチ16:9 {articleThumbnailCount}件 / 応募曲見出し下PNG {listenerHeadingThumbnailCount}件。stand.fm 1:1 と配信背景9:16は記事作成パックには含めません。</p>
         {thumbnailTransferText && (
           <textarea className="pack-output thumbnail-transfer-output" value={thumbnailTransferText} readOnly />
         )}
@@ -5633,7 +6009,7 @@ function CodexPack({ codexPack, copyPack, copied, selectedEpisode, copyThumbnail
   );
 }
 
-function SettingsPanel({ settings, updateSettings, exportJson, importJson, resetSample, copyTransferLink, transferCopied }) {
+function SettingsPanel({ settings, updateSettings, exportJson, importJson, resetSample, copyTransferLink, transferCopied, setActive }) {
   const [folderMessage, setFolderMessage] = useState("");
   const additionalXAccounts = Array.isArray(settings.additionalXAccounts) ? settings.additionalXAccounts : [];
 
@@ -5704,6 +6080,19 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
             <b>次フェーズ</b>
             <span>ログイン、クラウド保存、スマホ/PC間の自動同期、共同編集</span>
           </div>
+        </div>
+      </article>
+      <article className="panel">
+        <div className="record-head">
+          <div>
+            <h2>詳細設定</h2>
+            <p className="muted">フォーム作成・回答管理・応募期間管理は、今は通常運用では使わない旧/将来用の機能としてここに退避しています。</p>
+          </div>
+        </div>
+        <div className="advanced-actions">
+          <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />フォーム管理</button>
+          <button className="secondary" onClick={() => setActive("responses")}><ClipboardCopy size={16} />回答管理</button>
+          <button className="secondary" onClick={() => setActive("periods")}><CalendarDays size={16} />応募期間管理</button>
         </div>
       </article>
       <article className="panel">
