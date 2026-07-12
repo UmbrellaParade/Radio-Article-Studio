@@ -834,7 +834,36 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
   const renderTrackQuestionFields = (question) => {
     const trackFields = normalizeTrackFields(question.trackFields);
     const audioField = trackFields.find((field) => field.type === "audio");
-    const detailFields = trackFields.filter((field) => field.type !== "audio");
+    const audioUrlField = trackFields.find((field) => field.type === "audioUrl");
+    const detailFields = trackFields.filter((field) => field.type !== "audio" && (audioField ? field.type !== "audioUrl" : true));
+
+    const renderAudioUrlField = (field) => {
+      const audioUrl = String(answers[question.id]?.audioUrl ?? "").trim();
+      const canOpenAudioUrl = isWebUrl(audioUrl);
+      return (
+        <label className="track-audio-url-field" key={field.type}>
+          <span>{field.label}</span>
+          <div className="track-audio-url-row">
+            <input
+              type="url"
+              placeholder={field.placeholder || ""}
+              value={answers[question.id]?.audioUrl ?? ""}
+              onChange={(event) => updateTrackAnswer(question.id, { audioUrl: event.target.value })}
+            />
+            {canOpenAudioUrl ? (
+              <a className="secondary" href={audioUrl} target="_blank" rel="noreferrer">
+                <Link size={16} />URLを開く
+              </a>
+            ) : (
+              <button className="secondary" type="button" disabled>
+                <Link size={16} />URLを開く
+              </button>
+            )}
+          </div>
+          <small>{field.help || `フォーム直送できない大きい音源は、共有URLを貼ってください。`}</small>
+        </label>
+      );
+    };
 
     const renderDetailField = (field) => {
       if (field.type === "title") {
@@ -885,18 +914,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
         );
       }
       if (field.type === "audioUrl") {
-        return (
-          <label key={field.type}>
-            <span>{field.label}</span>
-            <input
-              type="url"
-              placeholder={field.placeholder || ""}
-              value={answers[question.id]?.audioUrl ?? ""}
-              onChange={(event) => updateTrackAnswer(question.id, { audioUrl: event.target.value })}
-            />
-            <small>{field.help || `フォーム直送できない大きい音源は、共有URLを貼ってください。`}</small>
-          </label>
-        );
+        return renderAudioUrlField(field);
       }
       return null;
     };
@@ -927,6 +945,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               </p>
             )}
             <TrackPreview track={answers[question.id]} />
+            {audioUrlField && renderAudioUrlField(audioUrlField)}
             {audioField.note && <p className="hint-text track-entry-help">{audioField.note}</p>}
           </div>
         )}

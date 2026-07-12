@@ -1101,6 +1101,17 @@ textarea {
   gap: 10px;
 }
 
+.track-audio-url-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.track-audio-url-row .secondary {
+  white-space: nowrap;
+}
+
 .track-question-fields label span {
   color: #6b6175;
   font-size: 12px;
@@ -2330,6 +2341,10 @@ textarea {
   }
 
   .share-url-row {
+    grid-template-columns: 1fr;
+  }
+
+  .track-audio-url-row {
     grid-template-columns: 1fr;
   }
 

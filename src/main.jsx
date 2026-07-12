@@ -2868,7 +2868,7 @@ function Forms({
                             </summary>
                             <div className="track-field-editor-head">
                               <div>
-                                <span>回答フォームではこの順番で表示され、音源プレビューは音源アップロードの直下に出ます。</span>
+                                <span>回答フォームではこの順番を基本に表示されます。音源プレビューと大容量音源URLは音源アップロードの直下にまとまります。</span>
                               </div>
                               <div className="track-field-editor-actions">
                                 <button className="secondary" onClick={() => saveTrackDefault(form.id, question.id)}>
