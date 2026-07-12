@@ -306,6 +306,34 @@ const makeImagePreviewUrl = (url = "") => {
   return trimmed;
 };
 
+const makeCanvasImageProxyUrl = (url = "") => {
+  const trimmed = String(url).trim();
+  if (!isWebUrl(trimmed) || /(?:^|\/\/)(?:images\.weserv\.nl|wsrv\.nl)\//i.test(trimmed)) return "";
+  const withoutProtocol = trimmed.replace(/^https?:\/\//i, "");
+  return `https://images.weserv.nl/?url=${encodeURIComponent(withoutProtocol)}`;
+};
+
+const getCanvasImageSourceCandidates = (src = "") => {
+  const trimmed = String(src || "").trim();
+  const candidates = [];
+  const add = (value) => {
+    const candidate = String(value || "").trim();
+    if (candidate && !candidates.includes(candidate)) candidates.push(candidate);
+  };
+  add(trimmed);
+  if (!trimmed || trimmed.startsWith("data:")) return candidates;
+
+  const previewUrl = makeImagePreviewUrl(trimmed);
+  add(previewUrl);
+  const driveFileId = getGoogleDriveFileId(trimmed);
+  if (driveFileId) {
+    add(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(driveFileId)}`);
+  }
+
+  [...candidates].forEach((candidate) => add(makeCanvasImageProxyUrl(candidate)));
+  return candidates;
+};
+
 const sanitizeDownloadName = (value = "") =>
   String(value)
     .trim()
@@ -471,9 +499,9 @@ const THUMBNAIL_ICON_LAYOUT_PRESETS = [
     id: "single",
     name: "1人用",
     templates: {
-      article16x9: { iconX: 50, iconY: 76, iconSize: 24, iconSlots: [{ x: 50, y: 76, size: 24 }], guestNameVisible: true, guestNameX: 50, guestNameY: 90, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 41, guestBadgeY: 77, guestBadgeSize: 10 },
-      standfm1x1: { iconX: 50, iconY: 81, iconSize: 22, iconSlots: [{ x: 50, y: 81, size: 22 }], guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 81, guestBadgeSize: 9 },
-      stream9x16: { iconX: 50, iconY: 77, iconSize: 27, iconSlots: [{ x: 50, y: 77, size: 27 }], guestNameVisible: true, guestNameX: 50, guestNameY: 88, guestNameSize: 4, guestBadgeVisible: true, guestBadgeX: 39, guestBadgeY: 78, guestBadgeSize: 8 }
+      article16x9: { iconX: 50, iconY: 76, iconSize: 23, iconSlots: [{ x: 50, y: 76, size: 23 }], guestNameVisible: true, guestNameX: 50, guestNameY: 93, guestNameSize: 7, guestBadgeVisible: true, guestBadgeX: 42, guestBadgeY: 71, guestBadgeSize: 16 },
+      standfm1x1: { iconX: 50, iconY: 79, iconSize: 18, iconSlots: [{ x: 50, y: 79, size: 18 }], guestNameVisible: true, guestNameX: 50, guestNameY: 92, guestNameSize: 5, guestBadgeVisible: true, guestBadgeX: 40, guestBadgeY: 73, guestBadgeSize: 12 },
+      stream9x16: { iconX: 50, iconY: 75, iconSize: 34, iconSlots: [{ x: 50, y: 75, size: 34 }], guestNameVisible: true, guestNameX: 50, guestNameY: 91, guestNameSize: 8, guestBadgeVisible: true, guestBadgeX: 31, guestBadgeY: 70, guestBadgeSize: 19 }
     }
   },
   {
@@ -496,7 +524,7 @@ const THUMBNAIL_ICON_LAYOUT_PRESETS = [
   }
 ];
 
-const THUMBNAIL_LAYOUT_PRESET_VERSION = 2;
+const THUMBNAIL_LAYOUT_PRESET_VERSION = 3;
 const getIconLayoutPresetTemplates = (preset) => preset?.templates ?? THUMBNAIL_ICON_LAYOUT_PRESETS[0].templates;
 
 const applyIconLayoutPresetToTemplates = (templates = defaultThumbnailStudio.templates, preset) => {
@@ -2014,7 +2042,10 @@ function migrateData(input) {
   const rawThumbnailStudio = input.thumbnailStudio ?? {};
   const activeLayoutPresetId = rawThumbnailStudio.activeLayoutPreset ?? defaultThumbnailStudio.activeLayoutPreset;
   const layoutPresetOverrides = rawThumbnailStudio.layoutPresetOverrides ?? {};
+  const customLayoutPresets = rawThumbnailStudio.customLayoutPresets ?? [];
   const builtInLayoutPreset = THUMBNAIL_ICON_LAYOUT_PRESETS.find((preset) => preset.id === activeLayoutPresetId);
+  const storedActiveLayoutPreset =
+    layoutPresetOverrides[activeLayoutPresetId] ?? customLayoutPresets.find((preset) => preset.id === activeLayoutPresetId);
   const hasBuiltInLayoutOverride = Boolean(layoutPresetOverrides[activeLayoutPresetId]);
   const normalizedThumbnailTemplates = Object.fromEntries(
     THUMBNAIL_PRESETS.map((preset) => [
@@ -2029,6 +2060,8 @@ function migrateData(input) {
     Boolean(builtInLayoutPreset) && !hasBuiltInLayoutOverride && rawThumbnailStudio.layoutPresetVersion !== THUMBNAIL_LAYOUT_PRESET_VERSION;
   const thumbnailTemplates = shouldRefreshBuiltInLayout
     ? applyIconLayoutPresetToTemplates(normalizedThumbnailTemplates, builtInLayoutPreset)
+    : storedActiveLayoutPreset
+      ? applyIconLayoutPresetToTemplates(normalizedThumbnailTemplates, storedActiveLayoutPreset)
     : normalizedThumbnailTemplates;
 
   return {
@@ -2067,7 +2100,7 @@ function migrateData(input) {
       guestIcons: normalizeGuestIconList(rawThumbnailStudio.guestIcon, rawThumbnailStudio.guestIcons),
       activeLayoutPreset: activeLayoutPresetId,
       layoutPresetOverrides,
-      customLayoutPresets: rawThumbnailStudio.customLayoutPresets ?? [],
+      customLayoutPresets,
       generated: shouldRefreshBuiltInLayout ? {} : rawThumbnailStudio.generated ?? {},
       autoGenerateRequestedAt: shouldRefreshBuiltInLayout ? "" : rawThumbnailStudio.autoGenerateRequestedAt ?? ""
     },
@@ -4714,7 +4747,16 @@ const fileToDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
-const loadCanvasImage = (src) =>
+const assertCanvasImageReadable = (image) => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0, 1, 1);
+  canvas.toDataURL("image/png");
+};
+
+const loadCanvasImageSource = (src) =>
   new Promise((resolve, reject) => {
     if (!src) {
       reject(new Error("image-src-missing"));
@@ -4726,6 +4768,21 @@ const loadCanvasImage = (src) =>
     if (!src.startsWith("data:")) image.crossOrigin = "anonymous";
     image.src = src;
   });
+
+const loadCanvasImage = async (src) => {
+  const candidates = getCanvasImageSourceCandidates(src);
+  let lastError = new Error("image-src-missing");
+  for (const candidate of candidates) {
+    try {
+      const image = await loadCanvasImageSource(candidate);
+      assertCanvasImageReadable(image);
+      return image;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
 
 function drawCoverAt(ctx, image, x, y, width, height, crop = {}) {
   const cropX = clampNumber(crop.cropX, 50, 0, 100);
