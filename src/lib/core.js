@@ -2044,6 +2044,12 @@ export const formatDateRange = (startDate = "", endDate = "") => {
   return startDate || endDate || "期間未設定";
 };
 
+export const defaultGoogleForms = [
+  { id: "google_form_guest", name: "ゲスト回アンケートフォーム", url: "", memo: "" },
+  { id: "google_form_listener", name: "リスナー楽曲応募フォーム", url: "", memo: "" },
+  { id: "google_form_kaname", name: "かなめちゃん専用フォーム", url: "", memo: "" }
+];
+
 export const sampleData = {
   settings: {
     obsidianPath: DEFAULT_OBSIDIAN_PATH,
@@ -2066,6 +2072,7 @@ export const sampleData = {
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
   socialPromos: {},
+  googleForms: defaultGoogleForms,
   episodes: [
     {
       id: "ep_yui_2026_07_10",
@@ -2416,6 +2423,26 @@ export function migrateData(input) {
     ])
   );
 
+  const defaultGoogleFormIds = new Set(defaultGoogleForms.map((form) => form.id));
+  const inputGoogleForms = Array.isArray(input.googleForms) ? input.googleForms : [];
+  const inputGoogleFormsById = new Map(
+    inputGoogleForms
+      .filter(Boolean)
+      .map((form, index) => [form.id || `google_form_custom_${index + 1}`, form])
+  );
+  const normalizeGoogleForm = (form, fallback = {}, index = 0) => ({
+    id: form?.id || fallback.id || `google_form_custom_${index + 1}`,
+    name: form?.name || fallback.name || "追加したGoogleフォーム",
+    url: form?.url || "",
+    memo: form?.memo || ""
+  });
+  const googleForms = [
+    ...defaultGoogleForms.map((form) => normalizeGoogleForm(inputGoogleFormsById.get(form.id), form)),
+    ...inputGoogleForms
+      .filter((form) => form && !defaultGoogleFormIds.has(form.id))
+      .map((form, index) => normalizeGoogleForm(form, {}, index))
+  ];
+
   const settings = { ...sampleData.settings, ...(input.settings ?? {}) };
   if (!settings.bellboXHandle) settings.bellboXHandle = DEFAULT_BELLBO_X_HANDLE;
   if (!settings.kanameXHandle) settings.kanameXHandle = DEFAULT_KANAME_X_HANDLE;
@@ -2513,6 +2540,7 @@ export function migrateData(input) {
       autoGenerateRequestedAt: shouldRefreshBuiltInLayout ? "" : rawThumbnailStudio.autoGenerateRequestedAt ?? ""
     },
     episodes,
+    googleForms,
     forms,
     formPresets,
     formPresetOverrides,

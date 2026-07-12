@@ -268,7 +268,7 @@ const MAIN_NAV_ITEMS = [
   ["dashboard", "ダッシュボード", Radio],
   ["imports", "取り込み", Upload],
   ["episodes", "放送回", CalendarDays],
-  ["forms", "フォーム", Send],
+  ["forms", "Googleフォーム", Send],
   ["responses", "回答", ClipboardCopy],
   ["tracks", "楽曲", Music],
   ["assets", "素材", Image],
@@ -280,6 +280,8 @@ const MAIN_NAV_ITEMS = [
 const MAIN_NAV_KEYS = new Set(MAIN_NAV_ITEMS.map(([key]) => key));
 const UI_STATE_KEY = `${STORAGE_KEY}:ui`;
 const formAnchorId = (formId) => `form-section-${formId}`;
+const googleFormAnchorId = (formId) => `google-form-section-${formId}`;
+const DEFAULT_GOOGLE_FORM_IDS = new Set(["google_form_guest", "google_form_listener", "google_form_kaname"]);
 
 const getTrackFieldDefaults = (settings = {}) => normalizeTrackFields(settings.trackFieldDefaults);
 
@@ -753,6 +755,29 @@ function App() {
       }
     ]);
     setActive("forms");
+  };
+
+  const addGoogleForm = () => {
+    updateData("googleForms", (googleForms = []) => [
+      ...googleForms,
+      {
+        id: newId("gform"),
+        name: "追加したGoogleフォーム",
+        url: "",
+        memo: ""
+      }
+    ]);
+    setActive("forms");
+  };
+
+  const patchGoogleForm = (formId, patch) => {
+    updateData("googleForms", (googleForms = []) =>
+      googleForms.map((form) => (form.id === formId ? { ...form, ...patch } : form))
+    );
+  };
+
+  const removeGoogleForm = (formId) => {
+    updateData("googleForms", (googleForms = []) => googleForms.filter((form) => form.id !== formId));
   };
 
   const addFormFromPreset = (preset) => {
@@ -1724,7 +1749,7 @@ ${socialRows || "-"}
               <span>{selectedEpisode.status}</span>
             </div>
           )}
-          <SideNavigator active={active} setActive={setActive} forms={data.forms} />
+          <SideNavigator active={active} setActive={setActive} googleForms={data.googleForms ?? []} />
         </aside>
 
         <section className="content-panel">
@@ -1763,31 +1788,11 @@ ${socialRows || "-"}
             />
           )}
           {active === "forms" && (
-            <Forms
-              forms={data.forms}
-              formPresets={data.formPresets ?? []}
-              formPresetOverrides={data.formPresetOverrides ?? {}}
-              settings={data.settings}
-              patchItem={patchItem}
-              addForm={addForm}
-              addFormFromPreset={addFormFromPreset}
-              saveFormPreset={saveFormPreset}
-              removeFormPreset={removeFormPreset}
-              overwriteBuiltInFormPreset={overwriteBuiltInFormPreset}
-              resetBuiltInFormPreset={resetBuiltInFormPreset}
-              removeFormWithBackup={removeFormWithBackup}
-              addQuestion={addQuestion}
-              patchQuestion={patchQuestion}
-              moveQuestion={moveQuestion}
-              patchTrackField={patchTrackField}
-              moveTrackField={moveTrackField}
-              addTrackField={addTrackField}
-              removeTrackField={removeTrackField}
-              resetTrackFields={resetTrackFields}
-              saveTrackFieldsAsDefault={saveTrackFieldsAsDefault}
-              removeQuestion={removeQuestion}
-              collapsibleState={collapsibleState}
-              setCollapsibleOpen={setCollapsibleOpen}
+            <GoogleForms
+              googleForms={data.googleForms ?? []}
+              addGoogleForm={addGoogleForm}
+              patchGoogleForm={patchGoogleForm}
+              removeGoogleForm={removeGoogleForm}
             />
           )}
           {active === "responses" && (
@@ -1859,17 +1864,17 @@ ${socialRows || "-"}
   );
 }
 
-function SideNavigator({ active, setActive, forms = [] }) {
+function SideNavigator({ active, setActive, googleForms = [] }) {
   const goToPanel = (key) => {
     setActive(key);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
   };
 
-  const goToForm = (formId) => {
+  const goToGoogleForm = (formId) => {
     setActive("forms");
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        document.getElementById(formAnchorId(formId))?.scrollIntoView({ behavior: "smooth", block: "start" });
+        document.getElementById(googleFormAnchorId(formId))?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     });
   };
@@ -1883,11 +1888,11 @@ function SideNavigator({ active, setActive, forms = [] }) {
             <Icon size={15} />
             <span>{label}</span>
           </button>
-          {key === "forms" && active === "forms" && forms.length > 0 && (
-            <div className="side-subnav" aria-label="フォーム内目次">
-              {forms.map((form, index) => (
-                <button type="button" key={form.id} onClick={() => goToForm(form.id)}>
-                  <span>{index + 1}. {form.name || "フォーム名未入力"}</span>
+          {key === "forms" && active === "forms" && googleForms.length > 0 && (
+            <div className="side-subnav" aria-label="Googleフォーム内目次">
+              {googleForms.map((form, index) => (
+                <button type="button" key={form.id} onClick={() => goToGoogleForm(form.id)}>
+                  <span>{index + 1}. {form.name || "Googleフォーム名未入力"}</span>
                 </button>
               ))}
             </div>
@@ -2531,6 +2536,88 @@ function ApplicationPeriods({
                   </label>
                 </div>
               </details>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GoogleForms({ googleForms = [], addGoogleForm, patchGoogleForm, removeGoogleForm }) {
+  const [copiedFormId, setCopiedFormId] = useState("");
+
+  const copyUrl = async (form) => {
+    const url = String(form.url || "").trim();
+    if (!url) return;
+    await navigator.clipboard.writeText(url);
+    setCopiedFormId(form.id);
+    window.setTimeout(() => setCopiedFormId(""), 1800);
+  };
+
+  return (
+    <div className="view-stack">
+      <SectionTitle
+        title="Googleフォーム管理"
+        subtitle="実際に使うGoogleフォームのURLを登録して、このツールからすぐ開けるようにします。"
+        action={<button className="primary" onClick={addGoogleForm}><Plus size={16} />Googleフォーム追加</button>}
+      />
+      <p className="hint-text">
+        Googleフォーム側の「送信」から共有リンクをコピーして、外部URLに貼り付けてください。自前フォーム作成画面は非表示にしています。
+      </p>
+      <div className="records">
+        {googleForms.map((form, index) => {
+          const url = String(form.url || "").trim();
+          const canOpen = isWebUrl(url);
+          const isDefault = DEFAULT_GOOGLE_FORM_IDS.has(form.id);
+          return (
+            <article className="record google-form-record" key={form.id} id={googleFormAnchorId(form.id)}>
+              <div className="record-head compact">
+                <div>
+                  <strong>{index + 1}. {form.name || "Googleフォーム名未入力"}</strong>
+                  <p className="muted">{canOpen ? "URL登録済み" : "URL未登録"}</p>
+                </div>
+                <div className="inline-actions">
+                  {canOpen ? (
+                    <a className="primary" href={url} target="_blank" rel="noreferrer">
+                      <Link size={16} />開く
+                    </a>
+                  ) : (
+                    <button className="primary" disabled>
+                      <Link size={16} />開く
+                    </button>
+                  )}
+                  <button className="secondary" onClick={() => copyUrl(form)} disabled={!url}>
+                    <ClipboardCopy size={16} />{copiedFormId === form.id ? "コピー済み" : "URLコピー"}
+                  </button>
+                  {!isDefault && (
+                    <button className="icon-danger" onClick={() => removeGoogleForm(form.id)} aria-label="Googleフォームを削除">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="form-grid">
+                <Field
+                  label="フォーム名"
+                  value={form.name}
+                  onChange={(value) => patchGoogleForm(form.id, { name: value })}
+                  placeholder="例: ゲスト回アンケートフォーム"
+                />
+                <Field
+                  label="外部URL"
+                  value={form.url}
+                  onChange={(value) => patchGoogleForm(form.id, { url: value })}
+                  placeholder="https://docs.google.com/forms/..."
+                  wide
+                />
+                <TextArea
+                  label="メモ"
+                  value={form.memo}
+                  onChange={(value) => patchGoogleForm(form.id, { memo: value })}
+                />
+              </div>
+              {url && !canOpen && <p className="hint-text">URLは https:// から始まる形式で登録してください。</p>}
             </article>
           );
         })}
@@ -3423,11 +3510,11 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
         <div className="record-head">
           <div>
             <h2>詳細設定</h2>
-            <p className="muted">フォーム作成・回答管理・応募期間管理は上部ナビからも開けます。</p>
+            <p className="muted">Googleフォーム管理・回答管理・応募期間管理は上部ナビからも開けます。</p>
           </div>
         </div>
         <div className="advanced-actions">
-          <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />フォーム管理</button>
+          <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />Googleフォーム管理</button>
           <button className="secondary" onClick={() => setActive("responses")}><ClipboardCopy size={16} />回答管理</button>
           <button className="secondary" onClick={() => setActive("periods")}><CalendarDays size={16} />応募期間管理</button>
         </div>

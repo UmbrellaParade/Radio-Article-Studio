@@ -615,6 +615,12 @@ h1 {
   padding: 16px;
 }
 
+.google-form-record {
+  scroll-margin-top: 18px;
+  border-left: 7px solid #0f9f86;
+  background: linear-gradient(90deg, rgba(15, 159, 134, .12), rgba(255, 253, 248, 0) 42%), #fffdf8;
+}
+
 .record.selected {
   outline: 2px solid #14b6c8;
 }
