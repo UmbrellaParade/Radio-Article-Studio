@@ -2045,9 +2045,9 @@ export const formatDateRange = (startDate = "", endDate = "") => {
 };
 
 export const defaultGoogleForms = [
-  { id: "google_form_guest", name: "ゲスト回アンケートフォーム", url: "", memo: "", color: "#8bd7df" },
-  { id: "google_form_listener", name: "リスナー楽曲応募フォーム", url: "", memo: "", color: "#f3c96b" },
-  { id: "google_form_kaname", name: "かなめちゃん専用フォーム", url: "", memo: "", color: "#bfa7f2" }
+  { id: "google_form_guest", name: "ゲスト回アンケートフォーム", url: "", editUrl: "", memo: "", color: "#8bd7df" },
+  { id: "google_form_listener", name: "リスナー楽曲応募フォーム", url: "", editUrl: "", memo: "", color: "#f3c96b" },
+  { id: "google_form_kaname", name: "かなめちゃん専用フォーム", url: "", editUrl: "", memo: "", color: "#bfa7f2" }
 ];
 
 export const sampleData = {
@@ -2434,6 +2434,7 @@ export function migrateData(input) {
     id: form?.id || fallback.id || `google_form_custom_${index + 1}`,
     name: form?.name || fallback.name || "追加したGoogleフォーム",
     url: form?.url || "",
+    editUrl: form?.editUrl || form?.adminUrl || "",
     memo: form?.memo || "",
     color: normalizeFormColor(form?.color, fallback.color || FORM_COLOR_PALETTE[index % FORM_COLOR_PALETTE.length])
   });

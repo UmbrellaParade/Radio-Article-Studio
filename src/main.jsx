@@ -764,6 +764,7 @@ function App() {
         id: newId("gform"),
         name: "追加したGoogleフォーム",
         url: "",
+        editUrl: "",
         memo: "",
         color: normalizeFormColor(FORM_COLOR_PALETTE[googleForms.length % FORM_COLOR_PALETTE.length])
       }
@@ -2585,7 +2586,9 @@ function GoogleForms({
       <div className="records">
         {googleForms.map((form, index) => {
           const url = String(form.url || "").trim();
+          const editUrl = String(form.editUrl || "").trim();
           const canOpen = isWebUrl(url);
+          const canOpenEditUrl = isWebUrl(editUrl);
           const isDefault = DEFAULT_GOOGLE_FORM_IDS.has(form.id);
           const color = normalizeFormColor(form.color, FORM_COLOR_PALETTE[index % FORM_COLOR_PALETTE.length]);
           return (
@@ -2662,6 +2665,33 @@ function GoogleForms({
                   value={form.memo}
                   onChange={(value) => patchGoogleForm(form.id, { memo: value })}
                 />
+              </PersistentDetails>
+              <PersistentDetails {...detailsProps(`googleForm:${form.id}:editUrl`)} className="collapsible-section">
+                <summary><strong>制作先URL</strong><span>{canOpenEditUrl ? "登録済み" : "未登録"}</span></summary>
+                <p className="hint-text">
+                  自分がGoogleフォームを編集するためのURLです。外部へ送る共有URLとは分けて保管します。
+                </p>
+                <div className="form-grid">
+                  <Field
+                    label="制作先URL（編集用）"
+                    value={form.editUrl || ""}
+                    onChange={(value) => patchGoogleForm(form.id, { editUrl: value })}
+                    placeholder="https://docs.google.com/forms/d/.../edit"
+                    wide
+                  />
+                </div>
+                <div className="inline-actions">
+                  {canOpenEditUrl ? (
+                    <a className="secondary" href={editUrl} target="_blank" rel="noreferrer">
+                      <Link size={16} />制作先を開く
+                    </a>
+                  ) : (
+                    <button className="secondary" disabled>
+                      <Link size={16} />制作先を開く
+                    </button>
+                  )}
+                </div>
+                {editUrl && !canOpenEditUrl && <p className="hint-text">制作先URLは https:// から始まる形式で登録してください。</p>}
               </PersistentDetails>
             </article>
           );
