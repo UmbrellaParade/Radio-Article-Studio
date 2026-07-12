@@ -616,9 +616,12 @@ h1 {
 }
 
 .google-form-record {
+  display: grid;
+  gap: 12px;
   scroll-margin-top: 18px;
-  border-left: 7px solid #0f9f86;
-  background: linear-gradient(90deg, rgba(15, 159, 134, .12), rgba(255, 253, 248, 0) 42%), #fffdf8;
+  border-color: var(--form-color-mid, #ded2c2);
+  border-left: 7px solid var(--form-color, #0f9f86);
+  background: linear-gradient(90deg, var(--form-color-soft, rgba(15, 159, 134, .12)), rgba(255, 253, 248, 0) 42%), #fffdf8;
 }
 
 .record.selected {

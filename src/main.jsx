@@ -764,7 +764,8 @@ function App() {
         id: newId("gform"),
         name: "追加したGoogleフォーム",
         url: "",
-        memo: ""
+        memo: "",
+        color: normalizeFormColor(FORM_COLOR_PALETTE[googleForms.length % FORM_COLOR_PALETTE.length])
       }
     ]);
     setActive("forms");
@@ -1793,6 +1794,8 @@ ${socialRows || "-"}
               addGoogleForm={addGoogleForm}
               patchGoogleForm={patchGoogleForm}
               removeGoogleForm={removeGoogleForm}
+              collapsibleState={collapsibleState}
+              setCollapsibleOpen={setCollapsibleOpen}
             />
           )}
           {active === "responses" && (
@@ -2544,8 +2547,22 @@ function ApplicationPeriods({
   );
 }
 
-function GoogleForms({ googleForms = [], addGoogleForm, patchGoogleForm, removeGoogleForm }) {
+function GoogleForms({
+  googleForms = [],
+  addGoogleForm,
+  patchGoogleForm,
+  removeGoogleForm,
+  collapsibleState,
+  setCollapsibleOpen
+}) {
   const [copiedFormId, setCopiedFormId] = useState("");
+
+  const detailsProps = (persistKey, defaultOpen = false) => ({
+    persistKey,
+    defaultOpen,
+    collapsibleState,
+    setCollapsibleOpen
+  });
 
   const copyUrl = async (form) => {
     const url = String(form.url || "").trim();
@@ -2570,8 +2587,9 @@ function GoogleForms({ googleForms = [], addGoogleForm, patchGoogleForm, removeG
           const url = String(form.url || "").trim();
           const canOpen = isWebUrl(url);
           const isDefault = DEFAULT_GOOGLE_FORM_IDS.has(form.id);
+          const color = normalizeFormColor(form.color, FORM_COLOR_PALETTE[index % FORM_COLOR_PALETTE.length]);
           return (
-            <article className="record google-form-record" key={form.id} id={googleFormAnchorId(form.id)}>
+            <article className="record google-form-record" key={form.id} id={googleFormAnchorId(form.id)} style={getFormColorStyle(color)}>
               <div className="record-head compact">
                 <div>
                   <strong>{index + 1}. {form.name || "Googleフォーム名未入力"}</strong>
@@ -2611,13 +2629,40 @@ function GoogleForms({ googleForms = [], addGoogleForm, patchGoogleForm, removeG
                   placeholder="https://docs.google.com/forms/..."
                   wide
                 />
+              </div>
+              {url && !canOpen && <p className="hint-text">URLは https:// から始まる形式で登録してください。</p>}
+              <PersistentDetails {...detailsProps(`googleForm:${form.id}:color`)} className="collapsible-section">
+                <summary><strong>表示色</strong><span>{color}</span></summary>
+                <div className="form-grid">
+                  <label className="field">
+                    <span>フォーム色</span>
+                    <div className="color-control-row">
+                      <input type="color" value={color} onChange={(event) => patchGoogleForm(form.id, { color: normalizeFormColor(event.target.value) })} />
+                      <input value={form.color || ""} onChange={(event) => patchGoogleForm(form.id, { color: event.target.value })} onBlur={(event) => patchGoogleForm(form.id, { color: normalizeFormColor(event.target.value, color) })} />
+                    </div>
+                  </label>
+                  <div className="form-color-swatches wide" aria-label="Googleフォーム色プリセット">
+                    {FORM_COLOR_PALETTE.map((presetColor) => (
+                      <button
+                        type="button"
+                        key={presetColor}
+                        className={color === presetColor ? "active" : ""}
+                        style={{ background: presetColor }}
+                        onClick={() => patchGoogleForm(form.id, { color: presetColor })}
+                        aria-label={`Googleフォーム色 ${presetColor}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </PersistentDetails>
+              <PersistentDetails {...detailsProps(`googleForm:${form.id}:memo`)} className="collapsible-section">
+                <summary><strong>メモ</strong><span>{form.memo ? "入力あり" : "未入力"}</span></summary>
                 <TextArea
                   label="メモ"
                   value={form.memo}
                   onChange={(value) => patchGoogleForm(form.id, { memo: value })}
                 />
-              </div>
-              {url && !canOpen && <p className="hint-text">URLは https:// から始まる形式で登録してください。</p>}
+              </PersistentDetails>
             </article>
           );
         })}
