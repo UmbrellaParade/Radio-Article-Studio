@@ -581,6 +581,10 @@ h1 {
   gap: 6px;
 }
 
+.field-disabled {
+  opacity: 0.45;
+}
+
 .field.wide {
   grid-column: 1 / -1;
 }

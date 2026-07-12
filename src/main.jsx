@@ -263,17 +263,41 @@ function App() {
   const [syncState, setSyncState] = useState({ busy: false, message: "" });
   const [packExportMessage, setPackExportMessage] = useState("");
   const autoThumbnailGenerationRef = useRef("");
+  const pendingSaveRef = useRef(null);
+
+  // ブラウザ保存はLZ圧縮が重く、スライダー操作のたびに実行するとUIがカクつくため
+  // 350msデバウンスする。タブを閉じる/離れる時はpagehideで即時保存する。
+  useEffect(() => {
+    if (sharedPayload || restorePayload) {
+      pendingSaveRef.current = null;
+      return undefined;
+    }
+    const persist = () => {
+      pendingSaveRef.current = null;
+      try {
+        saveStoredData(data);
+        setStorageWarning("");
+      } catch (error) {
+        setStorageWarning("ブラウザ保存に失敗しました。再読み込みすると直前の変更が戻る可能性があります。設定からJSONを書き出してください。");
+        console.warn("Radio Article Studio: browser storage failed. Export JSON to preserve current data.", error);
+      }
+    };
+    pendingSaveRef.current = persist;
+    const timer = window.setTimeout(persist, 350);
+    return () => window.clearTimeout(timer);
+  }, [data, sharedPayload, restorePayload]);
 
   useEffect(() => {
-    if (sharedPayload || restorePayload) return;
-    try {
-      saveStoredData(data);
-      setStorageWarning("");
-    } catch (error) {
-      setStorageWarning("ブラウザ保存に失敗しました。再読み込みすると直前の変更が戻る可能性があります。設定からJSONを書き出してください。");
-      console.warn("Radio Article Studio: browser storage failed. Export JSON to preserve current data.", error);
-    }
-  }, [data, sharedPayload, restorePayload]);
+    const flushPendingSave = () => {
+      pendingSaveRef.current?.();
+    };
+    window.addEventListener("pagehide", flushPendingSave);
+    document.addEventListener("visibilitychange", flushPendingSave);
+    return () => {
+      window.removeEventListener("pagehide", flushPendingSave);
+      document.removeEventListener("visibilitychange", flushPendingSave);
+    };
+  }, []);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -1277,7 +1301,11 @@ ${socialRows || "-"}
     }
     setSyncState({ busy: true, message: "新着回答を確認しています…" });
     try {
-      const result = await getFromGasEndpoint(endpointUrl, { action: "listResponses", token });
+      const result = await getFromGasEndpoint(endpointUrl, {
+        action: "listResponses",
+        token,
+        folder: String(data.settings.responseDriveFolderUrl || "").trim()
+      });
       const payloads = Array.isArray(result.responses) ? result.responses : [];
       const importedCount = applyResponsePayloads(payloads);
       updateSettings({ lastResponseSyncAt: result.now || new Date().toISOString() });
@@ -2722,7 +2750,8 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptのWebアプリURL" wide />
           <p className="hint-text wide">docs/google-apps-script/Code.gs をApps Scriptにデプロイして、WebアプリURLをここに貼ります。フォーム送信の受信、新着回答の同期、短いURL公開がこの1本で動きます。</p>
           <Field label="回答同期トークン" value={settings.responseSyncToken || ""} onChange={(value) => updateSettings({ responseSyncToken: value })} placeholder="Apps ScriptのSECRET_TOKENと同じ文字列" wide />
-          <Field label="回答保存先Google DriveフォルダーURL（控え）" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
+          <Field label="回答保存先Google DriveフォルダーURL" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
+          <p className="hint-text wide">回答JSON・音源・画像はこのフォルダーに保存されます。変更したら、使用中フォームの「短いURLを公開/更新」を押し直すと新しい保存先が回答者側にも反映されます。空欄の場合はApps Script側のFOLDER_IDに保存します。</p>
           <Field label="サムネDrive保存Webhook URL" value={settings.thumbnailDriveEndpointUrl || ""} onChange={(value) => updateSettings({ thumbnailDriveEndpointUrl: value })} placeholder="サムネPNG保存用のGoogle Apps Script WebアプリURL" wide />
           <Field label="サムネ保存先Google DriveフォルダーURL" value={settings.thumbnailDriveFolderUrl || ""} onChange={(value) => updateSettings({ thumbnailDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
           <TextArea label="音源保存先メモ" value={settings.audioSaveMemo || ""} onChange={(value) => updateSettings({ audioSaveMemo: value })} />

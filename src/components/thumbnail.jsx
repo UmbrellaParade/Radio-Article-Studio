@@ -292,6 +292,49 @@ export function GuestIconCropPreview({ icon, label }) {
 }
 
 
+export function GuestIconCropCard({ icon, index, onPatch }) {
+  const [aspect, setAspect] = useState(1);
+
+  useEffect(() => {
+    let active = true;
+    if (!icon?.dataUrl) return undefined;
+    loadCanvasImage(icon.dataUrl)
+      .then((image) => {
+        if (active && image.width && image.height) setAspect(image.width / image.height);
+      })
+      .catch(() => {
+        // 読み込めない画像は正方形とみなす（ヒント表示の判定にしか使わない）
+      });
+    return () => {
+      active = false;
+    };
+  }, [icon?.dataUrl]);
+
+  // 切り抜き枠は正方形（円形クリップ）。cover配置ではみ出しがある軸だけ位置調整が効く。
+  const zoomedIn = Number(icon.cropZoom || 100) > 100;
+  const canPanX = zoomedIn || aspect > 1.001;
+  const canPanY = zoomedIn || aspect < 0.999;
+
+  return (
+    <div className="icon-crop-card">
+      <div className="icon-crop-preview">
+        <GuestIconCropPreview icon={icon} label={`切り抜き確認 ${index + 1}`} />
+      </div>
+      <div className="icon-crop-controls">
+        <strong>{index + 1}. {icon.name}</strong>
+        <SliderField label="切り抜き 拡大率" value={icon.cropZoom} onChange={(value) => onPatch(index, { cropZoom: value })} min="100" max="300" />
+        <SliderField label="切り抜き 横位置" value={icon.cropX} onChange={(value) => onPatch(index, { cropX: value })} disabled={!canPanX} />
+        <SliderField label="切り抜き 縦位置" value={icon.cropY} onChange={(value) => onPatch(index, { cropY: value })} disabled={!canPanY} />
+        {(!canPanX || !canPanY) && (
+          <p className="hint-text">
+            アイコンが枠にぴったり収まっているため、{!canPanX && !canPanY ? "位置" : !canPanX ? "横位置" : "縦位置"}を動かす余白がありません。先に「拡大率」を上げると位置を調整できます。
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate, settings = {} }) {
   const [message, setMessage] = useState("");
   const [layoutPresetName, setLayoutPresetName] = useState("");
@@ -1051,17 +1094,7 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
           </div>
           <div className="icon-crop-list">
             {guestIcons.map((icon, index) => (
-              <div className="icon-crop-card" key={`${icon.id}-${index}`}>
-                <div className="icon-crop-preview">
-                  <GuestIconCropPreview icon={icon} label={`切り抜き確認 ${index + 1}`} />
-                </div>
-                <div className="icon-crop-controls">
-                  <strong>{index + 1}. {icon.name}</strong>
-                  <SliderField label="切り抜き 横位置" value={icon.cropX} onChange={(value) => patchGuestIconCrop(index, { cropX: value })} />
-                  <SliderField label="切り抜き 縦位置" value={icon.cropY} onChange={(value) => patchGuestIconCrop(index, { cropY: value })} />
-                  <SliderField label="切り抜き 拡大率" value={icon.cropZoom} onChange={(value) => patchGuestIconCrop(index, { cropZoom: value })} min="100" max="300" />
-                </div>
-              </div>
+              <GuestIconCropCard icon={icon} index={index} onPatch={patchGuestIconCrop} key={`${icon.id}-${index}`} />
             ))}
           </div>
           {guestIcons.some((icon) => !String(icon.dataUrl || "").startsWith("data:")) && (

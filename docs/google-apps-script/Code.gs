@@ -11,7 +11,8 @@
 //
 // セットアップ手順は docs/google-drive-response-endpoint.md を参照。
 
-// 回答保存先のGoogle DriveフォルダーID
+// 回答保存先のGoogle DriveフォルダーID（既定値）。
+// ツールの設定「回答保存先Google DriveフォルダーURL」を入れると、そちらが優先される。
 const FOLDER_ID = "1FnQ0knOIUKnTOYisf7JdKJNORsTgDwza";
 
 // ツールの設定画面「回答同期トークン」と同じ文字列にする（好きな合言葉でOK）
@@ -78,7 +79,19 @@ function requireToken(token) {
   }
 }
 
-function getRootFolder() {
+function getRootFolder(folderRef) {
+  const raw = String(folderRef || "").trim();
+  if (raw) {
+    // DriveフォルダーURL（.../folders/{ID}）でも生のIDでも受け付ける
+    const idMatch = raw.match(/[-\w]{25,}/);
+    if (idMatch) {
+      try {
+        return DriveApp.getFolderById(idMatch[0]);
+      } catch (error) {
+        throw new Error("指定のDriveフォルダーを開けません。URLと共有設定を確認してください: " + raw);
+      }
+    }
+  }
   return DriveApp.getFolderById(FOLDER_ID);
 }
 
@@ -108,7 +121,7 @@ function nowStamp() {
 // ---- 回答受信 ----
 
 function handleSubmitResponse(payload) {
-  const root = getRootFolder();
+  const root = getRootFolder(payload.driveFolderUrl || (payload.submission && payload.submission.driveFolderUrl));
   const response = payload.response || {};
   const stamp = nowStamp();
   const respondent = sanitizeName(response.respondent, "回答者");
@@ -195,7 +208,7 @@ function appendLogRow(root, row) {
 // ---- 回答一覧配信（ツールの「新着回答を同期」） ----
 
 function handleListResponses(params) {
-  const root = getRootFolder();
+  const root = getRootFolder(params.folder);
   const responsesFolder = getOrCreateFolder(root, RESPONSES_DIR);
   const since = params.since ? new Date(params.since) : null;
   const items = [];
@@ -255,7 +268,7 @@ function handleGetForm(params) {
 // ---- サムネPNG保存 ----
 
 function handleSaveThumbnails(payload) {
-  const root = getRootFolder();
+  const root = getRootFolder(payload.driveFolderUrl);
   const folder = getOrCreateFolder(root, THUMBNAILS_DIR);
   const stamp = nowStamp();
   const prefix = sanitizeName(payload.episodeDate || "", "") || stamp;

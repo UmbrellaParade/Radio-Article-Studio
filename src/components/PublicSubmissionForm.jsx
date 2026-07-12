@@ -522,7 +522,11 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     }
     setSubmitBusy(true);
     try {
-      const result = await postToGasEndpoint(endpointUrl, { action: "submitResponse", ...responsePayload });
+      const result = await postToGasEndpoint(endpointUrl, {
+        action: "submitResponse",
+        driveFolderUrl: String(submission.driveFolderUrl || "").trim(),
+        ...responsePayload
+      });
       const savedFiles = Array.isArray(result.savedFiles) ? result.savedFiles.length : 0;
       setSubmitStatus(
         `回答を受け付けました。ありがとうございます！（受付番号: ${result.savedAs || responsePayload.response.id}${savedFiles ? ` / 添付ファイル${savedFiles}件保存済み` : ""}）`

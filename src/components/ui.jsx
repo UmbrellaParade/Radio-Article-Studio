@@ -270,11 +270,11 @@ export function TextArea({ label, value, onChange }) {
   );
 }
 
-export function SliderField({ label, value, onChange, min = "0", max = "100" }) {
+export function SliderField({ label, value, onChange, min = "0", max = "100", disabled = false }) {
   return (
-    <label className="field">
+    <label className={disabled ? "field field-disabled" : "field"}>
       <span>{label}: {value}%</span>
-      <input type="range" min={min} max={max} value={value ?? 50} onChange={(event) => onChange(Number(event.target.value))} />
+      <input type="range" min={min} max={max} value={value ?? 50} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} />
     </label>
   );
 }
