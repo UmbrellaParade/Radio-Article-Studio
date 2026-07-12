@@ -25,6 +25,7 @@ import {
   ZoomIn
 } from "lucide-react";
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "../lib/gas.js";
+import { convertWavFileToMp3, isWavFile } from "../lib/audioConversion.js";
 import {
   STORAGE_KEY,
   STORAGE_COMPRESSED_PREFIX,
@@ -314,6 +315,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
   const [submitStatus, setSubmitStatus] = useState("");
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submissionStatus, setSubmissionStatus] = useState({ loading: false, count: null, error: "" });
+  const [audioConversionStatus, setAudioConversionStatus] = useState({});
   const submissionLimit = normalizeSubmissionLimit(form?.submissionLimit);
   const attachmentLimitMb = normalizeAttachmentLimitMb(form?.attachmentLimitMb);
   const directUploadLimitMb = Math.min(attachmentLimitMb, GAS_DIRECT_UPLOAD_LIMIT_MB);
@@ -545,6 +547,50 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     return false;
   };
 
+  const convertWavIfNeeded = async (file, statusKey) => {
+    if (!isWavFile(file)) {
+      setAudioConversionStatus((current) => {
+        if (!current[statusKey]) return current;
+        const next = { ...current };
+        delete next[statusKey];
+        return next;
+      });
+      return { file, conversion: null };
+    }
+    setAudioConversionStatus((current) => ({
+      ...current,
+      [statusKey]: { message: "WAVをMP3に変換しています...", progress: 0 }
+    }));
+    const conversion = await convertWavFileToMp3(file, (status) => {
+      setAudioConversionStatus((current) => ({
+        ...current,
+        [statusKey]: { message: status.message, progress: status.progress }
+      }));
+    });
+    setAudioConversionStatus((current) => ({
+      ...current,
+      [statusKey]: {
+        message: `MP3変換完了: ${formatFileSizeMb(file.size)} → ${formatFileSizeMb(conversion.file.size)}`,
+        progress: 100
+      }
+    }));
+    return { file: conversion.file, conversion };
+  };
+
+  const makeAudioAnswer = async (file, conversion = null) => ({
+    fileName: file.name,
+    mimeType: file.type || "audio/mpeg",
+    size: file.size,
+    dataUrl: await fileToDataUrl(file),
+    ...(conversion
+      ? {
+          convertedFrom: conversion.originalName,
+          originalSize: conversion.originalSize,
+          mp3BitrateKbps: conversion.bitrateKbps
+        }
+      : {})
+  });
+
   const updateFileAnswer = async (questionId, event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -553,17 +599,12 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       event.target.value = "";
       return;
     }
-    if (!validateAttachmentFile(file, event, "音源ファイル")) return;
     try {
-      const dataUrl = await fileToDataUrl(file);
-      updateAnswer(questionId, {
-        fileName: file.name,
-        mimeType: file.type || (file.name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg"),
-        size: file.size,
-        dataUrl
-      });
-    } catch {
-      setFormError("ファイルを読み込めませんでした。もう一度ファイルを選び直してください。");
+      const converted = await convertWavIfNeeded(file, questionId);
+      if (!validateAttachmentFile(converted.file, event, "音源ファイル")) return;
+      updateAnswer(questionId, await makeAudioAnswer(converted.file, converted.conversion));
+    } catch (error) {
+      setFormError(error?.message || "ファイルを読み込めませんでした。もう一度ファイルを選び直してください。");
       event.target.value = "";
     }
   };
@@ -599,19 +640,14 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       event.target.value = "";
       return;
     }
-    if (!validateAttachmentFile(file, event, "楽曲音源")) return;
     try {
-      const dataUrl = await fileToDataUrl(file);
+      const converted = await convertWavIfNeeded(file, questionId);
+      if (!validateAttachmentFile(converted.file, event, "楽曲音源")) return;
       updateTrackAnswer(questionId, {
-        audio: {
-          fileName: file.name,
-          mimeType: file.type || (file.name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg"),
-          size: file.size,
-          dataUrl
-        }
+        audio: await makeAudioAnswer(converted.file, converted.conversion)
       });
-    } catch {
-      setFormError("音源ファイルを読み込めませんでした。もう一度ファイルを選び直してください。");
+    } catch (error) {
+      setFormError(error?.message || "音源ファイルを読み込めませんでした。もう一度ファイルを選び直してください。");
       event.target.value = "";
     }
   };
@@ -871,9 +907,17 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               <small>
                 {answers[question.id]?.audio?.fileName
                   ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}`
-                  : `${audioField.help || "WAVまたはMP3をアップロードしてください。"}（フォーム直送は${directUploadLimitMb}MBまで）`}
+                  : `${audioField.help || "WAVはフォーム上でMP3に変換して送信します。"}（フォーム直送は${directUploadLimitMb}MBまで）`}
               </small>
             </label>
+            {audioConversionStatus[question.id] && (
+              <p className="hint-text track-entry-help">
+                {audioConversionStatus[question.id].message}
+                {Number.isFinite(audioConversionStatus[question.id].progress)
+                  ? `（${audioConversionStatus[question.id].progress}%）`
+                  : ""}
+              </p>
+            )}
             <TrackPreview track={answers[question.id]} />
             {audioField.note && <p className="hint-text track-entry-help">{audioField.note}</p>}
           </div>
@@ -946,7 +990,10 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                     accept={AUDIO_FILE_ACCEPT}
                     onChange={(event) => updateFileAnswer(question.id, event)}
                   />
-                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `WAVまたはMP3をアップロード（フォーム直送は${directUploadLimitMb}MBまで）`}</small>
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `WAVまたはMP3をアップロード（WAVはMP3に変換 / フォーム直送は${directUploadLimitMb}MBまで）`}</small>
+                  {audioConversionStatus[question.id] && (
+                    <p className="hint-text">{audioConversionStatus[question.id].message}</p>
+                  )}
                 </div>
               ) : question.kind === "image" ? (
                 <div className="upload-field">

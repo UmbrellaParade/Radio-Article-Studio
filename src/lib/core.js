@@ -135,8 +135,8 @@ export const DEFAULT_TRACK_FIELDS = [
     id: "audio",
     type: "audio",
     label: "楽曲をWAVかMP3でアップロード",
-    help: "35MBまでのWAVまたはMP3をアップロードしてください。",
-    note: "35MBを超える音源は、下の大容量音源URLにDriveなどの共有リンクを貼ってください。",
+    help: "WAVはフォーム上でMP3へ変換して送信します。MP3はそのまま送信します。",
+    note: "MP3変換後も35MBを超える音源は、下の大容量音源URLにDriveなどの共有リンクを貼ってください。",
     placeholder: ""
   },
   {
