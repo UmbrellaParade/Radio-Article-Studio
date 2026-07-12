@@ -4966,6 +4966,64 @@ function drawCover(ctx, image, width, height) {
   drawCoverAt(ctx, image, 0, 0, width, height);
 }
 
+function GuestIconCropPreview({ icon, label }) {
+  const canvasRef = useRef(null);
+  const [useFallbackImage, setUseFallbackImage] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const canvas = canvasRef.current;
+    if (!canvas || !icon?.dataUrl) return () => {
+      active = false;
+    };
+
+    const size = 240;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = "#f7efe4";
+    ctx.fillRect(0, 0, size, size);
+    setUseFallbackImage(false);
+
+    loadCanvasImage(icon.dataUrl)
+      .then((image) => {
+        if (!active) return;
+        ctx.clearRect(0, 0, size, size);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        ctx.clip();
+        drawCoverAt(ctx, image, 0, 0, size, size, icon);
+        ctx.restore();
+      })
+      .catch(() => {
+        if (active) setUseFallbackImage(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [icon?.dataUrl, icon?.cropX, icon?.cropY, icon?.cropZoom]);
+
+  return (
+    <span className="icon-crop-canvas-wrap">
+      <canvas ref={canvasRef} aria-label={label} role="img" />
+      {useFallbackImage && (
+        <img
+          src={icon.dataUrl}
+          alt={label}
+          style={{
+            objectPosition: `${icon.cropX}% ${icon.cropY}%`,
+            transform: `scale(${icon.cropZoom / 100})`,
+            transformOrigin: `${icon.cropX}% ${icon.cropY}%`
+          }}
+        />
+      )}
+    </span>
+  );
+}
+
 const isCustomTemplate = (template) => template?.source === "custom";
 const getTemplateSource = (template) => (isCustomTemplate(template) ? template?.dataUrl || "" : template?.assetUrl || "");
 const getNormalizedThumbnailTemplate = (presetKey, template) => ({
@@ -5895,13 +5953,10 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           <div className="registered-image-row">
             <div className="registered-icon-stack">
               {guestIcons.map((icon, index) => (
-                <img
-                  src={icon.dataUrl}
-                  alt={`登録済みゲストアイコン ${index + 1}`}
+                <GuestIconCropPreview
+                  icon={icon}
+                  label={`登録済みゲストアイコン ${index + 1}`}
                   key={`${icon.name}-${index}`}
-                  style={{
-                    objectPosition: `${icon.cropX}% ${icon.cropY}%`
-                  }}
                 />
               ))}
             </div>
@@ -5912,15 +5967,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
             {guestIcons.map((icon, index) => (
               <div className="icon-crop-card" key={`${icon.id}-${index}`}>
                 <div className="icon-crop-preview">
-                  <img
-                    src={icon.dataUrl}
-                    alt={`切り抜き確認 ${index + 1}`}
-                    style={{
-                      objectPosition: `${icon.cropX}% ${icon.cropY}%`,
-                      transform: `scale(${icon.cropZoom / 100})`,
-                      transformOrigin: `${icon.cropX}% ${icon.cropY}%`
-                    }}
-                  />
+                  <GuestIconCropPreview icon={icon} label={`切り抜き確認 ${index + 1}`} />
                 </div>
                 <div className="icon-crop-controls">
                   <strong>{index + 1}. {icon.name}</strong>
