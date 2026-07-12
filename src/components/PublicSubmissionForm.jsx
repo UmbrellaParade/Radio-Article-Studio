@@ -803,7 +803,6 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             <div className="field wide" key={question.id} id={`question-${question.id}`}>
               <span>{question.label}{question.required ? " *" : ""}</span>
               {String(question.help || "").trim() && <p className="question-help">{question.help}</p>}
-              <small>{QUESTION_USE_LABELS[question.use] ?? question.use}</small>
               {question.kind === "file" ? (
                 <div className="upload-field">
                   <input
