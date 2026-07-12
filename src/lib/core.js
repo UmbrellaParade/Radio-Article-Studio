@@ -16,6 +16,7 @@ export const DEFAULT_RESPONSE_ENDPOINT_URL = "";
 export const DEFAULT_RESPONSE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1FnQ0knOIUKnTOYisf7JdKJNORsTgDwza";
 export const DEFAULT_ATTACHMENT_LIMIT_MB = 200;
 export const MAX_ATTACHMENT_LIMIT_MB = 200;
+export const GAS_DIRECT_UPLOAD_LIMIT_MB = 35;
 // 旧コード互換用。公開フォームではフォームごとの添付上限を優先する。
 export const MAX_SUBMISSION_BYTES = DEFAULT_ATTACHMENT_LIMIT_MB * 1024 * 1024;
 export const DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL = "";
@@ -123,6 +124,7 @@ export const QUESTION_KIND_OPTIONS = [
 
 export const TRACK_FIELD_TYPE_OPTIONS = [
   ["audio", "音源アップロード"],
+  ["audioUrl", "大容量音源URL"],
   ["title", "楽曲名"],
   ["artist", "アーティスト名"],
   ["url", "楽曲URL"]
@@ -133,9 +135,17 @@ export const DEFAULT_TRACK_FIELDS = [
     id: "audio",
     type: "audio",
     label: "楽曲をWAVかMP3でアップロード",
-    help: "WAVまたはMP3をアップロードしてください。",
-    note: "音源を選んだあとも、楽曲名・アーティスト名は手動で入力や修正ができます。",
+    help: "35MBまでのWAVまたはMP3をアップロードしてください。",
+    note: "35MBを超える音源は、下の大容量音源URLにDriveなどの共有リンクを貼ってください。",
     placeholder: ""
+  },
+  {
+    id: "audioUrl",
+    type: "audioUrl",
+    label: "大容量音源URL（Driveなど）",
+    help: "35MBを超えるWAV/MP3はGoogle Driveなどにアップロードし、共有リンクを貼ってください。",
+    note: "",
+    placeholder: "https://drive.google.com/..."
   },
   {
     id: "title",
@@ -482,12 +492,13 @@ export const isSunoShortUrl = (url = "") => /suno\.com\/s\/[A-Za-z0-9_-]+/i.test
 export const formatAnswerValue = (value) => {
   if (!value) return "-";
   if (typeof value === "object" && value.fileName) return `${value.fileName} (${Math.round((value.size || 0) / 1024 / 1024 * 10) / 10}MB)`;
-  if (typeof value === "object" && ("title" in value || "url" in value || "audio" in value)) {
+  if (typeof value === "object" && ("title" in value || "url" in value || "audio" in value || "audioUrl" in value)) {
     return compactLines([
       `楽曲名: ${value.title || "-"}`,
       `アーティスト名: ${value.artist || "-"}`,
       `楽曲URL: ${value.url || "-"}`,
-      `音源ファイル: ${formatAnswerValue(value.audio)}`
+      `音源ファイル: ${formatAnswerValue(value.audio)}`,
+      `大容量音源URL: ${value.audioUrl || "-"}`
     ]);
   }
   if (typeof value === "object" && ("xHandle" in value || "xUrl" in value || "dmOk" in value)) {
@@ -1689,7 +1700,7 @@ export const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formI
     .filter((answer) => answer.kind === "track" && answer.track)
     .map((answer) => {
       const track = answer.track;
-      if (!track.title && !track.url && !track.audio?.fileName) return null;
+      if (!track.title && !track.url && !track.audio?.fileName && !track.audioUrl) return null;
       const trackArtist = artist;
       const aiArtist = track.aiArtist || track.artist || (artistAnswer && artistAnswer !== "-" ? artistAnswer : "");
       return {
@@ -1703,7 +1714,7 @@ export const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formI
         title: track.title || `${trackArtist || aiArtist || source} 紹介曲`,
         urlType: detectUrlType(track.url),
         url: track.url || "",
-        audioFile: track.audio?.fileName || "",
+        audioFile: track.audio?.fileName || track.audioUrl || "",
         audio: track.audio || null,
         ownerIconUrl,
         embedUrl: makeEmbedUrl(track.url || ""),

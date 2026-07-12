@@ -40,6 +40,7 @@ import {
   DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
   DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
   DEFAULT_AUDIO_SAVE_MEMO,
+  GAS_DIRECT_UPLOAD_LIMIT_MB,
   publicAsset,
   GUEST_BADGE_ASSET_URL,
   openThumbnailImageDb,
@@ -315,7 +316,12 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
   const [submissionStatus, setSubmissionStatus] = useState({ loading: false, count: null, error: "" });
   const submissionLimit = normalizeSubmissionLimit(form?.submissionLimit);
   const attachmentLimitMb = normalizeAttachmentLimitMb(form?.attachmentLimitMb);
-  const attachmentLimitBytes = attachmentLimitMb * 1024 * 1024;
+  const directUploadLimitMb = Math.min(attachmentLimitMb, GAS_DIRECT_UPLOAD_LIMIT_MB);
+  const attachmentLimitBytes = directUploadLimitMb * 1024 * 1024;
+  const attachmentLimitLabel =
+    attachmentLimitMb > directUploadLimitMb
+      ? `フォーム直送${directUploadLimitMb}MBまで / 大容量音源URLは1曲あたり${attachmentLimitMb}MB目安`
+      : `1ファイルあたり${attachmentLimitMb}MBまで`;
   const draftLoadingRef = useRef(false);
 
   useEffect(() => {
@@ -437,7 +443,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             {(form.receptionStartDate || form.receptionEndDate) && <span>受付条件: {formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>}
             {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
             {submissionLimit ? <span>応募数: {submissionStatus.count ?? "-"} / {submissionLimit}</span> : <span>応募数: 制限なし</span>}
-            <span>添付: 1ファイルあたり{attachmentLimitMb}MBまで</span>
+            <span>添付: {attachmentLimitLabel}</span>
           </div>
         </article>
       </main>
@@ -530,7 +536,11 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       setFormError("");
       return true;
     }
-    setFormError(`${label}は1ファイルあたり${attachmentLimitMb}MBまでです。「${file.name}」は${formatFileSizeMb(file.size)}あります。`);
+    const guidance =
+      attachmentLimitMb > directUploadLimitMb
+        ? `${label}のフォーム直送は${directUploadLimitMb}MBまでです。「${file.name}」は${formatFileSizeMb(file.size)}あります。35MBを超える音源はGoogle Driveなどにアップロードして、大容量音源URL欄に共有リンクを貼ってください。`
+        : `${label}は1ファイルあたり${attachmentLimitMb}MBまでです。「${file.name}」は${formatFileSizeMb(file.size)}あります。`;
+    setFormError(guidance);
     event.target.value = "";
     return false;
   };
@@ -738,7 +748,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       return;
     }
     if (oversizedAttachment) {
-      setFormError(`添付ファイルは1ファイルあたり${attachmentLimitMb}MBまでです。「${oversizedAttachment.fileName || "添付ファイル"}」は${formatFileSizeMb(oversizedAttachment.size)}あります。`);
+      setFormError(`添付ファイルのフォーム直送は${directUploadLimitMb}MBまでです。「${oversizedAttachment.fileName || "添付ファイル"}」は${formatFileSizeMb(oversizedAttachment.size)}あります。大容量音源URL欄に共有リンクを貼ってください。`);
       return;
     }
     setSubmitBusy(true);
@@ -755,8 +765,12 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       clearPublicDraftAnswers(draftKey);
       setAnswers({});
     } catch (error) {
+      const rawMessage = error?.message || "不明なエラー";
+      const readableMessage = /Failed to fetch/i.test(rawMessage)
+        ? "GASへの通信がブラウザ側で遮断されました。35MBを超える音源はファイル直送ではなく、大容量音源URL欄にDriveなどの共有リンクを貼って再送信してください。"
+        : rawMessage;
       setSubmitStatus(
-        `送信できませんでした（${error?.message || "不明なエラー"}）。時間を置いて再送信するか、URLを送ってくれた運営側へご連絡ください。`
+        `送信できませんでした（${readableMessage}）。時間を置いて再送信するか、URLを送ってくれた運営側へご連絡ください。`
       );
     } finally {
       setSubmitBusy(false);
@@ -824,6 +838,21 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
           </label>
         );
       }
+      if (field.type === "audioUrl") {
+        return (
+          <label key={field.type}>
+            <span>{field.label}</span>
+            <input
+              type="url"
+              required={Boolean(question.required && !answers[question.id]?.audio?.dataUrl)}
+              placeholder={field.placeholder || ""}
+              value={answers[question.id]?.audioUrl ?? ""}
+              onChange={(event) => updateTrackAnswer(question.id, { audioUrl: event.target.value })}
+            />
+            <small>{field.help || `フォーム直送できない大きい音源は、共有URLを貼ってください。`}</small>
+          </label>
+        );
+      }
       return null;
     };
 
@@ -835,14 +864,14 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               <span>{audioField.label}</span>
               <input
                 type="file"
-                required={Boolean(question.required)}
+                required={Boolean(question.required && !answers[question.id]?.audioUrl)}
                 accept={AUDIO_FILE_ACCEPT}
                 onChange={(event) => updateTrackFileAnswer(question.id, event)}
               />
               <small>
                 {answers[question.id]?.audio?.fileName
                   ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}`
-                  : `${audioField.help || "WAVまたはMP3をアップロードしてください。"}（1曲あたり${attachmentLimitMb}MBまで）`}
+                  : `${audioField.help || "WAVまたはMP3をアップロードしてください。"}（フォーム直送は${directUploadLimitMb}MBまで）`}
               </small>
             </label>
             <TrackPreview track={answers[question.id]} />
@@ -867,7 +896,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               <div className="public-context">
                 {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
                 {episode && <span>放送回: {episode.date || "-"} {episode.title || ""}</span>}
-                <span>添付: 1ファイルあたり{attachmentLimitMb}MBまで</span>
+                <span>添付: {attachmentLimitLabel}</span>
                 {submissionLimit > 0 && (
                   <span>応募数: {submissionStatus.loading ? "確認中" : submissionStatus.count !== null ? `${submissionStatus.count} / ${submissionLimit}` : `上限 ${submissionLimit}件`}</span>
                 )}
@@ -917,7 +946,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                     accept={AUDIO_FILE_ACCEPT}
                     onChange={(event) => updateFileAnswer(question.id, event)}
                   />
-                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `WAVまたはMP3をアップロード（1ファイルあたり${attachmentLimitMb}MBまで）`}</small>
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `WAVまたはMP3をアップロード（フォーム直送は${directUploadLimitMb}MBまで）`}</small>
                 </div>
               ) : question.kind === "image" ? (
                 <div className="upload-field">
@@ -927,7 +956,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                     accept={IMAGE_FILE_ACCEPT}
                     onChange={(event) => updateImageAnswer(question.id, event)}
                   />
-                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `PNG、JPG、WebP、GIFをアップロード（1ファイルあたり${attachmentLimitMb}MBまで）`}</small>
+                  <small>{answers[question.id]?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id])}` : `PNG、JPG、WebP、GIFをアップロード（フォーム直送は${directUploadLimitMb}MBまで）`}</small>
                   {answers[question.id]?.dataUrl && (
                     <img className="image-answer-preview" src={answers[question.id].dataUrl} alt={`${question.label} preview`} />
                   )}
