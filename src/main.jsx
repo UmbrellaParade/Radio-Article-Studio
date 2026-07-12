@@ -57,6 +57,7 @@ import {
   QUESTION_USE_LABELS,
   QUESTION_KIND_OPTIONS,
   TRACK_FIELD_TYPE_OPTIONS,
+  DEFAULT_TRACK_FIELDS,
   FORM_COLOR_PALETTE,
   normalizeFormColor,
   normalizeTrackFields,
@@ -907,6 +908,46 @@ function App() {
     patchQuestion(formId, questionId, { trackFields: getTrackFieldDefaults(data.settings) });
   };
 
+  const addTrackField = (formId, questionId, fieldType) => {
+    updateData("forms", (forms) =>
+      forms.map((form) => {
+        if (form.id !== formId) return form;
+        return {
+          ...form,
+          questions: form.questions.map((question) => {
+            if (question.id !== questionId) return question;
+            const trackFields = normalizeTrackFields(question.trackFields);
+            if (trackFields.some((field) => field.type === fieldType)) return question;
+            const template =
+              getTrackFieldDefaults(data.settings).find((field) => field.type === fieldType) ||
+              DEFAULT_TRACK_FIELDS.find((field) => field.type === fieldType);
+            if (!template) return question;
+            return { ...question, trackFields: [...trackFields, { ...template }] };
+          })
+        };
+      })
+    );
+  };
+
+  const removeTrackField = (formId, questionId, fieldType) => {
+    updateData("forms", (forms) =>
+      forms.map((form) => {
+        if (form.id !== formId) return form;
+        return {
+          ...form,
+          questions: form.questions.map((question) =>
+            question.id === questionId
+              ? {
+                  ...question,
+                  trackFields: normalizeTrackFields(question.trackFields).filter((field) => field.type !== fieldType)
+                }
+              : question
+          )
+        };
+      })
+    );
+  };
+
   const saveTrackFieldsAsDefault = (formId, questionId) => {
     const form = data.forms.find((item) => item.id === formId);
     const question = form?.questions.find((item) => item.id === questionId);
@@ -1740,6 +1781,8 @@ ${socialRows || "-"}
               moveQuestion={moveQuestion}
               patchTrackField={patchTrackField}
               moveTrackField={moveTrackField}
+              addTrackField={addTrackField}
+              removeTrackField={removeTrackField}
               resetTrackFields={resetTrackFields}
               saveTrackFieldsAsDefault={saveTrackFieldsAsDefault}
               removeQuestion={removeQuestion}
@@ -2514,6 +2557,8 @@ function Forms({
   moveQuestion,
   patchTrackField,
   moveTrackField,
+  addTrackField,
+  removeTrackField,
   resetTrackFields,
   saveTrackFieldsAsDefault,
   removeQuestion,
@@ -2904,9 +2949,20 @@ function Forms({
                                 <div className="move-buttons" aria-label={`${field.label || "楽曲内項目"}の並び替え`}>
                                   <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, -1)} disabled={fieldIndex === 0} aria-label="楽曲内項目を上へ" title="上へ"><ArrowUp size={16} /></button>
                                   <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, 1)} disabled={fieldIndex === trackFields.length - 1} aria-label="楽曲内項目を下へ" title="下へ"><ArrowDown size={16} /></button>
+                                  <button className="icon-danger" onClick={() => removeTrackField(form.id, question.id, field.type)} aria-label={`${field.label || "楽曲内項目"}を削除`} title="この項目を削除"><Trash2 size={16} /></button>
                                 </div>
                               </div>
                             ))}
+                            {TRACK_FIELD_TYPE_OPTIONS.some(([type]) => !trackFields.some((field) => field.type === type)) && (
+                              <div className="track-field-add-row">
+                                <span>項目を追加:</span>
+                                {TRACK_FIELD_TYPE_OPTIONS.filter(([type]) => !trackFields.some((field) => field.type === type)).map(([type, label]) => (
+                                  <button className="secondary" key={type} onClick={() => addTrackField(form.id, question.id, type)}>
+                                    <Plus size={16} />{label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </PersistentDetails>
                         )}
                       </div>

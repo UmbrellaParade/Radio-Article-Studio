@@ -717,12 +717,20 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
         receptionEndDate: form.receptionEndDate || "",
         submissionLimit,
         attachmentLimitMb,
-        // 回答シートの列（全質問）を受信側で作れるように、フォームの全質問を同梱する
+        // 回答シートの列（全質問＋楽曲の下位項目）を受信側で作れるように、フォームの全質問を同梱する
         questions: form.questions.map((question) => ({
           id: question.id,
           label: question.label,
           kind: question.kind,
-          use: question.use
+          use: question.use,
+          trackFields:
+            question.kind === "track"
+              ? normalizeTrackFields(question.trackFields).map((field) => ({
+                  id: field.id,
+                  type: field.type,
+                  label: field.label
+                }))
+              : undefined
         }))
       },
       period: period

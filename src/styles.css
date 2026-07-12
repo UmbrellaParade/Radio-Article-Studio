@@ -1059,6 +1059,20 @@ textarea {
   align-self: center;
 }
 
+.track-field-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.track-field-add-row > span {
+  color: #6b6175;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .track-field-spacer {
   min-height: 1px;
 }
@@ -1804,6 +1818,13 @@ textarea {
   height: 100%;
   display: block;
   object-fit: cover;
+}
+
+.icon-crop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .icon-crop-controls {

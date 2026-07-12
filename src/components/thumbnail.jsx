@@ -292,7 +292,7 @@ export function GuestIconCropPreview({ icon, label }) {
 }
 
 
-export function GuestIconCropCard({ icon, index, onPatch }) {
+export function GuestIconCropCard({ icon, index, onPatch, onRemove }) {
   const [aspect, setAspect] = useState(1);
 
   useEffect(() => {
@@ -321,7 +321,17 @@ export function GuestIconCropCard({ icon, index, onPatch }) {
         <GuestIconCropPreview icon={icon} label={`切り抜き確認 ${index + 1}`} />
       </div>
       <div className="icon-crop-controls">
-        <strong>{index + 1}. {icon.name}</strong>
+        <div className="icon-crop-head">
+          <strong>{index + 1}. {icon.name || "（名前なし）"}</strong>
+          {onRemove && (
+            <button className="icon-danger" onClick={() => onRemove(index)} aria-label={`アイコン${index + 1}を解除`} title="このアイコンだけ解除">
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
+        {!String(icon.dataUrl || "").startsWith("data:") && (
+          <p className="hint-text">外部URL画像のため、プレビューやPNG合成に表示されない場合があります。表示されない時はこのアイコンを解除して、画像ファイルを直接登録してください。</p>
+        )}
         <SliderField label="切り抜き 拡大率" value={icon.cropZoom} onChange={(value) => onPatch(index, { cropZoom: value })} min="100" max="300" />
         <SliderField label="切り抜き 横位置" value={icon.cropX} onChange={(value) => onPatch(index, { cropX: value })} disabled={!canPanX} />
         <SliderField label="切り抜き 縦位置" value={icon.cropY} onChange={(value) => onPatch(index, { cropY: value })} disabled={!canPanY} />
@@ -610,6 +620,20 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
       guestIcons: []
     }));
     setMessage("ゲストアイコンを解除しました。");
+  };
+
+  const removeGuestIcon = (index) => {
+    const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
+    const nextGuestIcons = guestIcons.filter((_, iconIndex) => iconIndex !== index);
+    forgetGeneratedImages(presetKeys);
+    updateStudio((current) => ({
+      ...defaultThumbnailStudio,
+      ...current,
+      generated: removeGeneratedRecords(current.generated, presetKeys),
+      guestIcon: nextGuestIcons[0] ?? { ...defaultThumbnailStudio.guestIcon },
+      guestIcons: nextGuestIcons
+    }));
+    setMessage(`アイコン${index + 1}を解除しました。古い生成画像は解除しました。`);
   };
 
   const patchGuestIconCrop = (index, patch) => {
@@ -1090,11 +1114,11 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
               ))}
             </div>
             <p className="muted">ゲストアイコン: {guestIcons.map((icon) => icon.name).join(" / ")}</p>
-            <button className="secondary" onClick={clearGuestIcon}><X size={16} />アイコン解除</button>
+            <button className="secondary" onClick={clearGuestIcon}><X size={16} />全アイコンを解除</button>
           </div>
           <div className="icon-crop-list">
             {guestIcons.map((icon, index) => (
-              <GuestIconCropCard icon={icon} index={index} onPatch={patchGuestIconCrop} key={`${icon.id}-${index}`} />
+              <GuestIconCropCard icon={icon} index={index} onPatch={patchGuestIconCrop} onRemove={removeGuestIcon} key={`${icon.id}-${index}`} />
             ))}
           </div>
           {guestIcons.some((icon) => !String(icon.dataUrl || "").startsWith("data:")) && (

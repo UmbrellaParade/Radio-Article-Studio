@@ -204,20 +204,18 @@ export const normalizeFormColor = (value = "", fallback = DEFAULT_FORM_COLOR) =>
 const TRACK_FIELD_DEFAULTS_BY_TYPE = Object.fromEntries(DEFAULT_TRACK_FIELDS.map((field) => [field.type, field]));
 
 export const normalizeTrackFields = (fields) => {
-  const inputFields = Array.isArray(fields) ? fields : [];
+  // 未設定（旧データ）は既定の全項目にする。配列で保存されている場合は
+  // 「入っている項目だけ」を尊重し、削除した項目を勝手に復活させない。
+  if (!Array.isArray(fields)) return DEFAULT_TRACK_FIELDS.map((field) => ({ ...field }));
   const usedTypes = new Set();
   const normalized = [];
 
-  inputFields.forEach((field) => {
+  fields.forEach((field) => {
     const type = String(field?.type || field?.id || "").trim();
     const defaults = TRACK_FIELD_DEFAULTS_BY_TYPE[type];
     if (!defaults || usedTypes.has(type)) return;
     normalized.push({ ...defaults, ...field, id: defaults.id, type });
     usedTypes.add(type);
-  });
-
-  DEFAULT_TRACK_FIELDS.forEach((defaults) => {
-    if (!usedTypes.has(defaults.type)) normalized.push({ ...defaults });
   });
 
   return normalized;
