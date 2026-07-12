@@ -26,6 +26,7 @@ import {
   ZoomIn
 } from "lucide-react";
 import "./styles.css";
+import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./lib/gas.js";
 
 const STORAGE_KEY = "radio-article-studio:v1";
 const STORAGE_COMPRESSED_PREFIX = "lz16:";
@@ -38,7 +39,9 @@ const DEFAULT_KANAME_X_HANDLE = "kaname_mbembe";
 const DEFAULT_X_CONTACT_MESSAGE =
   "Xでご連絡するため、べるぼ☂とかなめ🦐のアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。";
 const DEFAULT_RESPONSE_ENDPOINT_URL = "";
-const DEFAULT_RESPONSE_DRIVE_FOLDER_URL = "";
+const DEFAULT_RESPONSE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1FnQ0knOIUKnTOYisf7JdKJNORsTgDwza";
+// GASのPOST受信上限（約50MB）をbase64の膨張分込みで超えないための送信前チェック値。
+const MAX_SUBMISSION_BYTES = 45 * 1024 * 1024;
 const DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL = "";
 const DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL = "";
 const DEFAULT_AUDIO_SAVE_MEMO = "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー";
@@ -1826,14 +1829,39 @@ const readSharedFormPayload = () => {
   }
 };
 
+const isValidSharePayload = (payload) => payload?.type === "radio-article-studio-form" && Boolean(payload?.form);
+
 const loadPublishedSharePayload = async (slug) => {
+  // まずGAS受信口からフォーム定義を取得する（ツールから即時公開できる主経路）。
+  // 受信口URLはリポジトリのapp-config.jsonに一度だけ設定する。
+  const config = await loadAppConfig(import.meta.env.BASE_URL);
+  const endpointUrl = String(config.formEndpointUrl || "").trim();
+  if (endpointUrl) {
+    try {
+      const result = await getFromGasEndpoint(endpointUrl, { action: "getForm", slug: normalizeShareSlug(slug) });
+      if (isValidSharePayload(result.payload)) return result.payload;
+    } catch {
+      // GASに未公開のフォームは、従来のリポジトリ同梱JSONへフォールバックする。
+    }
+  }
   const response = await fetch(getPublishedSharePayloadUrl(slug), { cache: "no-store" });
   if (!response.ok) throw new Error(`published-share-not-found:${response.status}`);
   const payload = await response.json();
-  if (payload?.type !== "radio-article-studio-form" || !payload?.form) {
+  if (!isValidSharePayload(payload)) {
     throw new Error("published-share-invalid");
   }
   return payload;
+};
+
+const publishSharePayloadToGas = async (settings, slug, payload) => {
+  const endpointUrl = String(settings.responseEndpointUrl || "").trim();
+  if (!endpointUrl) throw new Error("設定で「回答保存Webhook URL」を入力してください。");
+  return postToGasEndpoint(endpointUrl, {
+    action: "publishForm",
+    token: String(settings.responseSyncToken || "").trim(),
+    slug: normalizeShareSlug(slug),
+    payload
+  });
 };
 
 const readRestorePayload = () => {
@@ -1932,7 +1960,9 @@ const sampleData = {
     responseDriveFolderUrl: DEFAULT_RESPONSE_DRIVE_FOLDER_URL,
     thumbnailDriveEndpointUrl: DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
     thumbnailDriveFolderUrl: DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
-    audioSaveMemo: DEFAULT_AUDIO_SAVE_MEMO
+    audioSaveMemo: DEFAULT_AUDIO_SAVE_MEMO,
+    responseSyncToken: "",
+    lastResponseSyncAt: ""
   },
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
@@ -2224,6 +2254,9 @@ function migrateData(input) {
   if (!("thumbnailDriveEndpointUrl" in settings)) settings.thumbnailDriveEndpointUrl = DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL;
   if (!("thumbnailDriveFolderUrl" in settings)) settings.thumbnailDriveFolderUrl = DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL;
   if (!settings.audioSaveMemo) settings.audioSaveMemo = DEFAULT_AUDIO_SAVE_MEMO;
+  if (!("responseSyncToken" in settings)) settings.responseSyncToken = "";
+  if (!("lastResponseSyncAt" in settings)) settings.lastResponseSyncAt = "";
+  if (!settings.responseDriveFolderUrl) settings.responseDriveFolderUrl = DEFAULT_RESPONSE_DRIVE_FOLDER_URL;
   const episodes = (input.episodes ?? sampleData.episodes).map((episode) => {
     const articleSlug = episode.articleSlug || extractSlugFromUrl(episode.articleUrl);
     return {
@@ -2363,6 +2396,8 @@ function App() {
   const [importingSource, setImportingSource] = useState("");
   const [importPreviews, setImportPreviews] = useState({});
   const [storageWarning, setStorageWarning] = useState("");
+  const [syncState, setSyncState] = useState({ busy: false, message: "" });
+  const [packExportMessage, setPackExportMessage] = useState("");
   const autoThumbnailGenerationRef = useRef("");
 
   useEffect(() => {
@@ -3217,6 +3252,42 @@ ${socialRows || "-"}
     window.setTimeout(() => setCopied(false), 1800);
   };
 
+  const exportPackToFolder = async () => {
+    if (!selectedEpisode) return;
+    if (!window.showDirectoryPicker) {
+      setPackExportMessage("このブラウザはフォルダー書き出しに未対応です。ChromeかEdgeで開くか、コピーで渡してください。");
+      return;
+    }
+    try {
+      const directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      const bundle = await buildThumbnailBundle();
+      const imageItems = [...bundle.thumbnails, ...bundle.listenerHeadingThumbnails].filter((item) => item.dataUrl);
+      const imageNotes = imageItems.length
+        ? `\n\n記事画像ファイル:\n${imageItems.map((item) => `- article-images/${item.fileName}`).join("\n")}\n※記事アイキャッチ16:9と応募曲見出し下PNGは、このフォルダーのarticle-images/に保存済みです。dataUrlの復元作業は不要です。`
+        : "";
+      const packText = `${codexPack}${imageNotes}\n`;
+      const fileHandle = await directoryHandle.getFileHandle("codex_request.md", { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(new Blob([packText], { type: "text/markdown" }));
+      await writable.close();
+      if (imageItems.length) {
+        const imagesDir = await directoryHandle.getDirectoryHandle("article-images", { create: true });
+        for (const item of imageItems) {
+          await writeDataUrlToDirectory(imagesDir, item.fileName, item.dataUrl);
+        }
+      }
+      setPackExportMessage(
+        `${directoryHandle.name} に codex_request.md${imageItems.length ? ` と記事画像${imageItems.length}枚（article-images/）` : ""} を書き出しました。Codexにはこのフォルダーを読むよう伝えるだけでOKです。`
+      );
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        setPackExportMessage("フォルダー書き出しをキャンセルしました。");
+      } else {
+        setPackExportMessage(`書き出しに失敗しました（${error?.message || "不明なエラー"}）。`);
+      }
+    }
+  };
+
   const copyTransferLink = async () => {
     await navigator.clipboard.writeText(makeRestoreUrl(data));
     setTransferCopied(true);
@@ -3249,6 +3320,71 @@ ${socialRows || "-"}
     reader.readAsText(file, "utf-8");
   };
 
+  const buildNormalizedResponse = (parsed) => {
+    const response = parsed?.response ?? parsed;
+    if (!response || typeof response !== "object") return null;
+    const attachments =
+      response.attachments ??
+      parsed.attachments ??
+      (parsed.rawAnswers ?? [])
+        .map((answer) => answer.attachment)
+        .filter(Boolean);
+    const normalized = {
+      id: response.id || newId("res"),
+      submittedAt: response.submittedAt || "",
+      episodeId: response.episodeId || selectedEpisode?.id || data.episodes[0]?.id || "",
+      periodId: response.periodId || "",
+      formId: response.formId || data.forms[0]?.id || "",
+      respondent: response.respondent || "",
+      status: response.status || "未確認",
+      publicInfo: response.publicInfo || "",
+      articleUse: response.articleUse || "",
+      internalOnly: response.internalOnly || "",
+      constraints: response.constraints || "",
+      attachments
+    };
+    const guestIconAttachment = findGuestIconAttachment(attachments);
+    const guestIcon = makeGuestIconFromAttachment(guestIconAttachment, `${normalized.respondent || "guest"}-icon`);
+    const importedTracks = buildTracksFromRawAnswers(
+      parsed.rawAnswers ?? [],
+      normalized.episodeId,
+      normalized.formId,
+      normalized.respondent,
+      normalized.periodId
+    );
+    return { normalized, guestIcon, importedTracks };
+  };
+
+  const applyResponsePayloads = (parsedList) => {
+    const fresh = parsedList
+      .map(buildNormalizedResponse)
+      .filter((item) => item && !data.responses.some((existing) => existing.id === item.normalized.id));
+    if (!fresh.length) return 0;
+    setData((current) => {
+      let next = current;
+      for (const { normalized, guestIcon, importedTracks } of fresh) {
+        if (next.responses.some((item) => item.id === normalized.id)) continue;
+        let nextTracks = next.tracks;
+        importedTracks.forEach((track) => {
+          nextTracks = appendTrack(nextTracks, {
+            ...track,
+            slotNo: nextSlotNo(nextTracks, normalized.episodeId)
+          });
+        });
+        next = {
+          ...next,
+          responses: [normalized, ...next.responses],
+          tracks: nextTracks,
+          thumbnailStudio: guestIcon
+            ? mergeGuestIcons(next.thumbnailStudio ?? defaultThumbnailStudio, guestIcon)
+            : next.thumbnailStudio
+        };
+      }
+      return next;
+    });
+    return fresh.length;
+  };
+
   const importResponseJson = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -3256,46 +3392,8 @@ ${socialRows || "-"}
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result));
-        const response = parsed.response ?? parsed;
-        const attachments =
-          response.attachments ??
-          parsed.attachments ??
-          (parsed.rawAnswers ?? [])
-            .map((answer) => answer.attachment)
-            .filter(Boolean);
-        const normalized = {
-          id: response.id || newId("res"),
-          episodeId: response.episodeId || selectedEpisode?.id || data.episodes[0]?.id || "",
-          periodId: response.periodId || "",
-          formId: response.formId || data.forms[0]?.id || "",
-          respondent: response.respondent || "",
-          status: response.status || "未確認",
-          publicInfo: response.publicInfo || "",
-          articleUse: response.articleUse || "",
-          internalOnly: response.internalOnly || "",
-          constraints: response.constraints || "",
-          attachments
-        };
-        const guestIconAttachment = findGuestIconAttachment(attachments);
-        const guestIcon = makeGuestIconFromAttachment(guestIconAttachment, `${normalized.respondent || "guest"}-icon`);
-        const importedTracks = buildTracksFromRawAnswers(parsed.rawAnswers ?? [], normalized.episodeId, normalized.formId, normalized.respondent, normalized.periodId);
-        setData((current) => {
-          let nextTracks = current.tracks;
-          importedTracks.forEach((track) => {
-            nextTracks = appendTrack(nextTracks, {
-              ...track,
-              slotNo: nextSlotNo(nextTracks, normalized.episodeId)
-            });
-          });
-          return {
-            ...current,
-            responses: [normalized, ...current.responses],
-            tracks: nextTracks,
-            thumbnailStudio: guestIcon
-              ? mergeGuestIcons(current.thumbnailStudio ?? defaultThumbnailStudio, guestIcon)
-              : current.thumbnailStudio
-          };
-        });
+        const importedCount = applyResponsePayloads([parsed]);
+        if (!importedCount) alert("この回答は読み込み済みです。");
         setActive("responses");
       } catch {
         alert("回答JSONを読み込めませんでした。");
@@ -3304,6 +3402,30 @@ ${socialRows || "-"}
       }
     };
     reader.readAsText(file, "utf-8");
+  };
+
+  const syncResponses = async () => {
+    const endpointUrl = String(data.settings.responseEndpointUrl || "").trim();
+    const token = String(data.settings.responseSyncToken || "").trim();
+    if (!endpointUrl) {
+      setSyncState({ busy: false, message: "設定で「回答保存Webhook URL」を入力してください。" });
+      return;
+    }
+    setSyncState({ busy: true, message: "新着回答を確認しています…" });
+    try {
+      const result = await getFromGasEndpoint(endpointUrl, { action: "listResponses", token });
+      const payloads = Array.isArray(result.responses) ? result.responses : [];
+      const importedCount = applyResponsePayloads(payloads);
+      updateSettings({ lastResponseSyncAt: result.now || new Date().toISOString() });
+      setSyncState({
+        busy: false,
+        message: importedCount
+          ? `新着回答を${importedCount}件取り込みました（受信口の回答 全${payloads.length}件）。`
+          : `新着回答はありませんでした（受信口の回答 全${payloads.length}件）。`
+      });
+    } catch (error) {
+      setSyncState({ busy: false, message: `同期できませんでした（${error?.message || "不明なエラー"}）。` });
+    }
   };
 
   const resetSample = () => {
@@ -3345,6 +3467,9 @@ ${socialRows || "-"}
           ["dashboard", "ダッシュボード", Radio],
           ["imports", "取り込み", Upload],
           ["episodes", "放送回", CalendarDays],
+          ["forms", "フォーム", Send],
+          ["periods", "応募期間", CalendarDays],
+          ["responses", "回答", ClipboardCopy],
           ["tracks", "楽曲", Music],
           ["assets", "素材", Image],
           ["social", "SNS告知", Share2],
@@ -3455,6 +3580,9 @@ ${socialRows || "-"}
               removeItem={removeItem}
               addResponse={addResponse}
               importResponseJson={importResponseJson}
+              syncResponses={syncResponses}
+              syncState={syncState}
+              lastResponseSyncAt={data.settings.lastResponseSyncAt || ""}
             />
           )}
           {active === "tracks" && (
@@ -3490,6 +3618,8 @@ ${socialRows || "-"}
               articleThumbnailCount={CODEX_THUMBNAIL_PRESETS.filter((preset) => data.thumbnailStudio?.generated?.[preset.key]).length}
               listenerHeadingThumbnailCount={episodeTracks.filter((track) => track.source === "リスナー応募曲").length}
               thumbnailTransferText={thumbnailTransferText}
+              exportPackToFolder={exportPackToFolder}
+              packExportMessage={packExportMessage}
             />
           )}
           {active === "settings" && (
@@ -3797,6 +3927,7 @@ function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }) {
       exportedAt: new Date().toISOString(),
       response: {
         id: newId("res"),
+        submittedAt: new Date().toISOString(),
         episodeId: episode?.id || period?.episodeId || "",
         periodId: period?.id || "",
         formId: form.id,
@@ -3835,23 +3966,27 @@ function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }) {
     setFormError("");
     setSubmitStatus("");
     const responsePayload = buildResponsePayload();
-    const json = JSON.stringify(responsePayload, null, 2);
+    const json = JSON.stringify(responsePayload);
     const endpointUrl = String(submission.endpointUrl || "").trim();
     if (!endpointUrl) {
       setSubmitStatus("送信先の設定に不備があります。URLを送ってくれた運営側へご連絡ください。");
       return;
     }
+    if (json.length > MAX_SUBMISSION_BYTES) {
+      setFormError("添付ファイルが大きすぎて送信できません。音源はMP3（合計30MBまで目安）にするか、ファイルを小さくして再度お試しください。");
+      return;
+    }
     setSubmitBusy(true);
     try {
-      await fetch(endpointUrl, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: json
-      });
-      setSubmitStatus("回答データを送信しました。受信結果は運営側の保存先で確認してください。");
-    } catch {
-      setSubmitStatus("送信できませんでした。時間を置いて再送信するか、URLを送ってくれた運営側へご連絡ください。");
+      const result = await postToGasEndpoint(endpointUrl, { action: "submitResponse", ...responsePayload });
+      const savedFiles = Array.isArray(result.savedFiles) ? result.savedFiles.length : 0;
+      setSubmitStatus(
+        `回答を受け付けました。ありがとうございます！（受付番号: ${result.savedAs || responsePayload.response.id}${savedFiles ? ` / 添付ファイル${savedFiles}件保存済み` : ""}）`
+      );
+    } catch (error) {
+      setSubmitStatus(
+        `送信できませんでした（${error?.message || "不明なエラー"}）。時間を置いて再送信するか、URLを送ってくれた運営側へご連絡ください。`
+      );
     } finally {
       setSubmitBusy(false);
     }
@@ -4432,11 +4567,19 @@ function SourceImportCard({
 }
 
 function downloadAttachment(attachment) {
-  downloadDataUrlFile(attachment?.dataUrl, attachment?.fileName || "audio-file");
+  if (attachment?.dataUrl) {
+    downloadDataUrlFile(attachment.dataUrl, attachment.fileName || "audio-file");
+    return;
+  }
+  // GAS同期で取り込んだ回答は音源本体をDriveに置くため、Drive側からダウンロードする。
+  if (attachment?.driveUrl) window.open(attachment.driveUrl, "_blank", "noopener");
 }
 
 async function saveAttachmentWithPicker(attachment) {
-  if (!attachment?.dataUrl) return;
+  if (!attachment?.dataUrl) {
+    if (attachment?.driveUrl) window.open(attachment.driveUrl, "_blank", "noopener");
+    return;
+  }
   try {
     await saveDataUrlWithPicker(attachment.dataUrl, attachment.fileName || "audio-file");
   } catch {
@@ -4529,8 +4672,27 @@ function ApplicationPeriods({
   importingSource
 }) {
   const [copiedPeriodId, setCopiedPeriodId] = useState("");
+  const [publishMessage, setPublishMessage] = useState("");
+  const [publishingPeriodId, setPublishingPeriodId] = useState("");
   const episodeLabels = Object.fromEntries(episodes.map((episode) => [episode.id, `${episode.date} ${episode.title}`]));
   const formLabels = Object.fromEntries(forms.map((form) => [form.id, form.name]));
+
+  const publishPeriodShortUrl = async (period) => {
+    const form = forms.find((item) => item.id === period.formId);
+    if (!form) return;
+    const episode = episodes.find((item) => item.id === period.episodeId);
+    const slug = getPeriodPublishedSlug(period, episode, form);
+    setPublishingPeriodId(period.id);
+    setPublishMessage("");
+    try {
+      await publishSharePayloadToGas(settings, slug, makeSharePayload(form, settings, { period, episode }));
+      setPublishMessage(`短いURLを公開しました: ${makePublishedShareUrl(slug)}`);
+    } catch (error) {
+      setPublishMessage(`公開できませんでした（${error?.message || "不明なエラー"}）。`);
+    } finally {
+      setPublishingPeriodId("");
+    }
+  };
 
   const copyPeriodShareUrl = async (period) => {
     const form = forms.find((item) => item.id === period.formId);
@@ -4594,6 +4756,7 @@ function ApplicationPeriods({
         subtitle="リスナー応募曲などを、募集期間・放送回・フォーム・応募シート単位でまとめます。"
         action={<button className="primary" onClick={addPeriod}><Plus size={16} />応募期間追加</button>}
       />
+      {publishMessage && <p className="hint-text">{publishMessage}</p>}
       <div className="records">
         {periods.map((period) => {
           const form = forms.find((item) => item.id === period.formId);
@@ -4637,6 +4800,9 @@ function ApplicationPeriods({
                 </div>
                 <input readOnly value={publishedUrl} onFocus={(event) => event.target.select()} />
                 <div className="inline-actions">
+                  <button className="primary" onClick={() => publishPeriodShortUrl(period)} disabled={!publishedUrl || publishingPeriodId === period.id}>
+                    <Send size={16} />{publishingPeriodId === period.id ? "公開中…" : "短いURLを公開/更新"}
+                  </button>
                   <button className="secondary" onClick={() => copyPublishedPeriodShareUrl(period)} disabled={!publishedUrl}>
                     <ClipboardCopy size={16} />{copiedPeriodId === `${period.id}:published` ? "コピー済み" : "短いURLをコピー"}
                   </button>
@@ -4683,6 +4849,22 @@ function ApplicationPeriods({
 
 function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, patchQuestion, removeQuestion }) {
   const [copiedFormId, setCopiedFormId] = useState("");
+  const [publishMessage, setPublishMessage] = useState("");
+  const [publishingFormId, setPublishingFormId] = useState("");
+
+  const publishFormShortUrl = async (form) => {
+    const slug = getFormPublishedSlug(form);
+    setPublishingFormId(form.id);
+    setPublishMessage("");
+    try {
+      await publishSharePayloadToGas(settings, slug, makeSharePayload(form, settings));
+      setPublishMessage(`短いURLを公開しました: ${makePublishedShareUrl(slug)}`);
+    } catch (error) {
+      setPublishMessage(`公開できませんでした（${error?.message || "不明なエラー"}）。`);
+    } finally {
+      setPublishingFormId("");
+    }
+  };
 
   const copyShareUrl = async (form) => {
     await navigator.clipboard.writeText(makePortableShareUrl(form, settings));
@@ -4723,7 +4905,8 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
 
   return (
     <div className="view-stack">
-      <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、外部共有URLから回答してもらえます。現時点の回答回収はJSON受け取り方式です。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
+      <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、「短いURLを公開/更新」ですぐ共有できます。回答は回答管理の「新着回答を同期」で自動取得します。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
+      {publishMessage && <p className="hint-text">{publishMessage}</p>}
       <div className="records">
         {forms.map((form) => (
           <article className="record" key={form.id}>
@@ -4743,6 +4926,9 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
               </div>
               <input readOnly value={makePublishedShareUrl(getFormPublishedSlug(form))} onFocus={(event) => event.target.select()} />
               <div className="inline-actions">
+                <button className="primary" onClick={() => publishFormShortUrl(form)} disabled={publishingFormId === form.id}>
+                  <Send size={16} />{publishingFormId === form.id ? "公開中…" : "短いURLを公開/更新"}
+                </button>
                 <button className="secondary" onClick={() => copyPublishedShareUrl(form)}>
                   <ClipboardCopy size={16} />{copiedFormId === `${form.id}:published` ? "コピー済み" : "短いURLをコピー"}
                 </button>
@@ -4804,7 +4990,7 @@ function Forms({ forms, settings, patchItem, removeItem, addForm, addQuestion, p
   );
 }
 
-function Responses({ forms, responses, patchItem, removeItem, addResponse, importResponseJson }) {
+function Responses({ forms, responses, patchItem, removeItem, addResponse, importResponseJson, syncResponses, syncState, lastResponseSyncAt }) {
   return (
     <div className="view-stack">
       <SectionTitle
@@ -4812,14 +4998,23 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
         subtitle="公開できる情報、記事に使う内容、制作メモ、掲載NG/表記ルールを分けて保持します。"
         action={
           <div className="inline-actions">
+            <button className="primary" onClick={syncResponses} disabled={syncState?.busy}>
+              <Download size={16} />{syncState?.busy ? "同期中…" : "新着回答を同期"}
+            </button>
             <label className="secondary file-button">
               <Upload size={16} />回答JSONを読み込み
               <input type="file" accept="application/json" onChange={importResponseJson} />
             </label>
-            <button className="primary" onClick={addResponse}><Plus size={16} />回答追加</button>
+            <button className="secondary" onClick={addResponse}><Plus size={16} />回答追加</button>
           </div>
         }
       />
+      {(syncState?.message || lastResponseSyncAt) && (
+        <p className="hint-text">
+          {syncState?.message}
+          {lastResponseSyncAt ? `（最終同期: ${new Date(lastResponseSyncAt).toLocaleString("ja-JP")}）` : ""}
+        </p>
+      )}
       <div className="records">
         {responses.map((response) => (
           <article className="record" key={response.id}>
@@ -4845,6 +5040,11 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
                     <small>{Math.round((attachment.size || 0) / 1024 / 1024 * 10) / 10}MB</small>
                     <button className="secondary" onClick={() => downloadAttachment(attachment)}><Download size={16} />ダウンロード</button>
                     <button className="secondary" onClick={() => saveAttachmentWithPicker(attachment)}><FolderOpen size={16} />保存先を選ぶ</button>
+                    {attachment.driveUrl && (
+                      <a className="secondary file-button" href={attachment.driveUrl} target="_blank" rel="noreferrer noopener">
+                        <Link size={16} />Driveで開く
+                      </a>
+                    )}
                     {attachment.dataUrl && isImageAttachment(attachment) && (
                       <img className="attachment-image" src={attachment.dataUrl} alt={attachment.fileName || "添付画像"} />
                     )}
@@ -5997,22 +6197,20 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate, setti
       return;
     }
     try {
-      await fetch(endpointUrl, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          type: "thumbnail_bundle",
-          createdAt: new Date().toISOString(),
-          guestName,
-          episodeDate: thumbnailDate,
-          driveFolderUrl: settings.thumbnailDriveFolderUrl || "",
-          images: items
-        })
+      const result = await postToGasEndpoint(endpointUrl, {
+        action: "saveThumbnails",
+        type: "thumbnail_bundle",
+        token: String(settings.responseSyncToken || "").trim(),
+        createdAt: new Date().toISOString(),
+        guestName,
+        episodeDate: thumbnailDate,
+        driveFolderUrl: settings.thumbnailDriveFolderUrl || "",
+        images: items
       });
-      setMessage("Drive保存Webhookへ3枚のPNGを送信しました。Drive側で保存結果を確認してください。");
-    } catch {
-      setMessage("Drive保存Webhookへ送信できませんでした。URLやApps Scriptの公開設定を確認してください。");
+      const savedCount = Array.isArray(result.savedFiles) ? result.savedFiles.length : items.length;
+      setMessage(`Driveへ${savedCount}枚のPNGを保存しました。`);
+    } catch (error) {
+      setMessage(`Driveへ保存できませんでした（${error?.message || "不明なエラー"}）。URLやApps Scriptの公開設定を確認してください。`);
     }
   };
 
@@ -6434,22 +6632,28 @@ function CodexPack({
   fullPackCopied,
   articleThumbnailCount,
   listenerHeadingThumbnailCount,
-  thumbnailTransferText
+  thumbnailTransferText,
+  exportPackToFolder,
+  packExportMessage
 }) {
   const imageBundleCount = articleThumbnailCount + listenerHeadingThumbnailCount;
   return (
     <div className="view-stack">
-      <SectionTitle title="Codex記事作成パック" subtitle="ここをコピーしてCodexへ渡せば、記事化に必要な情報がまとまります。" action={<button className="primary" onClick={copyPack}><ClipboardCopy size={16} />{copied ? "コピー済み" : "コピー"}</button>} />
+      <SectionTitle title="Codex記事作成パック" subtitle="フォルダーへ書き出すと、codex_request.mdと記事画像がまとめて保存され、Codexがそのまま読めます。" action={<button className="primary" onClick={copyPack}><ClipboardCopy size={16} />{copied ? "コピー済み" : "コピー"}</button>} />
       <article className="panel">
         <h2>{selectedEpisode?.title || "放送回未選択"}</h2>
         <div className="button-row">
-          <button className="primary" onClick={copyFullPackWithThumbnails} disabled={!imageBundleCount}>
+          <button className="primary" onClick={exportPackToFolder}>
+            <FolderOpen size={16} />Sunoパ！記事フォルダーへ書き出し
+          </button>
+          <button className="secondary" onClick={copyFullPackWithThumbnails} disabled={!imageBundleCount}>
             <ClipboardCopy size={16} />{fullPackCopied ? "画像込みコピー済み" : "本文+記事画像データをコピー"}
           </button>
           <button className="secondary" onClick={copyThumbnailBundle} disabled={!imageBundleCount}>
             <ClipboardCopy size={16} />{thumbnailBundleCopied ? "記事画像JSONコピー済み" : "記事画像JSONをコピー"}
           </button>
         </div>
+        {packExportMessage && <p className="hint-text">{packExportMessage}</p>}
         <p className="hint-text">Codexへ送る画像: 記事アイキャッチ16:9 {articleThumbnailCount}件 / 応募曲見出し下PNG {listenerHeadingThumbnailCount}件。stand.fm 1:1 と配信背景9:16は記事作成パックには含めません。</p>
         {thumbnailTransferText && (
           <textarea className="pack-output thumbnail-transfer-output" value={thumbnailTransferText} readOnly />
@@ -6537,7 +6741,7 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
         <div className="record-head">
           <div>
             <h2>詳細設定</h2>
-            <p className="muted">フォーム作成・回答管理・応募期間管理は、今は通常運用では使わない旧/将来用の機能としてここに退避しています。</p>
+            <p className="muted">フォーム作成・回答管理・応募期間管理は上部ナビからも開けます。</p>
           </div>
         </div>
         <div className="advanced-actions">
@@ -6553,7 +6757,9 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
           <Field label="WordPressサイト" value={settings.wordpressSite} onChange={(value) => updateSettings({ wordpressSite: value })} />
           <Field label="SE_Pon URL" value={settings.sePonUrl} onChange={(value) => updateSettings({ sePonUrl: value })} />
-          <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptなどのWebアプリURL" wide />
+          <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptのWebアプリURL" wide />
+          <p className="hint-text wide">docs/google-apps-script/Code.gs をApps Scriptにデプロイして、WebアプリURLをここに貼ります。フォーム送信の受信、新着回答の同期、短いURL公開がこの1本で動きます。</p>
+          <Field label="回答同期トークン" value={settings.responseSyncToken || ""} onChange={(value) => updateSettings({ responseSyncToken: value })} placeholder="Apps ScriptのSECRET_TOKENと同じ文字列" wide />
           <Field label="回答保存先Google DriveフォルダーURL（控え）" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
           <Field label="サムネDrive保存Webhook URL" value={settings.thumbnailDriveEndpointUrl || ""} onChange={(value) => updateSettings({ thumbnailDriveEndpointUrl: value })} placeholder="サムネPNG保存用のGoogle Apps Script WebアプリURL" wide />
           <Field label="サムネ保存先Google DriveフォルダーURL" value={settings.thumbnailDriveFolderUrl || ""} onChange={(value) => updateSettings({ thumbnailDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />

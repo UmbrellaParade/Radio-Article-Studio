@@ -1,58 +1,60 @@
-# Google Drive Response Endpoint
+# 回答受信口（Google Apps Script）セットアップ
 
-Radio Article Studio is hosted on GitHub Pages, so the shared form page cannot directly write files into the operator's Google Drive folder by itself.
+Radio Article StudioはGitHub Pages上の静的アプリなので、回答の受信・保存はGoogle Apps Script（GAS）のWebアプリが担当します。
+`docs/google-apps-script/Code.gs` を1本デプロイするだけで、次の全部が動きます。
 
-To receive online form submissions into Google Drive, create a small Google Apps Script Web App and paste its Web App URL into:
+- 共有フォームの回答受信（回答者にはその場で「受け付けました/失敗しました」が表示される）
+- 添付音源・画像のDriveフォルダー保存（放送回の日付フォルダーに整理）
+- スプレッドシート「回答ログ」への追記
+- ツールの「新着回答を同期」ボタンへの回答一覧配信（手動JSON読み込みが不要になる）
+- フォームの短いURL（`#/r/{slug}`）の即時公開（Codexへのコミット依頼が不要になる）
+- サムネPNGのDrive保存
+
+## 保存先フォルダー構成
+
+回答保存先フォルダー（`FOLDER_ID`）の中に自動で作られます。
 
 ```text
-設定 > 回答保存Webhook URL
+Sunoパ！回答受信フォルダー/
+├─ _responses/          回答JSON（同期用の正本）
+├─ _forms/              公開したフォーム定義JSON
+├─ サムネ/              サムネPNG
+├─ 回答ログ             スプレッドシート（受信履歴）
+└─ 2026-07-23/          放送回ごとの添付ファイル（音源WAV/MP3、アイコン画像）
 ```
 
-## Apps Script Template
+## セットアップ手順（初回のみ）
 
-Replace `YOUR_DRIVE_FOLDER_ID` with the target Google Drive folder ID.
+1. https://script.google.com で新規プロジェクトを作成する。
+2. `docs/google-apps-script/Code.gs` の内容をそのまま貼り付ける。
+3. 先頭の設定を確認する。
+   - `FOLDER_ID`: 回答保存先DriveフォルダーのID（設定済み: `1FnQ0knOIUKnTOYisf7JdKJNORsTgDwza`）
+   - `SECRET_TOKEN`: 好きな合言葉に変更する（例: `sunopa-2026-himitsu`）
+4. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」。
+   - 実行ユーザー: 自分
+   - アクセスできるユーザー: 全員
+5. 表示されたWebアプリURL（`https://script.google.com/macros/s/.../exec`）をコピーする。
+6. Radio Article Studioの「設定」を開き、次を入力する。
+   - 回答保存Webhook URL: 手順5のURL
+   - 回答同期トークン: 手順3で決めた合言葉
+   - （サムネもDriveに保存する場合）サムネDrive保存Webhook URL: 同じURLでOK
+7. リポジトリの `public/app-config.json` の `formEndpointUrl` にも同じURLを入れてコミット＆プッシュする（1回だけ）。
+   - これで短いURL `#/r/{slug}` のフォーム定義がGASから配信され、ツールの「短いURLを公開/更新」ボタンだけでフォームを公開できるようになる。
 
-```javascript
-const FOLDER_ID = "YOUR_DRIVE_FOLDER_ID";
+## 動作確認
 
-function doPost(e) {
-  const folder = DriveApp.getFolderById(FOLDER_ID);
-  const payload = JSON.parse(e.postData.contents);
-  const stamp = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyyMMdd-HHmmss");
-  const respondent = payload.response?.respondent || payload.response?.formId || "response";
-  const safeName = String(respondent).replace(/[\\/:*?"<>|]/g, "_");
+1. ブラウザでWebアプリURLをそのまま開く → `{"ok":true,...}` が表示されればデプロイ成功。
+2. フォーム管理でテストフォームの「短いURLを公開/更新」を押す → 「公開しました」と出る。
+3. 短いURLをシークレットウィンドウで開いてテスト回答を送信 → 「回答を受け付けました（受付番号: ...）」と出る。
+4. 回答管理の「新着回答を同期」を押す → テスト回答が取り込まれる。
+5. Driveフォルダーに `_responses/` のJSONと添付ファイルができていることを確認する。
 
-  folder.createFile(
-    `${stamp}-${safeName}.json`,
-    JSON.stringify(payload, null, 2),
-    MimeType.JSON
-  );
+## Code.gsを更新した場合
 
-  const attachments = payload.response?.attachments || [];
-  attachments.forEach((attachment, index) => {
-    if (!attachment.dataUrl) return;
-    const match = attachment.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-    if (!match) return;
-    const mimeType = match[1];
-    const bytes = Utilities.base64Decode(match[2]);
-    const fileName = attachment.fileName || `${stamp}-attachment-${index + 1}`;
-    folder.createFile(Utilities.newBlob(bytes, mimeType, fileName));
-  });
+「デプロイ」→「デプロイを管理」→ 鉛筆アイコン →「バージョン: 新バージョン」で更新します。
+新しいデプロイを作るとURLが変わってしまうので注意（変わった場合は設定とapp-config.jsonを更新）。
 
-  return ContentService
-    .createTextOutput(JSON.stringify({ ok: true }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-```
+## 制限事項
 
-## Deploy
-
-1. Create a Google Apps Script project.
-2. Paste the script above.
-3. Set `FOLDER_ID`.
-4. Deploy as a Web App.
-5. Execute as yourself.
-6. Allow access to anyone with the URL, or the intended respondent access scope.
-7. Copy the Web App URL into Radio Article Studio settings.
-
-The form uses a simple POST request. The browser cannot fully verify the Drive write because many Apps Script deployments respond without normal cross-origin confirmation, so confirm received files in the Drive folder after a test submission.
+- GASのPOST受信上限は約50MBです。フォーム側でも約45MBを超える送信はエラー表示にしています。音源はMP3推奨（WAVで30MB超は失敗しやすい）。
+- 大きい音源は回答JSONにはbase64を残さず、Drive上のファイルが正本になります。回答管理画面の「Driveで開く」からダウンロードできます。
