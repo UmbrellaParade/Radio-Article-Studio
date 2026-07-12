@@ -920,6 +920,7 @@ textarea {
 
 .track-field-editor-head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
@@ -928,6 +929,18 @@ textarea {
 .track-field-editor-head div {
   display: grid;
   gap: 4px;
+}
+
+.track-field-editor-head > div:first-child {
+  flex: 1 1 260px;
+}
+
+.track-field-editor-actions {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .track-field-editor-head strong {
@@ -1183,6 +1196,13 @@ textarea {
 
 .share-box.short-share strong {
   color: #0a6670;
+}
+
+.share-url-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .collapsible-share summary {
@@ -1841,6 +1861,7 @@ textarea {
   padding: 8px 12px;
   border-radius: 8px;
   font-weight: 900;
+  text-decoration: none;
 }
 
 .primary {
@@ -2217,6 +2238,10 @@ textarea {
 
   .track-field-editor-head {
     display: grid;
+  }
+
+  .share-url-row {
+    grid-template-columns: 1fr;
   }
 
   .icon-danger {

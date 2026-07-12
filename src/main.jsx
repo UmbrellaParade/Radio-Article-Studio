@@ -274,6 +274,8 @@ const MAIN_NAV_ITEMS = [
 
 const formAnchorId = (formId) => `form-section-${formId}`;
 
+const getTrackFieldDefaults = (settings = {}) => normalizeTrackFields(settings.trackFieldDefaults);
+
 const sanitizeLimitInput = (value) => {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -713,7 +715,13 @@ function App() {
   };
 
   const resetTrackFields = (formId, questionId) => {
-    patchQuestion(formId, questionId, { trackFields: normalizeTrackFields([]) });
+    patchQuestion(formId, questionId, { trackFields: getTrackFieldDefaults(data.settings) });
+  };
+
+  const saveTrackFieldsAsDefault = (formId, questionId) => {
+    const form = data.forms.find((item) => item.id === formId);
+    const question = form?.questions.find((item) => item.id === questionId);
+    updateSettings({ trackFieldDefaults: normalizeTrackFields(question?.trackFields) });
   };
 
   const removeQuestion = (formId, questionId) => {
@@ -1537,6 +1545,7 @@ ${socialRows || "-"}
               patchTrackField={patchTrackField}
               moveTrackField={moveTrackField}
               resetTrackFields={resetTrackFields}
+              saveTrackFieldsAsDefault={saveTrackFieldsAsDefault}
               removeQuestion={removeQuestion}
             />
           )}
@@ -2285,11 +2294,20 @@ function Forms({
   patchTrackField,
   moveTrackField,
   resetTrackFields,
+  saveTrackFieldsAsDefault,
   removeQuestion
 }) {
   const [copiedFormId, setCopiedFormId] = useState("");
   const [publishMessage, setPublishMessage] = useState("");
   const [publishingFormId, setPublishingFormId] = useState("");
+  const [savedDefaultQuestionId, setSavedDefaultQuestionId] = useState("");
+  const trackFieldDefaults = getTrackFieldDefaults(settings);
+
+  const saveTrackDefault = (formId, questionId) => {
+    saveTrackFieldsAsDefault(formId, questionId);
+    setSavedDefaultQuestionId(`${formId}:${questionId}`);
+    window.setTimeout(() => setSavedDefaultQuestionId(""), 1800);
+  };
 
   const publishFormShortUrl = async (form) => {
     const slug = getFormPublishedSlug(form);
@@ -2400,7 +2418,12 @@ function Forms({
                     <strong><Share2 size={16} />短いURL</strong>
                     <span>ゲストさんやSNSに渡す用です。まだ開けない時は「Codex用依頼をコピー」をそのままCodexに貼ってください。</span>
                   </div>
-                  <input readOnly value={makePublishedShareUrl(getFormPublishedSlug(form))} onFocus={(event) => event.target.select()} />
+                  <div className="share-url-row">
+                    <input readOnly value={makePublishedShareUrl(getFormPublishedSlug(form))} onFocus={(event) => event.target.select()} />
+                    <a className="secondary" href={makePublishedShareUrl(getFormPublishedSlug(form))} target="_blank" rel="noreferrer">
+                      <Link size={16} />開く
+                    </a>
+                  </div>
                   <div className="inline-actions">
                     <button className="primary" onClick={() => publishFormShortUrl(form)} disabled={publishingFormId === form.id}>
                       <Send size={16} />{publishingFormId === form.id ? "公開中…" : "短いURLを公開/更新"}
@@ -2446,7 +2469,13 @@ function Forms({
                       <div className="question-editor" key={question.id}>
                         <div className="question-row">
                           <input value={question.label} onChange={(event) => patchQuestion(form.id, question.id, { label: event.target.value })} />
-                          <select value={question.kind} onChange={(event) => patchQuestion(form.id, question.id, { kind: event.target.value })}>
+                          <select
+                            value={question.kind}
+                            onChange={(event) => {
+                              const kind = event.target.value;
+                              patchQuestion(form.id, question.id, kind === "track" ? { kind, trackFields: trackFieldDefaults } : { kind });
+                            }}
+                          >
                             {QUESTION_KIND_OPTIONS.map(([value, label]) => (
                               <option key={value} value={value}>{label}</option>
                             ))}
@@ -2484,7 +2513,12 @@ function Forms({
                               <div>
                                 <span>回答フォームではこの順番で表示され、音源プレビューは音源アップロードの直下に出ます。</span>
                               </div>
-                              <button className="secondary" onClick={() => resetTrackFields(form.id, question.id)}><RotateCcw size={16} />既定に戻す</button>
+                              <div className="track-field-editor-actions">
+                                <button className="secondary" onClick={() => saveTrackDefault(form.id, question.id)}>
+                                  <Save size={16} />{savedDefaultQuestionId === `${form.id}:${question.id}` ? "既定にしました" : "この並びを既定にする"}
+                                </button>
+                                <button className="secondary" onClick={() => resetTrackFields(form.id, question.id)}><RotateCcw size={16} />既定に戻す</button>
+                              </div>
                             </div>
                             {trackFields.map((field, fieldIndex) => (
                               <div className="track-field-row" key={field.type}>

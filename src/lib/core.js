@@ -2009,6 +2009,7 @@ export const sampleData = {
     thumbnailDriveEndpointUrl: DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
     thumbnailDriveFolderUrl: DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
     audioSaveMemo: DEFAULT_AUDIO_SAVE_MEMO,
+    trackFieldDefaults: DEFAULT_TRACK_FIELDS,
     responseSyncToken: "",
     lastResponseSyncAt: ""
   },
@@ -2314,6 +2315,7 @@ export function migrateData(input) {
   if (!("thumbnailDriveEndpointUrl" in settings)) settings.thumbnailDriveEndpointUrl = DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL;
   if (!("thumbnailDriveFolderUrl" in settings)) settings.thumbnailDriveFolderUrl = DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL;
   if (!settings.audioSaveMemo) settings.audioSaveMemo = DEFAULT_AUDIO_SAVE_MEMO;
+  settings.trackFieldDefaults = normalizeTrackFields(settings.trackFieldDefaults);
   if (!("responseSyncToken" in settings)) settings.responseSyncToken = "";
   if (!("lastResponseSyncAt" in settings)) settings.lastResponseSyncAt = "";
   if (!settings.responseDriveFolderUrl) settings.responseDriveFolderUrl = DEFAULT_RESPONSE_DRIVE_FOLDER_URL;
