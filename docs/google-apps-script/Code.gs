@@ -26,6 +26,7 @@ const RESPONSES_DIR = "_responses";
 const FORMS_DIR = "_forms";
 const THUMBNAILS_DIR = "サムネ";
 const LOG_SHEET_NAME = "回答ログ";
+const TRACKS_DIR = "楽曲";
 const LOG_HEADERS = [
   "受信日時",
   "回答者",
@@ -146,6 +147,15 @@ function todayDateString() {
   return Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd");
 }
 
+function isAudioAttachment(attachment) {
+  const mimeType = String(attachment && attachment.mimeType ? attachment.mimeType : "").toLowerCase();
+  const fileName = String(attachment && attachment.fileName ? attachment.fileName : "").toLowerCase();
+  return (
+    mimeType.indexOf("audio/") === 0 ||
+    /\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i.test(fileName)
+  );
+}
+
 function normalizeSubmissionLimit(value) {
   const limit = Math.floor(Number(value || 0));
   return isFinite(limit) && limit > 0 ? limit : 0;
@@ -215,9 +225,17 @@ function handleSubmitResponse(payload) {
     (payload.episode && payload.episode.date) || response.episodeId || "未分類",
     "未分類"
   );
-  const attachmentsFolder = getOrCreateFolder(root, episodeLabel);
+  const attachmentFolders = {};
   const savedFiles = [];
   const savedCache = {}; // 同じ添付がresponse.attachmentsとrawAnswersの両方に入っているため二重保存を防ぐ
+
+  const getAttachmentFolder = function (attachment) {
+    const folderName = isAudioAttachment(attachment) ? TRACKS_DIR : episodeLabel;
+    if (!attachmentFolders[folderName]) {
+      attachmentFolders[folderName] = getOrCreateFolder(root, folderName);
+    }
+    return { folder: attachmentFolders[folderName], folderName: folderName };
+  };
 
   const processAttachment = function (attachment) {
     if (!attachment || !attachment.dataUrl) return attachment;
@@ -228,10 +246,11 @@ function handleSubmitResponse(payload) {
       if (!blob) return attachment;
       const fileName = stamp + "_" + respondent + "_" + sanitizeName(attachment.fileName, "attachment");
       blob.setName(fileName);
-      const file = attachmentsFolder.createFile(blob);
-      saved = { fileName: fileName, driveUrl: file.getUrl(), driveFileId: file.getId() };
+      const target = getAttachmentFolder(attachment);
+      const file = target.folder.createFile(blob);
+      saved = { fileName: fileName, driveUrl: file.getUrl(), driveFileId: file.getId(), folderName: target.folderName };
       savedCache[cacheKey] = saved;
-      savedFiles.push({ fileName: fileName, url: saved.driveUrl });
+      savedFiles.push({ fileName: fileName, url: saved.driveUrl, folderName: target.folderName });
     }
     const isSmallImage =
       String(attachment.mimeType || "").indexOf("image/") === 0 &&
@@ -240,6 +259,7 @@ function handleSubmitResponse(payload) {
     for (const key in attachment) next[key] = attachment[key];
     next.driveUrl = saved.driveUrl;
     next.driveFileId = saved.driveFileId;
+    next.driveFolderName = saved.folderName || "";
     // 音源などの大きいデータはDrive本体を正とし、JSONからbase64を外して軽くする
     if (!isSmallImage) delete next.dataUrl;
     return next;
@@ -404,7 +424,13 @@ function formatDateRangeForLog(startDate, endDate) {
 function formatSavedFilesForLog(savedFiles) {
   return (savedFiles || [])
     .map(function (file) {
-      return [file.fileName || "", file.url || ""].filter(Boolean).join("\n");
+      return [
+        file.folderName ? "保存フォルダー: " + file.folderName : "",
+        file.fileName || "",
+        file.url || ""
+      ]
+        .filter(Boolean)
+        .join("\n");
     })
     .filter(Boolean)
     .join("\n\n");
@@ -419,7 +445,7 @@ function collectSavedFilesFromPayload(payload) {
     const key = attachment.driveFileId || url || attachment.fileName || "";
     if (!key || seen[key]) return;
     seen[key] = true;
-    collected.push({ fileName: attachment.fileName || "", url: url });
+    collected.push({ fileName: attachment.fileName || "", url: url, folderName: attachment.driveFolderName || "" });
   };
   const response = payload.response || {};
   (response.attachments || []).forEach(addAttachment);
