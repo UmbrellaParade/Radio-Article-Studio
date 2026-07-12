@@ -161,6 +161,25 @@ export const DEFAULT_TRACK_FIELDS = [
   }
 ];
 
+export const FORM_COLOR_PALETTE = [
+  "#8bd7df",
+  "#f4b6c2",
+  "#b8d98f",
+  "#f3c96b",
+  "#bfa7f2",
+  "#f5a56f",
+  "#9ec5ff",
+  "#d7b78a"
+];
+
+export const DEFAULT_FORM_COLOR = FORM_COLOR_PALETTE[0];
+
+export const normalizeFormColor = (value = "", fallback = DEFAULT_FORM_COLOR) => {
+  const color = String(value || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toLowerCase();
+  return /^#[0-9a-f]{6}$/i.test(fallback) ? fallback.toLowerCase() : DEFAULT_FORM_COLOR;
+};
+
 const TRACK_FIELD_DEFAULTS_BY_TYPE = Object.fromEntries(DEFAULT_TRACK_FIELDS.map((field) => [field.type, field]));
 
 export const normalizeTrackFields = (fields) => {
@@ -2040,6 +2059,7 @@ export const sampleData = {
       type: "ゲスト",
       status: "受付中",
       shareSlug: "guest-form",
+      color: "#8bd7df",
       description: "ゲスト紹介、紹介楽曲、NG/注意事項を集めるフォーム。",
       questions: [
         { id: "q_guest_name", label: "ゲスト名 正式表記", kind: "short", required: true, use: "public" },
@@ -2058,6 +2078,7 @@ export const sampleData = {
       type: "リスナー",
       status: "準備中",
       shareSlug: "listener-tracks",
+      color: "#f3c96b",
       description: "送って頂く楽曲の楽曲名、楽曲URL、WAV/MP3音源、記事掲載可否を集めるフォーム。",
       questions: [
         { id: "q_artist", label: "アーティスト名 正式表記", kind: "short", required: true, use: "article" },
@@ -2072,6 +2093,7 @@ export const sampleData = {
       type: "運営",
       status: "運用中",
       shareSlug: "personality-tracks",
+      color: "#bfa7f2",
       description: "かなめ🦐/べるぼ☂の紹介曲を運営側で入力するフォーム。",
       questions: [
         { id: "q_owner", label: "担当", kind: "choice", required: true, use: "article" },
@@ -2080,6 +2102,7 @@ export const sampleData = {
       ]
     }
   ],
+  formPresets: [],
   applicationPeriods: [
     {
       id: "period_listener_2026_07_10",
@@ -2216,7 +2239,15 @@ export function migrateData(input) {
     );
   };
 
-  const forms = (input.forms ?? sampleData.forms).map((form) => {
+  const normalizePresetQuestions = (questions = []) =>
+    (Array.isArray(questions) ? questions : []).map((question) => {
+      const normalizedQuestion = { ...question, help: question?.help || "" };
+      return normalizedQuestion.kind === "track"
+        ? { ...normalizedQuestion, trackFields: normalizeTrackFields(normalizedQuestion.trackFields) }
+        : normalizedQuestion;
+    });
+
+  const forms = (input.forms ?? sampleData.forms).map((form, formIndex) => {
     let questions = form.questions ?? [];
     const formName = form.name ?? "";
     const isGuestForm = form.id === "form_guest" || formName.includes("ゲスト");
@@ -2301,7 +2332,30 @@ export function migrateData(input) {
       receptionEndDate: form.receptionEndDate || "",
       submissionLimit: normalizeSubmissionLimit(form.submissionLimit) || "",
       shareSlug: form.shareSlug || getFormPublishedSlug(form),
+      color: normalizeFormColor(form.color, FORM_COLOR_PALETTE[formIndex % FORM_COLOR_PALETTE.length]),
       questions
+    };
+  });
+
+  const formPresets = (input.formPresets ?? []).map((preset, presetIndex) => {
+    const presetForm = preset.form ?? {};
+    return {
+      id: preset.id || `preset_${presetIndex + 1}`,
+      name: preset.name || presetForm.name || "フォームプリセット",
+      createdAt: preset.createdAt || "",
+      form: {
+        id: presetForm.id || `preset_form_${presetIndex + 1}`,
+        name: presetForm.name || preset.name || "フォームプリセット",
+        type: presetForm.type || "自由フォーム",
+        status: presetForm.status || "準備中",
+        shareSlug: "",
+        description: presetForm.description || "",
+        receptionStartDate: presetForm.receptionStartDate || "",
+        receptionEndDate: presetForm.receptionEndDate || "",
+        submissionLimit: normalizeSubmissionLimit(presetForm.submissionLimit) || "",
+        color: normalizeFormColor(presetForm.color, FORM_COLOR_PALETTE[presetIndex % FORM_COLOR_PALETTE.length]),
+        questions: normalizePresetQuestions(presetForm.questions)
+      }
     };
   });
 
@@ -2403,6 +2457,7 @@ export function migrateData(input) {
     },
     episodes,
     forms,
+    formPresets,
     applicationPeriods: (input.applicationPeriods ?? sampleData.applicationPeriods).map((period) => ({
       title: "",
       type: "リスナー応募曲",

@@ -626,6 +626,11 @@ h1 {
 
 .form-record {
   scroll-margin-top: 18px;
+  border-color: var(--form-color-mid, #ded2c2);
+  border-left: 7px solid var(--form-color, #8bd7df);
+  background:
+    linear-gradient(90deg, var(--form-color-soft, rgba(139, 215, 223, .14)), rgba(255, 253, 248, 0) 42%),
+    #fffdf8;
 }
 
 .record-summary {
@@ -644,6 +649,9 @@ h1 {
 }
 
 .record-summary strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-width: min(260px, 100%);
   margin-right: auto;
   color: #241f2f;
@@ -662,6 +670,23 @@ h1 {
 .collapsible-record[open] .record-summary {
   border-bottom: 1px solid #eadfce;
   background: #fffaf2;
+}
+
+.form-record[open] .record-summary {
+  border-bottom-color: var(--form-color-mid, #eadfce);
+  background:
+    linear-gradient(90deg, var(--form-color-soft, rgba(139, 215, 223, .14)), rgba(255, 250, 242, 0) 50%),
+    #fffaf2;
+}
+
+.form-color-dot {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--form-color, #8bd7df);
+  box-shadow: 0 0 0 1px var(--form-color-mid, #d6ccbd);
 }
 
 .record-body {
@@ -790,6 +815,69 @@ h1 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.form-preset-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 320px) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fbf6ed;
+}
+
+.form-preset-panel div {
+  display: grid;
+  gap: 3px;
+}
+
+.form-preset-panel strong {
+  color: #241f2f;
+}
+
+.form-preset-panel span {
+  color: #6b6175;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.color-control-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.color-control-row input[type="color"] {
+  min-height: 38px;
+  padding: 4px;
+}
+
+.form-color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.form-color-swatches.wide {
+  grid-column: 1 / -1;
+}
+
+.form-color-swatches button {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px #cfc4b4;
+}
+
+.form-color-swatches button.active {
+  box-shadow: 0 0 0 3px #241f2f;
 }
 
 .track-meta-grid {
@@ -2182,6 +2270,7 @@ textarea {
   .import-mapping-grid,
   .bellbo-url-row,
   .form-grid,
+  .form-preset-panel,
   .track-meta-grid,
   .question-row,
   .track-field-row,

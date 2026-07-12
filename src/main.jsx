@@ -56,6 +56,8 @@ import {
   QUESTION_USE_LABELS,
   QUESTION_KIND_OPTIONS,
   TRACK_FIELD_TYPE_OPTIONS,
+  FORM_COLOR_PALETTE,
+  normalizeFormColor,
   normalizeTrackFields,
   TRACK_URL_ERROR_MESSAGE,
   TRACK_URL_PATTERN,
@@ -277,6 +279,65 @@ const UI_STATE_KEY = `${STORAGE_KEY}:ui`;
 const formAnchorId = (formId) => `form-section-${formId}`;
 
 const getTrackFieldDefaults = (settings = {}) => normalizeTrackFields(settings.trackFieldDefaults);
+
+const hexToRgba = (hex, alpha) => {
+  const color = normalizeFormColor(hex).slice(1);
+  const red = parseInt(color.slice(0, 2), 16);
+  const green = parseInt(color.slice(2, 4), 16);
+  const blue = parseInt(color.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+};
+
+const getFormColorStyle = (color) => {
+  const normalized = normalizeFormColor(color);
+  return {
+    "--form-color": normalized,
+    "--form-color-soft": hexToRgba(normalized, 0.14),
+    "--form-color-mid": hexToRgba(normalized, 0.32)
+  };
+};
+
+const cloneFormQuestion = (question) => ({
+  ...question,
+  id: newId("q"),
+  help: question.help || "",
+  trackFields: question.kind === "track" ? normalizeTrackFields(question.trackFields) : question.trackFields
+});
+
+const makeFormSnapshot = (form) => ({
+  name: form.name || "フォームプリセット",
+  type: form.type || "自由フォーム",
+  status: form.status || "準備中",
+  description: form.description || "",
+  receptionStartDate: form.receptionStartDate || "",
+  receptionEndDate: form.receptionEndDate || "",
+  submissionLimit: form.submissionLimit || "",
+  color: normalizeFormColor(form.color),
+  questions: (form.questions || []).map((question) => ({
+    ...question,
+    help: question.help || "",
+    trackFields: question.kind === "track" ? normalizeTrackFields(question.trackFields) : question.trackFields
+  }))
+});
+
+const makeFormFromPreset = (presetForm, index = 0) => {
+  const source = makeFormSnapshot(presetForm || {});
+  return {
+    ...source,
+    id: newId("form"),
+    name: `${source.name} コピー`,
+    shareSlug: "",
+    color: normalizeFormColor(source.color, FORM_COLOR_PALETTE[index % FORM_COLOR_PALETTE.length]),
+    questions: source.questions.map(cloneFormQuestion)
+  };
+};
+
+const makeFormPreset = (form, name = "") => ({
+  id: newId("preset"),
+  name: name || form.name || "フォームプリセット",
+  createdAt: new Date().toISOString(),
+  form: makeFormSnapshot(form)
+});
 
 function readUiState() {
   try {
@@ -647,6 +708,7 @@ function App() {
         type: "自由フォーム",
         status: "準備中",
         shareSlug: "",
+        color: normalizeFormColor(FORM_COLOR_PALETTE[forms.length % FORM_COLOR_PALETTE.length]),
         description: "",
         receptionStartDate: "",
         receptionEndDate: "",
@@ -657,6 +719,33 @@ function App() {
       }
     ]);
     setActive("forms");
+  };
+
+  const addFormFromPreset = (preset) => {
+    if (!preset?.form) return;
+    const nextForm = makeFormFromPreset(preset.form, data.forms.length);
+    updateData("forms", (forms) => [...forms, nextForm]);
+    setCollapsibleOpen(`form:${nextForm.id}:record`, true);
+    setActive("forms");
+  };
+
+  const saveFormPreset = (formId) => {
+    const form = data.forms.find((item) => item.id === formId);
+    if (!form) return;
+    updateData("formPresets", (presets = []) => [makeFormPreset(form), ...presets]);
+  };
+
+  const removeFormPreset = (presetId) => {
+    updateData("formPresets", (presets = []) => presets.filter((preset) => preset.id !== presetId));
+  };
+
+  const removeFormWithBackup = (form) => {
+    if (!form) return;
+    setData((current) => ({
+      ...current,
+      forms: current.forms.filter((item) => item.id !== form.id),
+      formPresets: [makeFormPreset(form, `削除バックアップ: ${form.name || "フォーム名未入力"}`), ...(current.formPresets ?? [])]
+    }));
   };
 
   const addApplicationPeriod = () => {
@@ -1586,10 +1675,14 @@ ${socialRows || "-"}
           {active === "forms" && (
             <Forms
               forms={data.forms}
+              formPresets={data.formPresets ?? []}
               settings={data.settings}
               patchItem={patchItem}
-              removeItem={removeItem}
               addForm={addForm}
+              addFormFromPreset={addFormFromPreset}
+              saveFormPreset={saveFormPreset}
+              removeFormPreset={removeFormPreset}
+              removeFormWithBackup={removeFormWithBackup}
               addQuestion={addQuestion}
               patchQuestion={patchQuestion}
               moveQuestion={moveQuestion}
@@ -2353,10 +2446,14 @@ function ApplicationPeriods({
 
 function Forms({
   forms,
+  formPresets = [],
   settings,
   patchItem,
-  removeItem,
   addForm,
+  addFormFromPreset,
+  saveFormPreset,
+  removeFormPreset,
+  removeFormWithBackup,
   addQuestion,
   patchQuestion,
   moveQuestion,
@@ -2372,7 +2469,17 @@ function Forms({
   const [publishMessage, setPublishMessage] = useState("");
   const [publishingFormId, setPublishingFormId] = useState("");
   const [savedDefaultQuestionId, setSavedDefaultQuestionId] = useState("");
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presetMessage, setPresetMessage] = useState("");
   const trackFieldDefaults = getTrackFieldDefaults(settings);
+  const builtInFormPresets = sampleData.forms.map((form) => ({
+    id: `builtin:${form.id}`,
+    name: `標準: ${form.name}`,
+    builtIn: true,
+    form
+  }));
+  const allFormPresets = [...builtInFormPresets, ...formPresets];
+  const selectedPreset = allFormPresets.find((preset) => preset.id === selectedPresetId) ?? allFormPresets[0];
 
   const saveTrackDefault = (formId, questionId) => {
     saveTrackFieldsAsDefault(formId, questionId);
@@ -2386,6 +2493,33 @@ function Forms({
     collapsibleState,
     setCollapsibleOpen
   });
+
+  const addSelectedPreset = () => {
+    if (!selectedPreset) return;
+    addFormFromPreset(selectedPreset);
+    setPresetMessage(`「${selectedPreset.name}」からフォームを追加しました。`);
+    window.setTimeout(() => setPresetMessage(""), 2400);
+  };
+
+  const savePreset = (form) => {
+    saveFormPreset(form.id);
+    setPresetMessage(`「${form.name || "フォーム名未入力"}」をプリセットに保存しました。`);
+    window.setTimeout(() => setPresetMessage(""), 2400);
+  };
+
+  const deleteSelectedPreset = () => {
+    if (!selectedPreset || selectedPreset.builtIn) return;
+    removeFormPreset(selectedPreset.id);
+    setSelectedPresetId("");
+    setPresetMessage(`「${selectedPreset.name}」をプリセットから削除しました。`);
+    window.setTimeout(() => setPresetMessage(""), 2400);
+  };
+
+  const deleteForm = (form) => {
+    removeFormWithBackup(form);
+    setPresetMessage(`「${form.name || "フォーム名未入力"}」を削除し、プリセットにバックアップしました。`);
+    window.setTimeout(() => setPresetMessage(""), 3000);
+  };
 
   const publishFormShortUrl = async (form) => {
     const slug = getFormPublishedSlug(form);
@@ -2441,12 +2575,30 @@ function Forms({
   return (
     <div className="view-stack">
       <SectionTitle title="フォーム管理" subtitle="質問テンプレートを作り、「短いURLを公開/更新」ですぐ共有できます。回答は回答管理の「新着回答を同期」で自動取得します。" action={<button className="primary" onClick={addForm}><Plus size={16} />フォーム追加</button>} />
+      <div className="form-preset-panel">
+        <div>
+          <strong>フォームプリセット</strong>
+          <span>似たフォームを作る時や、削除バックアップから戻す時に使います。</span>
+        </div>
+        <select value={selectedPreset?.id ?? ""} onChange={(event) => setSelectedPresetId(event.target.value)}>
+          {allFormPresets.map((preset) => (
+            <option key={preset.id} value={preset.id}>{preset.name}</option>
+          ))}
+        </select>
+        <button className="secondary" onClick={addSelectedPreset} disabled={!selectedPreset}>
+          <Plus size={16} />プリセットから追加
+        </button>
+        <button className="icon-danger" onClick={deleteSelectedPreset} disabled={!selectedPreset || selectedPreset.builtIn} title="保存プリセットを削除">
+          <Trash2 size={16} />
+        </button>
+      </div>
+      {presetMessage && <p className="hint-text">{presetMessage}</p>}
       {publishMessage && <p className="hint-text">{publishMessage}</p>}
       <div className="records">
         {forms.map((form) => (
-          <PersistentDetails {...detailsProps(`form:${form.id}:record`)} className="record collapsible-record form-record" key={form.id} id={formAnchorId(form.id)}>
+          <PersistentDetails {...detailsProps(`form:${form.id}:record`)} className="record collapsible-record form-record" key={form.id} id={formAnchorId(form.id)} style={getFormColorStyle(form.color)}>
             <summary className="record-summary">
-              <strong>{form.name || "フォーム名未入力"}</strong>
+              <strong><i className="form-color-dot" aria-hidden="true" />{form.name || "フォーム名未入力"}</strong>
               <span>{form.questions.length}項目</span>
               <span>{formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>
               {form.submissionLimit ? <span>上限 {form.submissionLimit}件</span> : <span>上限なし</span>}
@@ -2454,13 +2606,35 @@ function Forms({
             <div className="record-body">
               <div className="record-head compact">
                 <strong>フォーム編集</strong>
-                <button className="icon-danger" onClick={() => removeItem("forms", form.id)}><Trash2 size={16} /></button>
+                <div className="inline-actions">
+                  <button className="secondary" onClick={() => savePreset(form)}><Save size={16} />プリセット保存</button>
+                  <button className="icon-danger" onClick={() => deleteForm(form)} title="削除バックアップを残してフォームを削除"><Trash2 size={16} /></button>
+                </div>
               </div>
               <PersistentDetails {...detailsProps(`form:${form.id}:basic`, true)} className="collapsible-section">
                 <summary><strong>基本設定</strong><span>フォーム名・説明</span></summary>
                 <div className="form-grid">
                   <Field label="フォーム名" value={form.name} onChange={(value) => patchItem("forms", form.id, { name: value })} />
                   <Field label="短縮ID" value={form.shareSlug} onChange={(value) => patchItem("forms", form.id, { shareSlug: value })} placeholder="例: guest-form" />
+                  <label className="field">
+                    <span>フォーム色</span>
+                    <div className="color-control-row">
+                      <input type="color" value={normalizeFormColor(form.color)} onChange={(event) => patchItem("forms", form.id, { color: normalizeFormColor(event.target.value) })} />
+                      <input value={form.color || ""} onChange={(event) => patchItem("forms", form.id, { color: event.target.value })} onBlur={(event) => patchItem("forms", form.id, { color: normalizeFormColor(event.target.value) })} />
+                    </div>
+                  </label>
+                  <div className="form-color-swatches wide" aria-label="フォーム色プリセット">
+                    {FORM_COLOR_PALETTE.map((color) => (
+                      <button
+                        type="button"
+                        key={color}
+                        className={normalizeFormColor(form.color) === color ? "active" : ""}
+                        style={{ background: color }}
+                        onClick={() => patchItem("forms", form.id, { color })}
+                        aria-label={`フォーム色 ${color}`}
+                      />
+                    ))}
+                  </div>
                   <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
                 </div>
               </PersistentDetails>
