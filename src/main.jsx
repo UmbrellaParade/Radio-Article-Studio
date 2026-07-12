@@ -1251,9 +1251,35 @@ const getTrackColumnField = (label = "") => {
 };
 
 const getTrackColumnGroup = (label = "") => {
-  const text = String(label || "");
+  const rawText = String(label || "");
+  const text = rawText.normalize("NFKC");
+  const selectionMatch = text.match(/(?:選曲|曲|楽曲|song|track)\s*(\d+)/i);
+  if (selectionMatch) return Number(selectionMatch[1]) || 1;
+  const bracketNumberMatch = text.match(/[【［\[\(（]\s*(\d+)\s*[】］\]\)）]/);
+  if (bracketNumberMatch) return Number(bracketNumberMatch[1]) || 1;
+  const circledNumberMap = {
+    "①": 1,
+    "❶": 1,
+    "➀": 1,
+    "②": 2,
+    "❷": 2,
+    "➁": 2,
+    "③": 3,
+    "❸": 3,
+    "➂": 3,
+    "④": 4,
+    "❹": 4,
+    "➃": 4,
+    "⑤": 5,
+    "❺": 5,
+    "➄": 5
+  };
+  const circledMatch = rawText.match(/[①②③④⑤❶❷❸❹❺➀➁➂➃➄]/);
+  if (circledMatch) return circledNumberMap[circledMatch[0]] || 1;
   const suffixMatch = text.match(/_(\d+)$/);
   if (suffixMatch) return Number(suffixMatch[1]) || 1;
+  if (/五曲|5曲|５曲|五つ目|5つ目|５つ目|5番|５番|fifth/i.test(text)) return 5;
+  if (/四曲|4曲|４曲|四つ目|4つ目|４つ目|4番|４番|fourth/i.test(text)) return 4;
   if (/三曲|3曲|３曲|三つ目|3つ目|３つ目|3番|３番|third/i.test(text)) return 3;
   if (/二曲|2曲|２曲|二つ目|2つ目|２つ目|2番|２番|second/i.test(text)) return 2;
   return 1;
@@ -4256,7 +4282,8 @@ function SourceImportCard({
   kind
 }) {
   const columns = Object.keys(preview?.rows?.[0] ?? {}).filter(Boolean);
-  const previewRows = preview ? buildImportPreviewRows(preview.rows, kind, preview.mapping).slice(0, 8) : [];
+  const allPreviewRows = preview ? buildImportPreviewRows(preview.rows, kind, preview.mapping) : [];
+  const previewRows = allPreviewRows.slice(0, 8);
   const columnLabels = { "": "自動判定" };
   columns.forEach((column) => {
     columnLabels[column] = column;
@@ -4290,7 +4317,7 @@ function SourceImportCard({
           <div className="record-head">
             <div>
               <strong>プレビュー</strong>
-              <p className="muted">{preview.rows.length}行を読み込み済み。内容を確認してから反映してください。</p>
+              <p className="muted">{preview.rows.length}行 / {allPreviewRows.length}件の楽曲候補を読み込み済み。内容を確認してから反映してください。</p>
             </div>
             <div className="button-row compact">
               <button className="primary" onClick={onApplyPreview}><Save size={16} />反映</button>
@@ -4335,8 +4362,8 @@ function SourceImportCard({
               </tbody>
             </table>
           </div>
-          {preview.rows.length > previewRows.length && (
-            <p className="hint-text">先頭{previewRows.length}行だけ表示しています。反映時は{preview.rows.length}行すべて取り込みます。</p>
+          {allPreviewRows.length > previewRows.length && (
+            <p className="hint-text">先頭{previewRows.length}件だけ表示しています。反映時は{allPreviewRows.length}件すべて取り込みます。</p>
           )}
         </div>
       )}
