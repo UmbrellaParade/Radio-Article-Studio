@@ -28,6 +28,7 @@ import {
 import "./styles.css";
 
 const STORAGE_KEY = "radio-article-studio:v1";
+const STORAGE_COMPRESSED_PREFIX = "lz16:";
 const THUMBNAIL_IMAGE_DB_NAME = "radio-article-studio-thumbnails";
 const THUMBNAIL_IMAGE_STORE = "generated";
 const SHARED_FORMS_DIR = "shared-forms";
@@ -1661,6 +1662,22 @@ const decodeCompressedSharePayload = (value) => {
   return JSON.parse(json);
 };
 
+const encodeStoredData = (payload) => `${STORAGE_COMPRESSED_PREFIX}${LZString.compressToUTF16(JSON.stringify(payload))}`;
+
+const decodeStoredData = (value) => {
+  const stored = String(value || "");
+  if (stored.startsWith(STORAGE_COMPRESSED_PREFIX)) {
+    const json = LZString.decompressFromUTF16(stored.slice(STORAGE_COMPRESSED_PREFIX.length));
+    if (!json) throw new Error("stored-data-decode-failed");
+    return JSON.parse(json);
+  }
+  return JSON.parse(stored);
+};
+
+const saveStoredData = (payload) => {
+  localStorage.setItem(STORAGE_KEY, encodeStoredData(payload));
+};
+
 const normalizeShareSlug = (value = "", fallback = "form") => {
   const fallbackSlug =
     String(fallback || "form")
@@ -1744,7 +1761,7 @@ const saveDataUrlWithPicker = async (dataUrl, fileName = "download") => {
 const getRawStoredDataForShare = () => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? { ...sampleData, ...JSON.parse(stored) } : sampleData;
+    return stored ? { ...sampleData, ...decodeStoredData(stored) } : sampleData;
   } catch {
     return sampleData;
   }
@@ -2212,6 +2229,9 @@ function migrateData(input) {
   const storedActiveLayoutPreset =
     layoutPresetOverrides[activeLayoutPresetId] ?? customLayoutPresets.find((preset) => preset.id === activeLayoutPresetId);
   const hasBuiltInLayoutOverride = Boolean(layoutPresetOverrides[activeLayoutPresetId]);
+  const hasSavedThumbnailTemplates = Boolean(
+    rawThumbnailStudio.templates && Object.values(rawThumbnailStudio.templates).some((template) => template && Object.keys(template).length)
+  );
   const normalizedThumbnailTemplates = Object.fromEntries(
     THUMBNAIL_PRESETS.map((preset) => [
       preset.key,
@@ -2222,7 +2242,10 @@ function migrateData(input) {
     ])
   );
   const shouldRefreshBuiltInLayout =
-    Boolean(builtInLayoutPreset) && !hasBuiltInLayoutOverride && rawThumbnailStudio.layoutPresetVersion !== THUMBNAIL_LAYOUT_PRESET_VERSION;
+    Boolean(builtInLayoutPreset) &&
+    !hasBuiltInLayoutOverride &&
+    !hasSavedThumbnailTemplates &&
+    rawThumbnailStudio.layoutPresetVersion !== THUMBNAIL_LAYOUT_PRESET_VERSION;
   const thumbnailTemplates = shouldRefreshBuiltInLayout
     ? applyIconLayoutPresetToTemplates(normalizedThumbnailTemplates, builtInLayoutPreset)
     : storedActiveLayoutPreset
@@ -2305,7 +2328,7 @@ function migrateData(input) {
 function loadData() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return migrateData(stored ? JSON.parse(stored) : sampleData);
+    return migrateData(stored ? decodeStoredData(stored) : sampleData);
   } catch {
     return migrateData(sampleData);
   }
@@ -2325,14 +2348,17 @@ function App() {
   const [restorePayload, setRestorePayload] = useState(readRestorePayload);
   const [importingSource, setImportingSource] = useState("");
   const [importPreviews, setImportPreviews] = useState({});
+  const [storageWarning, setStorageWarning] = useState("");
   const autoThumbnailGenerationRef = useRef("");
 
   useEffect(() => {
     if (sharedPayload || restorePayload) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch {
-      console.warn("Radio Article Studio: browser storage quota exceeded. Export JSON to preserve current data.");
+      saveStoredData(data);
+      setStorageWarning("");
+    } catch (error) {
+      setStorageWarning("ブラウザ保存に失敗しました。再読み込みすると直前の変更が戻る可能性があります。設定からJSONを書き出してください。");
+      console.warn("Radio Article Studio: browser storage failed. Export JSON to preserve current data.", error);
     }
   }, [data, sharedPayload, restorePayload]);
 
@@ -3275,8 +3301,9 @@ ${socialRows || "-"}
   const restoreData = (incomingData) => {
     try {
       const next = migrateData(incomingData);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      saveStoredData(next);
       setData(next);
+      setStorageWarning("");
       setSelectedEpisodeId(next.episodes?.[0]?.id ?? "");
       setSharedPayload(null);
       setRestorePayload(null);
@@ -3316,6 +3343,12 @@ ${socialRows || "-"}
           </button>
         ))}
       </nav>
+
+      {storageWarning && (
+        <div className="storage-warning" role="alert">
+          {storageWarning}
+        </div>
+      )}
 
       <div className="workspace">
         <aside className="side-panel">

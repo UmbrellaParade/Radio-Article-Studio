@@ -134,6 +134,16 @@ h1 {
   align-items: start;
 }
 
+.storage-warning {
+  padding: 12px 16px;
+  border: 1px solid #ee9f9f;
+  border-radius: 8px;
+  background: #fff1f1;
+  color: #8a2020;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .side-panel,
 .content-panel,
 .panel,
