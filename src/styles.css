@@ -245,6 +245,11 @@ h1 {
   margin-bottom: 2px;
 }
 
+.side-nav-group {
+  display: grid;
+  gap: 5px;
+}
+
 .side-nav button {
   display: flex;
   align-items: center;
@@ -264,6 +269,34 @@ h1 {
   border-color: #241f2f;
   background: #241f2f;
   color: #fff;
+}
+
+.side-subnav {
+  display: grid;
+  gap: 4px;
+  padding-left: 14px;
+}
+
+.side-subnav button {
+  min-height: 30px;
+  padding: 6px 8px;
+  border-left: 2px solid #d6ccbd;
+  border-radius: 6px;
+  color: #645b6f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.side-subnav button:hover {
+  border-left-color: #14b6c8;
+  background: #fffaf2;
+  color: #241f2f;
+}
+
+.side-subnav span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .content-panel {
@@ -589,6 +622,10 @@ h1 {
 .collapsible-record {
   padding: 0;
   overflow: hidden;
+}
+
+.form-record {
+  scroll-margin-top: 18px;
 }
 
 .record-summary {

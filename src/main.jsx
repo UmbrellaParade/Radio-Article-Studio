@@ -272,6 +272,8 @@ const MAIN_NAV_ITEMS = [
   ["settings", "設定", Settings]
 ];
 
+const formAnchorId = (formId) => `form-section-${formId}`;
+
 const sanitizeLimitInput = (value) => {
   const text = String(value || "").trim();
   if (!text) return "";
@@ -1484,7 +1486,7 @@ ${socialRows || "-"}
               <span>{selectedEpisode.status}</span>
             </div>
           )}
-          <SideNavigator active={active} setActive={setActive} />
+          <SideNavigator active={active} setActive={setActive} forms={data.forms} />
         </aside>
 
         <section className="content-panel">
@@ -1607,20 +1609,40 @@ ${socialRows || "-"}
   );
 }
 
-function SideNavigator({ active, setActive }) {
+function SideNavigator({ active, setActive, forms = [] }) {
   const goToPanel = (key) => {
     setActive(key);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  };
+
+  const goToForm = (formId) => {
+    setActive("forms");
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        document.getElementById(formAnchorId(formId))?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
   };
 
   return (
     <nav className="side-nav" aria-label="ツール目次">
       <div className="side-title">目次</div>
       {MAIN_NAV_ITEMS.map(([key, label, Icon]) => (
-        <button key={key} className={active === key ? "active" : ""} onClick={() => goToPanel(key)}>
-          <Icon size={15} />
-          <span>{label}</span>
-        </button>
+        <div className="side-nav-group" key={key}>
+          <button className={active === key ? "active" : ""} onClick={() => goToPanel(key)}>
+            <Icon size={15} />
+            <span>{label}</span>
+          </button>
+          {key === "forms" && active === "forms" && forms.length > 0 && (
+            <div className="side-subnav" aria-label="フォーム内目次">
+              {forms.map((form, index) => (
+                <button type="button" key={form.id} onClick={() => goToForm(form.id)}>
+                  <span>{index + 1}. {form.name || "フォーム名未入力"}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       ))}
     </nav>
   );
@@ -2326,7 +2348,7 @@ function Forms({
       {publishMessage && <p className="hint-text">{publishMessage}</p>}
       <div className="records">
         {forms.map((form) => (
-          <details className="record collapsible-record form-record" key={form.id}>
+          <details className="record collapsible-record form-record" key={form.id} id={formAnchorId(form.id)}>
             <summary className="record-summary">
               <strong>{form.name || "フォーム名未入力"}</strong>
               <span>{form.questions.length}項目</span>
