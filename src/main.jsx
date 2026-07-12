@@ -793,19 +793,37 @@ const normalizeKey = (value = "") =>
 
 const compactLines = (items) => items.filter(Boolean).join("\n");
 
-const pick = (row, aliases) => {
-  const normalized = Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizeKey(key), value]));
+const isExcludedImportLabel = (label = "", excludePatterns = []) =>
+  excludePatterns.some((pattern) => pattern.test(String(label || "")));
+
+const pick = (row, aliases, excludePatterns = []) => {
+  const entries = Object.entries(row).map(([key, value]) => ({
+    label: String(key || ""),
+    key: normalizeKey(key),
+    value
+  }));
   for (const alias of aliases) {
-    const value = normalized[normalizeKey(alias)];
-    if (value != null && String(value).trim() !== "") return String(value).trim();
+    const normalizedAlias = normalizeKey(alias);
+    const match = entries.find(
+      ({ label, key, value }) =>
+        key === normalizedAlias &&
+        !isExcludedImportLabel(label, excludePatterns) &&
+        value != null &&
+        String(value).trim() !== ""
+    );
+    if (match) return String(match.value).trim();
   }
   for (const alias of aliases) {
     const normalizedAlias = normalizeKey(alias);
     if (normalizedAlias.length < 4 || ["url", "xurl", "wav", "mp3"].includes(normalizedAlias)) continue;
-    const match = Object.entries(normalized).find(
-      ([key, value]) => key.includes(normalizedAlias) && value != null && String(value).trim() !== ""
+    const match = entries.find(
+      ({ label, key, value }) =>
+        key.includes(normalizedAlias) &&
+        !isExcludedImportLabel(label, excludePatterns) &&
+        value != null &&
+        String(value).trim() !== ""
     );
-    if (match) return String(match[1]).trim();
+    if (match) return String(match.value).trim();
   }
   return "";
 };
@@ -822,7 +840,7 @@ const pickByLabelPattern = (row, patterns, excludePatterns = []) => {
 };
 
 const pickImportValue = (row, aliases, patterns = [], excludePatterns = []) =>
-  pick(row, aliases) || pickByLabelPattern(row, patterns, excludePatterns);
+  pick(row, aliases, excludePatterns) || pickByLabelPattern(row, patterns, excludePatterns);
 
 const isImportMetadataColumn = (key = "") => {
   const normalized = normalizeKey(key);
@@ -1211,76 +1229,153 @@ const buildResponseFromRow = (row, episodeId, formId, fallbackRespondent = "") =
   };
 };
 
-const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId = "") => {
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object ?? {}, key);
+const pickOverride = (overrides, key, fallback) => (hasOwn(overrides, key) ? overrides[key] : fallback);
+
+const TRACK_COLUMN_PATTERNS = {
+  aiArtist: [/AI\s*(アーティスト|名義|名前|活動名)|AI artist/i],
+  url: [/(楽曲|曲|Suno|YouTube|Youtube|ユーチューブ).*(URL|リンク)|(URL|リンク).*(楽曲|曲|Suno|YouTube|Youtube|ユーチューブ)/i],
+  audioFile: [/音源|楽曲.*アップロード|曲.*アップロード|mp3|wav|Drive|ドライブ/i],
+  articlePoint: [/想い|思い|曲紹介|楽曲紹介|こだわり|おすすめ|ポイント|メッセージ|コメント|制作意図|記事で触れて/],
+  title: [/曲名|楽曲名|楽曲.*タイトル|曲.*タイトル|紹介曲|タイトル/]
+};
+
+const getTrackColumnField = (label = "") => {
+  if (/アイコン|画像|プロフィール|サムネ/i.test(label)) return "";
+  if (TRACK_COLUMN_PATTERNS.aiArtist.some((pattern) => pattern.test(label))) return "aiArtist";
+  if (TRACK_COLUMN_PATTERNS.url.some((pattern) => pattern.test(label))) return "url";
+  if (TRACK_COLUMN_PATTERNS.audioFile.some((pattern) => pattern.test(label))) return "audioFile";
+  if (TRACK_COLUMN_PATTERNS.articlePoint.some((pattern) => pattern.test(label))) return "articlePoint";
+  if (TRACK_COLUMN_PATTERNS.title.some((pattern) => pattern.test(label))) return "title";
+  return "";
+};
+
+const getTrackColumnGroup = (label = "") => {
+  const text = String(label || "");
+  const suffixMatch = text.match(/_(\d+)$/);
+  if (suffixMatch) return Number(suffixMatch[1]) || 1;
+  if (/三曲|3曲|３曲|三つ目|3つ目|３つ目|3番|３番|third/i.test(text)) return 3;
+  if (/二曲|2曲|２曲|二つ目|2つ目|２つ目|2番|２番|second/i.test(text)) return 2;
+  return 1;
+};
+
+const collectTrackFieldGroups = (row = {}) => {
+  const groups = new Map();
+  meaningfulRowEntries(row).forEach(({ label, value }) => {
+    const field = getTrackColumnField(label);
+    if (!field) return;
+    const group = getTrackColumnGroup(label);
+    const current = groups.get(group) ?? {};
+    if (!current[field]) current[field] = value;
+    groups.set(group, current);
+  });
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => left - right)
+    .map(([group, values]) => ({ group, values }));
+};
+
+const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId = "", overrides = {}) => {
   const ownerName =
+    pickOverride(
+      overrides,
+      "artist",
+      pickImportValue(
+        row,
+        [
+          "ゲスト名",
+          "活動名",
+          "活動名義",
+          "応募者名",
+          "応募者のお名前",
+          "お名前",
+          "お名前 よみかた",
+          "クリエイター名",
+          "ハンドルネーム",
+          "ラジオネーム",
+          "パーソナリティ名",
+          "回答者",
+          "担当",
+          "アーティスト名",
+          "アーティスト名 正式表記"
+        ],
+        [/ゲスト.*(名|名前|表記)/, /応募者|お名前|名前|活動名|活動名義|名義|クリエイター名|ハンドルネーム|ラジオネーム|パーソナリティ名|担当|アーティスト名/],
+        [/AI\s*アーティスト|AI artist|AI名義/i]
+      )
+    ) || fallbackArtist;
+  const aiArtist = pickOverride(
+    overrides,
+    "aiArtist",
     pickImportValue(
       row,
       [
-        "ゲスト名",
-        "活動名",
-        "活動名義",
-        "応募者名",
-        "応募者のお名前",
-        "お名前",
-        "お名前 よみかた",
-        "クリエイター名",
-        "ハンドルネーム",
-        "ラジオネーム",
-        "パーソナリティ名",
-        "回答者",
-        "担当",
-        "アーティスト名",
-        "アーティスト名 正式表記"
+        "AIアーティスト名",
+        "AIアーティストの名前",
+        "AIアーティスト",
+        "AI artist",
+        "AI Artist",
+        "AI名義",
+        "AIアーティスト名 正式表記",
+        "AIアーティスト名（正式表記）",
+        "AIアーティスト名(正式表記)"
       ],
-      [/ゲスト.*(名|名前|表記)/, /応募者|お名前|名前|活動名|活動名義|名義|クリエイター名|ハンドルネーム|ラジオネーム|パーソナリティ名|担当|アーティスト名/],
-      [/AI\s*アーティスト|AI artist|AI名義/i]
-    ) || fallbackArtist;
-  const aiArtist = pickImportValue(
-    row,
-    [
-      "AIアーティスト名",
-      "AIアーティストの名前",
-      "AIアーティスト",
-      "AI artist",
-      "AI Artist",
-      "AI名義",
-      "AIアーティスト名 正式表記",
-      "AIアーティスト名（正式表記）",
-      "AIアーティスト名(正式表記)"
-    ],
-    [/AI\s*(アーティスト|名義|名前|活動名)|AI artist/i]
+      TRACK_COLUMN_PATTERNS.aiArtist
+    )
   );
   const artist = ownerName;
-  const title = pickImportValue(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"], [/曲名|楽曲名|楽曲.*タイトル|曲.*タイトル|紹介曲|タイトル/]);
-  const url = pickImportValue(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"], [/(楽曲|曲|Suno|YouTube|Youtube|ユーチューブ).*(URL|リンク)|(URL|リンク).*(楽曲|曲|Suno|YouTube|Youtube|ユーチューブ)/i]);
-  const audioFile = pickImportValue(
-    row,
-    ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"],
-    [/音源|楽曲.*アップロード|曲.*アップロード|mp3|wav|Drive|ドライブ/i],
-    [/アイコン|画像|プロフィール|サムネ/i]
+  const title = pickOverride(
+    overrides,
+    "title",
+    pickImportValue(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"], TRACK_COLUMN_PATTERNS.title)
   );
-  const ownerIconUrl = pickImportValue(
-    row,
-    [
-      "応募者アイコン画像",
-      "応募者アイコン",
-      "応募者さんのアイコン",
-      "ゲストアイコン画像",
-      "アイコン画像",
-      "プロフィール画像",
-      "サムネ用画像",
-      "見出しサムネ画像",
-      "画像URL",
-      "アイコンURL",
-      "icon",
-      "avatar",
-      "profile image"
-    ],
-    [/アイコン|プロフィール画像|サムネ|見出し.*画像|画像URL|アイコンURL|icon|avatar|profile image/i],
-    [/音源|楽曲|曲|mp3|wav/i]
+  const url = pickOverride(
+    overrides,
+    "url",
+    pickImportValue(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"], TRACK_COLUMN_PATTERNS.url)
   );
-  const articlePoint = pickImportValue(row, ["曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"], [/想い|思い|曲紹介|楽曲紹介|こだわり|おすすめ|ポイント|メッセージ|コメント|制作意図|記事で触れて/]);
-  const honorific = pickImportValue(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"], [/敬称|表記注意|クレジット|呼び方|名前の出し方/]) || getDefaultOwnerHonorific(source);
+  const audioFile = pickOverride(
+    overrides,
+    "audioFile",
+    pickImportValue(
+      row,
+      ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"],
+      TRACK_COLUMN_PATTERNS.audioFile,
+      [/アイコン|画像|プロフィール|サムネ/i]
+    )
+  );
+  const ownerIconUrl = pickOverride(
+    overrides,
+    "ownerIconUrl",
+    pickImportValue(
+      row,
+      [
+        "応募者アイコン画像",
+        "応募者アイコン",
+        "応募者さんのアイコン",
+        "ゲストアイコン画像",
+        "アイコン画像",
+        "プロフィール画像",
+        "サムネ用画像",
+        "見出しサムネ画像",
+        "画像URL",
+        "アイコンURL",
+        "icon",
+        "avatar",
+        "profile image"
+      ],
+      [/アイコン|プロフィール画像|サムネ|見出し.*画像|画像URL|アイコンURL|icon|avatar|profile image/i],
+      [/音源|楽曲|曲|mp3|wav/i]
+    )
+  );
+  const articlePoint = pickOverride(
+    overrides,
+    "articlePoint",
+    pickImportValue(row, ["曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"], TRACK_COLUMN_PATTERNS.articlePoint)
+  );
+  const honorific = pickOverride(
+    overrides,
+    "honorific",
+    pickImportValue(row, ["敬称ルール", "表記注意", "クレジット", "クレジット表記"], [/敬称|表記注意|クレジット|呼び方|名前の出し方/]) || getDefaultOwnerHonorific(source)
+  );
 
   if (!title && !url && !audioFile) return null;
 
@@ -1302,6 +1397,37 @@ const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", periodId
     articlePoint,
     status: "取り込み済み"
   };
+};
+
+const buildTracksFromRow = (row, episodeId, source, fallbackArtist = "", periodId = "") => {
+  const groups = collectTrackFieldGroups(row);
+  if (groups.length <= 1) {
+    return [buildTrackFromRow(row, episodeId, source, fallbackArtist, periodId)].filter(Boolean);
+  }
+
+  const commonAiArtist = pickImportValue(
+    row,
+    [
+      "AIアーティスト名",
+      "AIアーティストの名前",
+      "AIアーティスト",
+      "AI artist",
+      "AI Artist",
+      "AI名義"
+    ],
+    TRACK_COLUMN_PATTERNS.aiArtist
+  );
+  return groups
+    .map(({ values }) =>
+      buildTrackFromRow(row, episodeId, source, fallbackArtist, periodId, {
+        title: values.title || "",
+        url: values.url || "",
+        audioFile: values.audioFile || "",
+        articlePoint: values.articlePoint || "",
+        aiArtist: values.aiArtist || commonAiArtist || ""
+      })
+    )
+    .filter(Boolean);
 };
 
 const getPreviewTrackSource = (kind = "") =>
@@ -1330,24 +1456,25 @@ const shortenPreviewValue = (value = "", max = 72) => {
 
 const buildImportPreviewRows = (rows = [], kind = "", mapping = {}) => {
   const mappedRows = applyColumnMappingToRows(rows, kind, mapping);
-  return mappedRows.map((row, index) => {
+  return mappedRows.flatMap((row, index) => {
     const response =
       kind === "guest"
         ? buildResponseFromRow(row, "preview", "form_guest", `ゲスト回答${index + 1}`)
         : null;
-    const track = buildTrackFromRow(row, "preview", getPreviewTrackSource(kind), response?.respondent || "");
+    const tracks = buildTracksFromRow(row, "preview", getPreviewTrackSource(kind), response?.respondent || "");
     const iconFromResponse = response?.attachments?.[0]?.sourceUrl || response?.attachments?.[0]?.dataUrl || "";
-    return {
-      rowNo: index + 1,
+    const previewTracks = tracks.length ? tracks : [null];
+    return previewTracks.map((track, trackIndex) => ({
+      rowNo: previewTracks.length > 1 ? `${index + 1}-${trackIndex + 1}` : index + 1,
       ownerName: response?.respondent || track?.artist || pickPreviewOwnerName(row, kind),
-      aiArtist: track?.aiArtist || pickImportValue(row, ["AIアーティスト名", "AIアーティスト"], [/AI\s*(アーティスト|名義|名前)|AI artist/i]),
-      trackTitle: track?.title || pickImportValue(row, ["曲名", "楽曲名", "紹介曲"], [/曲名|楽曲名|紹介曲|タイトル/]),
-      trackUrl: track?.url || pickImportValue(row, ["楽曲URL", "曲URL", "URL", "Suno URL", "YouTube URL"], [/(楽曲|曲|Suno|YouTube|Youtube).*(URL|リンク)|(URL|リンク).*(楽曲|曲|Suno|YouTube|Youtube)/i]),
-      audioFile: track?.audioFile || pickImportValue(row, ["音源ファイル", "音源URL", "Drive URL"], [/音源|mp3|wav|Drive|ドライブ/i]),
-      articlePoint: track?.articlePoint || pickImportValue(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "記事で触れてほしいポイント"], [/想い|思い|曲紹介|楽曲紹介|こだわり|おすすめ|ポイント|メッセージ|記事で触れて/]),
+      aiArtist: track?.aiArtist || pickImportValue(row, ["AIアーティスト名", "AIアーティスト"], TRACK_COLUMN_PATTERNS.aiArtist),
+      trackTitle: track?.title || pickImportValue(row, ["曲名", "楽曲名", "紹介曲"], TRACK_COLUMN_PATTERNS.title),
+      trackUrl: track?.url || pickImportValue(row, ["楽曲URL", "曲URL", "URL", "Suno URL", "YouTube URL"], TRACK_COLUMN_PATTERNS.url),
+      audioFile: track?.audioFile || pickImportValue(row, ["音源ファイル", "音源URL", "Drive URL"], TRACK_COLUMN_PATTERNS.audioFile),
+      articlePoint: track?.articlePoint || pickImportValue(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "記事で触れてほしいポイント"], TRACK_COLUMN_PATTERNS.articlePoint),
       iconUrl: track?.ownerIconUrl || iconFromResponse,
       constraints: response?.constraints || pickImportValue(row, ["触れないでほしいこと", "NG質問", "表記注意", "注意事項"], [/触れない|NG|表記注意|注意事項|伏せたい|非公開|禁止|避けて|表記ルール/])
-    };
+    }));
   });
 };
 
@@ -1390,24 +1517,24 @@ const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "")
         ];
         responseCount += 1;
       }
-      const track = buildTrackFromRow(row, selectedEpisode.id, "ゲスト曲", response.respondent);
-      if (track) {
+      const tracks = buildTracksFromRow(row, selectedEpisode.id, "ゲスト曲", response.respondent);
+      tracks.forEach((track) => {
         reflectTrack(track);
-      }
+      });
     }
 
     if (kind === "listener") {
-      const track = buildTrackFromRow(row, selectedEpisode.id, "リスナー応募曲", "", periodId);
-      if (track) {
+      const tracks = buildTracksFromRow(row, selectedEpisode.id, "リスナー応募曲", "", periodId);
+      tracks.forEach((track) => {
         reflectTrack(track);
-      }
+      });
     }
 
     if (kind === "personality") {
-      const track = buildTrackFromRow(row, selectedEpisode.id, "パーソナリティ曲");
-      if (track) {
+      const tracks = buildTracksFromRow(row, selectedEpisode.id, "パーソナリティ曲");
+      tracks.forEach((track) => {
         reflectTrack(track);
-      }
+      });
     }
   });
 
