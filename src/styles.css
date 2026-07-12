@@ -854,6 +854,17 @@ textarea {
   align-items: center;
 }
 
+.question-help-row {
+  display: grid;
+  gap: 5px;
+}
+
+.question-help-row span {
+  color: #6b6175;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .move-buttons {
   display: inline-flex;
   gap: 6px;
@@ -1364,6 +1375,14 @@ textarea {
 .public-form {
   display: grid;
   gap: 14px;
+}
+
+.question-help {
+  margin: -1px 0 0;
+  color: #665d70;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .form-toc {

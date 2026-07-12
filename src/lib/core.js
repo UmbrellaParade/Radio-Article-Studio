@@ -2270,7 +2270,8 @@ export function migrateData(input) {
         label: existingTrack?.kind === "track" ? existingTrack.label : "送って頂く楽曲",
         kind: "track",
         required: existingTrack?.required ?? true,
-        use: existingTrack?.use || "article"
+        use: existingTrack?.use || "article",
+        help: existingTrack?.help || ""
       };
       const rest = questions.filter((question) => question.id !== trackQuestion.id && !isLegacyTrackQuestion(question));
       const insertAfterId = isListenerForm ? "q_artist" : "q_owner";
@@ -2287,9 +2288,10 @@ export function migrateData(input) {
 
     questions = questions.map((question) => {
       const nextQuestion = question.kind === "x_contact" && question.use === "internal" ? { ...question, use: "public" } : question;
-      return nextQuestion.kind === "track"
-        ? { ...nextQuestion, trackFields: normalizeTrackFields(nextQuestion.trackFields) }
-        : nextQuestion;
+      const normalizedQuestion = { ...nextQuestion, help: nextQuestion.help || "" };
+      return normalizedQuestion.kind === "track"
+        ? { ...normalizedQuestion, trackFields: normalizeTrackFields(normalizedQuestion.trackFields) }
+        : normalizedQuestion;
     });
 
     return {

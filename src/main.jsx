@@ -597,7 +597,7 @@ function App() {
         receptionEndDate: "",
         submissionLimit: "",
         questions: [
-          { id: newId("q"), label: "質問文", kind: "short", required: false, use: "article" }
+          { id: newId("q"), label: "質問文", kind: "short", required: false, use: "article", help: "" }
         ]
       }
     ]);
@@ -633,7 +633,7 @@ function App() {
               ...form,
               questions: [
                 ...form.questions,
-                { id: newId("q"), label: "新しい質問", kind: "short", required: false, use: "article" }
+                { id: newId("q"), label: "新しい質問", kind: "short", required: false, use: "article", help: "" }
               ]
             }
           : form
@@ -2444,6 +2444,14 @@ function Forms({
                           </div>
                           <button className="icon-danger" onClick={() => removeQuestion(form.id, question.id)} aria-label="質問を削除" title="削除"><Trash2 size={16} /></button>
                         </div>
+                        <label className="question-help-row">
+                          <span>補足文</span>
+                          <input
+                            value={question.help || ""}
+                            onChange={(event) => patchQuestion(form.id, question.id, { help: event.target.value })}
+                            placeholder="回答者に見せる説明や注意書きを入力"
+                          />
+                        </label>
                         {question.kind === "track" && (
                           <details className="track-field-editor collapsible-share">
                             <summary>
