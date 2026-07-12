@@ -1165,6 +1165,18 @@ textarea {
   background: #fbf6ed;
 }
 
+.thumbnail-bulk-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, auto)) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
 .thumbnail-layout-controls {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto auto auto;
@@ -1535,6 +1547,7 @@ textarea {
   .two-col,
   .import-grid,
   .thumbnail-grid,
+  .thumbnail-bulk-actions,
   .thumbnail-layout-controls,
   .bellbo-url-row,
   .form-grid,
@@ -1718,6 +1731,7 @@ textarea {
   .period-summary,
   .import-grid,
   .thumbnail-grid,
+  .thumbnail-bulk-actions,
   .import-mapping-grid,
   .bellbo-url-row,
   .form-grid,

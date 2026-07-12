@@ -39,6 +39,8 @@ const DEFAULT_X_CONTACT_MESSAGE =
   "Xでご連絡するため、べるぼ☂とかなめ🦐のアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。";
 const DEFAULT_RESPONSE_ENDPOINT_URL = "";
 const DEFAULT_RESPONSE_DRIVE_FOLDER_URL = "";
+const DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL = "";
+const DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL = "";
 const DEFAULT_AUDIO_SAVE_MEMO = "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー";
 const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 const GUEST_BADGE_ASSET_URL = publicAsset("thumbnail-overlays/guest-in-badge.png");
@@ -1758,6 +1760,14 @@ const saveDataUrlWithPicker = async (dataUrl, fileName = "download") => {
   return true;
 };
 
+const writeDataUrlToDirectory = async (directoryHandle, fileName, dataUrl) => {
+  const blob = await fetch(dataUrl).then((response) => response.blob());
+  const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+};
+
 const getRawStoredDataForShare = () => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -1920,6 +1930,8 @@ const sampleData = {
     xContactMessage: DEFAULT_X_CONTACT_MESSAGE,
     responseEndpointUrl: DEFAULT_RESPONSE_ENDPOINT_URL,
     responseDriveFolderUrl: DEFAULT_RESPONSE_DRIVE_FOLDER_URL,
+    thumbnailDriveEndpointUrl: DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
+    thumbnailDriveFolderUrl: DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
     audioSaveMemo: DEFAULT_AUDIO_SAVE_MEMO
   },
   imports: defaultImports,
@@ -2209,6 +2221,8 @@ function migrateData(input) {
   if (!settings.xContactMessage) settings.xContactMessage = DEFAULT_X_CONTACT_MESSAGE;
   if (!("responseEndpointUrl" in settings)) settings.responseEndpointUrl = DEFAULT_RESPONSE_ENDPOINT_URL;
   if (!("responseDriveFolderUrl" in settings)) settings.responseDriveFolderUrl = DEFAULT_RESPONSE_DRIVE_FOLDER_URL;
+  if (!("thumbnailDriveEndpointUrl" in settings)) settings.thumbnailDriveEndpointUrl = DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL;
+  if (!("thumbnailDriveFolderUrl" in settings)) settings.thumbnailDriveFolderUrl = DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL;
   if (!settings.audioSaveMemo) settings.audioSaveMemo = DEFAULT_AUDIO_SAVE_MEMO;
   const episodes = (input.episodes ?? sampleData.episodes).map((episode) => {
     const articleSlug = episode.articleSlug || extractSlugFromUrl(episode.articleUrl);
@@ -3452,6 +3466,7 @@ ${socialRows || "-"}
               updateThumbnailStudio={updateThumbnailStudio}
               guestName={selectedEpisode?.guestName ?? ""}
               episodeDate={selectedEpisode?.date ?? ""}
+              settings={data.settings}
             />
           )}
           {active === "social" && (
@@ -5370,7 +5385,7 @@ async function saveThumbnailDataUrl(preset, dataUrl, guestName) {
   return { fileName, generatedRecord };
 }
 
-function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
+function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate, settings = {} }) {
   const [message, setMessage] = useState("");
   const [layoutPresetName, setLayoutPresetName] = useState("");
   const [generatedImages, setGeneratedImages] = useState({});
@@ -5426,6 +5441,8 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
       ),
     [studio.templates, templateBaseImages]
   );
+  const generatedReadyCount = THUMBNAIL_PRESETS.filter((preset) => generatedImages[preset.key] || generated[preset.key]).length;
+  const allThumbnailsReady = generatedReadyCount === THUMBNAIL_PRESETS.length;
 
   const removeGeneratedRecords = (records, presetKeys) => {
     const nextGenerated = { ...(records ?? {}) };
@@ -5847,6 +5864,43 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     }
   };
 
+  const generateAll = async () => {
+    setGeneratingKey("all");
+    setMessage("3種類のサムネをまとめて生成しています。");
+    try {
+      const imageEntries = [];
+      const generatedEntries = [];
+      for (const preset of THUMBNAIL_PRESETS) {
+        const template = await hydrateTemplateForPreset(preset.key);
+        const dataUrl = await renderThumbnail({
+          preset,
+          template,
+          icon: studio.guestIcon,
+          icons: guestIcons,
+          date: thumbnailDate,
+          guestName
+        });
+        const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, guestName);
+        imageEntries.push([preset.key, dataUrl]);
+        generatedEntries.push([preset.key, generatedRecord]);
+      }
+      setGeneratedImages((current) => ({ ...current, ...Object.fromEntries(imageEntries) }));
+      updateStudio((current) => ({
+        ...defaultThumbnailStudio,
+        ...current,
+        generated: {
+          ...(current.generated ?? {}),
+          ...Object.fromEntries(generatedEntries)
+        }
+      }));
+      setMessage("3種類のサムネをまとめて生成して保存しました。");
+    } catch {
+      setMessage("一括生成に失敗しました。ベース画像やゲストアイコンを確認してください。");
+    } finally {
+      setGeneratingKey("");
+    }
+  };
+
   const clearGeneratedOne = async (preset) => {
     const saved = generated[preset.key];
     if (saved?.imageKey) {
@@ -5879,6 +5933,87 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
     anchor.href = dataUrl;
     anchor.download = saved.fileName || `${guestName || "guest"}-${preset.fileName}`;
     anchor.click();
+  };
+
+  const collectGeneratedThumbnailItems = async () => {
+    const items = [];
+    for (const preset of THUMBNAIL_PRESETS) {
+      const saved = generated[preset.key];
+      if (!saved) continue;
+      let dataUrl = generatedImages[preset.key] || saved.dataUrl || "";
+      if (!dataUrl && saved.imageKey) {
+        try {
+          dataUrl = await loadGeneratedThumbnailImage(saved.imageKey);
+        } catch {
+          dataUrl = "";
+        }
+      }
+      if (!dataUrl) continue;
+      items.push({
+        key: preset.key,
+        label: preset.label,
+        width: preset.width,
+        height: preset.height,
+        fileName: saved.fileName || `${guestName || "guest"}-${preset.fileName}`,
+        mimeType: "image/png",
+        generatedAt: saved.generatedAt || "",
+        dataUrl
+      });
+    }
+    return items;
+  };
+
+  const saveAllToPcFolder = async () => {
+    const items = await collectGeneratedThumbnailItems();
+    if (items.length !== THUMBNAIL_PRESETS.length) {
+      setMessage("3種類すべてを生成してから一括保存してください。");
+      return;
+    }
+    if (!window.showDirectoryPicker) {
+      items.forEach((item) => downloadDataUrlFile(item.dataUrl, item.fileName));
+      setMessage("このブラウザではフォルダー選択に未対応のため、3枚を通常ダウンロードしました。");
+      return;
+    }
+    try {
+      const directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      for (const item of items) {
+        await writeDataUrlToDirectory(directoryHandle, item.fileName, item.dataUrl);
+      }
+      setMessage(`${directoryHandle.name} に3枚のPNGを保存しました。`);
+    } catch {
+      setMessage("PCフォルダーへの一括保存をキャンセルしました。");
+    }
+  };
+
+  const saveAllToDrive = async () => {
+    const endpointUrl = String(settings.thumbnailDriveEndpointUrl || "").trim();
+    if (!endpointUrl) {
+      setMessage("設定で「サムネDrive保存Webhook URL」を入力してください。");
+      return;
+    }
+    const items = await collectGeneratedThumbnailItems();
+    if (items.length !== THUMBNAIL_PRESETS.length) {
+      setMessage("3種類すべてを生成してからDriveへ保存してください。");
+      return;
+    }
+    try {
+      await fetch(endpointUrl, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          type: "thumbnail_bundle",
+          createdAt: new Date().toISOString(),
+          guestName,
+          episodeDate: thumbnailDate,
+          driveFolderUrl: settings.thumbnailDriveFolderUrl || "",
+          images: items
+        })
+      });
+      setMessage("Drive保存Webhookへ3枚のPNGを送信しました。Drive側で保存結果を確認してください。");
+    } catch {
+      setMessage("Drive保存Webhookへ送信できませんでした。URLやApps Scriptの公開設定を確認してください。");
+    }
   };
 
   const openLargePreview = (preset, dataUrl, saved) => {
@@ -5956,6 +6091,19 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
           <Upload size={16} />ゲストアイコン
           <input type="file" accept="image/*" multiple onChange={handleIconFile} />
         </label>
+      </div>
+
+      <div className="thumbnail-bulk-actions">
+        <button className="primary" onClick={generateAll} disabled={generatingKey === "all"}>
+          <Image size={16} />{generatingKey === "all" ? "一括生成中" : "3枚まとめて生成"}
+        </button>
+        <button className="secondary" onClick={saveAllToPcFolder} disabled={!allThumbnailsReady || generatingKey === "all"}>
+          <Download size={16} />3枚をPCへ一括保存
+        </button>
+        <button className="secondary" onClick={saveAllToDrive} disabled={!allThumbnailsReady || generatingKey === "all"}>
+          <Send size={16} />3枚をDriveへ保存
+        </button>
+        <p className="hint-text wide">PC保存は保存先フォルダーを選んで3枚まとめて書き出します。Drive保存は設定のWebhook URLへ送信します。</p>
       </div>
 
       <div className="form-grid thumbnail-date-controls">
@@ -6060,7 +6208,7 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
               </button>
               {!collapsedSliderKeys[preset.key] && renderPlacementControls(preset, template)}
               <div className="button-row">
-                <button className="primary" onClick={() => generateOne(preset)} disabled={generatingKey === preset.key}>
+                <button className="primary" onClick={() => generateOne(preset)} disabled={generatingKey === preset.key || generatingKey === "all"}>
                   {generatingKey === preset.key ? "生成中" : "生成"}
                 </button>
                 <button className="secondary" onClick={() => downloadOne(preset)} disabled={!savedGeneratedDataUrl}>PNG保存</button>
@@ -6107,11 +6255,11 @@ function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate }) {
   );
 }
 
-function Assets({ thumbnailStudio, updateThumbnailStudio, guestName, episodeDate }) {
+function Assets({ thumbnailStudio, updateThumbnailStudio, guestName, episodeDate, settings }) {
   return (
     <div className="view-stack">
       <SectionTitle title="サムネ/素材管理" subtitle="記事16:9、stand.fm 1:1、配信背景9:16を放送回に紐づけて作成します。" />
-      <ThumbnailComposer studio={thumbnailStudio} updateStudio={updateThumbnailStudio} guestName={guestName} episodeDate={episodeDate} />
+      <ThumbnailComposer studio={thumbnailStudio} updateStudio={updateThumbnailStudio} guestName={guestName} episodeDate={episodeDate} settings={settings} />
     </div>
   );
 }
@@ -6407,6 +6555,8 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           <Field label="SE_Pon URL" value={settings.sePonUrl} onChange={(value) => updateSettings({ sePonUrl: value })} />
           <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptなどのWebアプリURL" wide />
           <Field label="回答保存先Google DriveフォルダーURL（控え）" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
+          <Field label="サムネDrive保存Webhook URL" value={settings.thumbnailDriveEndpointUrl || ""} onChange={(value) => updateSettings({ thumbnailDriveEndpointUrl: value })} placeholder="サムネPNG保存用のGoogle Apps Script WebアプリURL" wide />
+          <Field label="サムネ保存先Google DriveフォルダーURL" value={settings.thumbnailDriveFolderUrl || ""} onChange={(value) => updateSettings({ thumbnailDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
           <TextArea label="音源保存先メモ" value={settings.audioSaveMemo || ""} onChange={(value) => updateSettings({ audioSaveMemo: value })} />
           <Field label="べるぼ☂ Xアカウント" value={settings.bellboXHandle || ""} onChange={(value) => updateSettings({ bellboXHandle: normalizeXHandle(value) })} />
           <Field label="かなめ🦐 Xアカウント" value={settings.kanameXHandle || ""} onChange={(value) => updateSettings({ kanameXHandle: normalizeXHandle(value) })} />

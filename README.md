@@ -53,7 +53,7 @@ Implemented:
 8. Response JSON creation/import with grouped song fields, in-form song preview, WAV/MP3 attachments, and internal X contact blocks.
 9. Response management with public/article/internal/constraint separation.
 10. Track and audio metadata management.
-11. Thumbnail composition from bundled fixed base images plus date text and an optional guest icon, with registered image previews, saved generated previews, and reusable icon layout presets.
+11. Thumbnail composition from bundled fixed base images plus date text and an optional guest icon, with registered image previews, saved generated previews, reusable icon layout presets, three-image batch generation, local folder export, and optional Drive webhook export.
 12. Thumbnail and production asset management.
 13. Codex request pack generation.
 14. JSON export/import backup.
@@ -62,7 +62,8 @@ Implemented:
 17. One-time device transfer links for moving the current browser data to another phone or desktop browser.
 18. Shared form table of contents, top return button, response status messaging, and audio download/save actions.
 19. Optional response Webhook URL setting for forwarding online form submissions to a Google Apps Script or other backend.
-20. Editable extra X contact accounts for shared form contact blocks.
+20. Optional thumbnail Drive Webhook URL setting for forwarding generated PNG thumbnails to a Google Apps Script or other backend.
+21. Editable extra X contact accounts for shared form contact blocks.
 
 The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Application periods connect a date range, target episode, form, and listener submission sheet. Shared forms can use short `#/r/{id}` URLs after the app-generated Codex activation request is applied. They also keep compressed portable `#/s/...` URLs as immediate fallback links, so the form can open on devices that do not have the operator's local browser data even before a short URL is activated. Short reference URLs such as `#/p/...` and `#/f/...` are kept as management-device shortcuts only. Forms can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. Guest forms can also use an image field for the guest icon. When a response JSON or imported guest sheet includes a guest icon image, the thumbnail composer automatically registers it as the current guest icon. They can also use an X contact block that explains why Bellbo/Kaname follows are needed for DM contact while keeping the respondent's X URL usable for article promotion. The operator can import the response JSON, preview/download attached audio and images, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
 
