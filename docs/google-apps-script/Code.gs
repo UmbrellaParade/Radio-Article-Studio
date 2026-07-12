@@ -21,11 +21,13 @@ const SECRET_TOKEN = "ここを好きな合言葉に変更";
 // このサイズ以下の画像（ゲストアイコンなど）は、Drive保存に加えて回答JSONにも残す。
 // サムネ合成でそのまま使えるようにするため。音源はDrive保存のみ。
 const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const SCRIPT_VERSION = "2026-07-13-response-details";
 
 const RESPONSES_DIR = "_responses";
 const FORMS_DIR = "_forms";
 const THUMBNAILS_DIR = "サムネ";
 const LOG_SHEET_NAME = "回答ログ";
+const DETAIL_SHEET_NAME = "回答詳細";
 const TRACKS_DIR = "楽曲";
 const LOG_HEADERS = [
   "受信日時",
@@ -48,6 +50,28 @@ const LOG_HEADERS = [
   "楽曲情報",
   "全質問回答",
   "添付ファイルURL",
+  "JSON保存先URL"
+];
+const DETAIL_HEADERS = [
+  "受信日時",
+  "受付ID",
+  "回答者",
+  "フォーム名",
+  "フォームID",
+  "放送回ID",
+  "期間ID",
+  "JSONファイル",
+  "質問ID",
+  "質問内容",
+  "用途",
+  "入力形式",
+  "回答",
+  "楽曲名",
+  "アーティスト名",
+  "楽曲URL",
+  "大容量音源URL",
+  "添付ファイル名",
+  "添付URL",
   "JSON保存先URL"
 ];
 
@@ -78,7 +102,7 @@ function doGet(e) {
   try {
     const params = (e && e.parameter) || {};
     const action = params.action || "ping";
-    if (action === "ping") return jsonOutput({ ok: true, now: new Date().toISOString() });
+    if (action === "ping") return jsonOutput({ ok: true, version: SCRIPT_VERSION, now: new Date().toISOString() });
     if (action === "getForm") return handleGetForm(params);
     if (action === "submissionStatus") return handleSubmissionStatus(params);
     if (action === "listResponses") {
@@ -287,7 +311,9 @@ function handleSubmitResponse(payload) {
 }
 
 function appendResponseLog(root, payload, savedFiles, jsonName, jsonUrl) {
-  appendLogRow(root, buildLogRow(payload, savedFiles, jsonName, jsonUrl, new Date()));
+  const receivedAt = new Date();
+  appendLogRow(root, buildLogRow(payload, savedFiles, jsonName, jsonUrl, receivedAt));
+  appendDetailRows(root, buildDetailRows(payload, jsonName, jsonUrl, receivedAt));
 }
 
 function buildLogRow(payload, savedFiles, jsonName, jsonUrl, receivedAt) {
@@ -325,21 +351,24 @@ function rebuildResponseLogFromJson() {
   const root = getRootFolder();
   const responsesFolder = getOrCreateFolder(root, RESPONSES_DIR);
   const rows = [];
+  const detailRows = [];
   const files = responsesFolder.getFiles();
   while (files.hasNext()) {
     const file = files.next();
     if (file.getName().slice(-5) !== ".json") continue;
     try {
       const payload = JSON.parse(file.getBlob().getDataAsString("UTF-8"));
+      const receivedAt = file.getDateCreated();
       rows.push(
         buildLogRow(
           payload,
           collectSavedFilesFromPayload(payload),
           file.getName(),
           file.getUrl(),
-          file.getDateCreated()
+          receivedAt
         )
       );
+      detailRows.push.apply(detailRows, buildDetailRows(payload, file.getName(), file.getUrl(), receivedAt));
     } catch (error) {
       // 壊れたJSONは復元対象から除外
     }
@@ -347,26 +376,46 @@ function rebuildResponseLogFromJson() {
   rows.sort(function (a, b) {
     return new Date(a[0]).getTime() - new Date(b[0]).getTime();
   });
-  const sheet = getLogSheet(root);
+  detailRows.sort(function (a, b) {
+    return new Date(a[0]).getTime() - new Date(b[0]).getTime();
+  });
+  const sheet = getResponseSheet(root, LOG_SHEET_NAME);
   sheet.clearContents();
-  ensureLogHeader(sheet);
+  ensureSheetHeader(sheet, LOG_HEADERS);
   if (rows.length) {
     sheet.getRange(2, 1, rows.length, LOG_HEADERS.length).setValues(rows);
   }
-  return "回答ログを" + rows.length + "件で作り直しました。";
+  const detailSheet = getResponseSheet(root, DETAIL_SHEET_NAME);
+  detailSheet.clearContents();
+  ensureSheetHeader(detailSheet, DETAIL_HEADERS);
+  if (detailRows.length) {
+    detailSheet.getRange(2, 1, detailRows.length, DETAIL_HEADERS.length).setValues(detailRows);
+  }
+  return "回答ログを" + rows.length + "件、回答詳細を" + detailRows.length + "行で作り直しました。";
 }
 
 function appendLogRow(root, row) {
   try {
-    const sheet = getLogSheet(root);
-    ensureLogHeader(sheet);
+    const sheet = getResponseSheet(root, LOG_SHEET_NAME);
+    ensureSheetHeader(sheet, LOG_HEADERS);
     sheet.appendRow(row);
   } catch (error) {
     // ログ追記の失敗で回答受信全体を失敗にしない
   }
 }
 
-function getLogSheet(root) {
+function appendDetailRows(root, rows) {
+  if (!rows || !rows.length) return;
+  try {
+    const sheet = getResponseSheet(root, DETAIL_SHEET_NAME);
+    ensureSheetHeader(sheet, DETAIL_HEADERS);
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, DETAIL_HEADERS.length).setValues(rows);
+  } catch (error) {
+    // 詳細ログの失敗で回答受信全体を失敗にしない
+  }
+}
+
+function getResponseSpreadsheet(root) {
   const files = root.getFilesByName(LOG_SHEET_NAME);
   let spreadsheet;
   if (files.hasNext()) {
@@ -375,27 +424,43 @@ function getLogSheet(root) {
     spreadsheet = SpreadsheetApp.create(LOG_SHEET_NAME);
     DriveApp.getFileById(spreadsheet.getId()).moveTo(root);
   }
-  return spreadsheet.getActiveSheet();
+  return spreadsheet;
 }
 
-function ensureLogHeader(sheet) {
-  const currentWidth = Math.max(sheet.getLastColumn(), LOG_HEADERS.length);
+function getResponseSheet(root, sheetName) {
+  const spreadsheet = getResponseSpreadsheet(root);
+  const existing = spreadsheet.getSheetByName(sheetName);
+  if (existing) return existing;
+  if (sheetName === LOG_SHEET_NAME) {
+    const active = spreadsheet.getActiveSheet();
+    try {
+      active.setName(LOG_SHEET_NAME);
+    } catch (error) {
+      // 同名シートがないのに改名できない場合だけ新規作成へ進む
+    }
+    if (active.getName() === LOG_SHEET_NAME) return active;
+  }
+  return spreadsheet.insertSheet(sheetName);
+}
+
+function ensureSheetHeader(sheet, headers) {
+  const currentWidth = Math.max(sheet.getLastColumn(), headers.length);
   const currentHeaders =
     sheet.getLastRow() > 0 && currentWidth > 0
       ? sheet.getRange(1, 1, 1, currentWidth).getValues()[0]
       : [];
   let shouldWrite = sheet.getLastRow() === 0;
   const nextHeaders = [];
-  for (let i = 0; i < LOG_HEADERS.length; i += 1) {
-    nextHeaders[i] = currentHeaders[i] || LOG_HEADERS[i];
-    if (nextHeaders[i] !== LOG_HEADERS[i]) {
-      nextHeaders[i] = LOG_HEADERS[i];
+  for (let i = 0; i < headers.length; i += 1) {
+    nextHeaders[i] = currentHeaders[i] || headers[i];
+    if (nextHeaders[i] !== headers[i]) {
+      nextHeaders[i] = headers[i];
       shouldWrite = true;
     }
   }
-  if (currentHeaders.length < LOG_HEADERS.length) shouldWrite = true;
+  if (currentHeaders.length < headers.length) shouldWrite = true;
   if (shouldWrite) {
-    sheet.getRange(1, 1, 1, LOG_HEADERS.length).setValues([nextHeaders]);
+    sheet.getRange(1, 1, 1, headers.length).setValues([nextHeaders]);
     sheet.setFrozenRows(1);
   }
 }
@@ -455,6 +520,69 @@ function collectSavedFilesFromPayload(payload) {
     if (answer.track) addAttachment(answer.track.audio);
   });
   return collected;
+}
+
+function buildDetailRows(payload, jsonName, jsonUrl, receivedAt) {
+  const response = payload.response || {};
+  const form = payload.form || {};
+  const rawAnswers = Array.isArray(payload.rawAnswers) ? payload.rawAnswers : [];
+  const answers = rawAnswers.length ? rawAnswers : buildFallbackAnswersFromResponse(response);
+  return answers.map(function (answer) {
+    const track = answer.track || {};
+    const attachment = getDetailAttachment(answer);
+    return [
+      receivedAt || response.submittedAt || payload.exportedAt || new Date(),
+      response.id || "",
+      response.respondent || "",
+      form.name || "",
+      response.formId || form.id || "",
+      response.episodeId || "",
+      response.periodId || "",
+      jsonName || "",
+      answer.id || "",
+      answer.label || "質問",
+      answer.useLabel || answer.use || "",
+      answer.kind || "",
+      truncateForLogCell(formatDetailAnswerForLog(answer)),
+      track.title || "",
+      track.artist || track.aiArtist || "",
+      track.url || "",
+      track.audioUrl || "",
+      attachment.fileName || "",
+      attachment.driveUrl || attachment.url || attachment.sourceUrl || "",
+      jsonUrl || ""
+    ];
+  });
+}
+
+function buildFallbackAnswersFromResponse(response) {
+  const fallback = [
+    { id: "publicInfo", label: "公開プロフィール", useLabel: "公開情報", kind: "summary", answer: response.publicInfo || "" },
+    { id: "articleUse", label: "記事/SNS用回答", useLabel: "記事/SNS用", kind: "summary", answer: response.articleUse || "" },
+    { id: "internalOnly", label: "制作側メモ", useLabel: "内部用", kind: "summary", answer: response.internalOnly || "" },
+    { id: "constraints", label: "触れないこと・表記ルール", useLabel: "制約", kind: "summary", answer: response.constraints || "" }
+  ];
+  return fallback.filter(function (answer) {
+    return String(answer.answer || "").trim();
+  });
+}
+
+function getDetailAttachment(answer) {
+  if (!answer) return {};
+  if (answer.attachment) return answer.attachment;
+  if (answer.track && answer.track.audio) return answer.track.audio;
+  return {};
+}
+
+function formatDetailAnswerForLog(answer) {
+  if (!answer) return "";
+  const parts = [];
+  if (answer.answer && answer.answer !== "-") parts.push(answer.answer);
+  if (answer.track) parts.push(formatTrackForLog(answer.track));
+  if (answer.attachment) parts.push("添付: " + formatAttachmentForLog(answer.attachment));
+  if (answer.xContact) parts.push("連絡先: " + formatValueForLog(answer.xContact));
+  const text = compactLogLines(parts);
+  return text || "未回答";
 }
 
 function formatRawAnswersForLog(rawAnswers) {
