@@ -26,6 +26,29 @@ const RESPONSES_DIR = "_responses";
 const FORMS_DIR = "_forms";
 const THUMBNAILS_DIR = "サムネ";
 const LOG_SHEET_NAME = "回答ログ";
+const LOG_HEADERS = [
+  "受信日時",
+  "回答者",
+  "フォームID",
+  "放送回ID",
+  "期間ID",
+  "添付数",
+  "JSONファイル",
+  "受付ID",
+  "フォーム名",
+  "フォーム種別",
+  "放送回",
+  "応募期間",
+  "フォーム受付期間",
+  "公開プロフィール",
+  "記事/SNS用回答",
+  "制作側メモ",
+  "触れないこと・表記ルール",
+  "楽曲情報",
+  "全質問回答",
+  "添付ファイルURL",
+  "JSON保存先URL"
+];
 
 function jsonOutput(body) {
   return ContentService.createTextOutput(JSON.stringify(body)).setMimeType(ContentService.MimeType.JSON);
@@ -236,36 +259,267 @@ function handleSubmitResponse(payload) {
 
   const responsesFolder = getOrCreateFolder(root, RESPONSES_DIR);
   const jsonName = stamp + "_" + respondent + ".json";
-  responsesFolder.createFile(jsonName, JSON.stringify(payload, null, 2), "application/json");
+  const jsonFile = responsesFolder.createFile(jsonName, JSON.stringify(payload, null, 2), "application/json");
 
-  appendLogRow(root, [
-    new Date(),
-    response.respondent || "",
-    response.formId || "",
-    response.episodeId || "",
-    response.periodId || "",
-    savedFiles.length,
-    jsonName
-  ]);
+  appendResponseLog(root, payload, savedFiles, jsonName, jsonFile.getUrl());
 
   return jsonOutput({ ok: true, savedAs: jsonName, savedFiles: savedFiles, now: new Date().toISOString() });
 }
 
+function appendResponseLog(root, payload, savedFiles, jsonName, jsonUrl) {
+  appendLogRow(root, buildLogRow(payload, savedFiles, jsonName, jsonUrl, new Date()));
+}
+
+function buildLogRow(payload, savedFiles, jsonName, jsonUrl, receivedAt) {
+  const response = payload.response || {};
+  const form = payload.form || {};
+  const period = payload.period || {};
+  const episode = payload.episode || {};
+  const savedFileList = savedFiles || [];
+  return [
+    receivedAt || response.submittedAt || payload.exportedAt || new Date(),
+    response.respondent || "",
+    response.formId || "",
+    response.episodeId || "",
+    response.periodId || "",
+    savedFileList.length,
+    jsonName,
+    response.id || "",
+    form.name || "",
+    form.type || "",
+    formatEpisodeForLog(episode, response.episodeId),
+    formatPeriodForLog(period),
+    formatDateRangeForLog(form.receptionStartDate, form.receptionEndDate),
+    truncateForLogCell(response.publicInfo || ""),
+    truncateForLogCell(response.articleUse || ""),
+    truncateForLogCell(response.internalOnly || ""),
+    truncateForLogCell(response.constraints || ""),
+    truncateForLogCell(formatTracksForLog(payload.rawAnswers || [])),
+    truncateForLogCell(formatRawAnswersForLog(payload.rawAnswers || [])),
+    truncateForLogCell(formatSavedFilesForLog(savedFileList)),
+    jsonUrl || ""
+  ];
+}
+
+function rebuildResponseLogFromJson() {
+  const root = getRootFolder();
+  const responsesFolder = getOrCreateFolder(root, RESPONSES_DIR);
+  const rows = [];
+  const files = responsesFolder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    if (file.getName().slice(-5) !== ".json") continue;
+    try {
+      const payload = JSON.parse(file.getBlob().getDataAsString("UTF-8"));
+      rows.push(
+        buildLogRow(
+          payload,
+          collectSavedFilesFromPayload(payload),
+          file.getName(),
+          file.getUrl(),
+          file.getDateCreated()
+        )
+      );
+    } catch (error) {
+      // 壊れたJSONは復元対象から除外
+    }
+  }
+  rows.sort(function (a, b) {
+    return new Date(a[0]).getTime() - new Date(b[0]).getTime();
+  });
+  const sheet = getLogSheet(root);
+  sheet.clearContents();
+  ensureLogHeader(sheet);
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, LOG_HEADERS.length).setValues(rows);
+  }
+  return "回答ログを" + rows.length + "件で作り直しました。";
+}
+
 function appendLogRow(root, row) {
   try {
-    const files = root.getFilesByName(LOG_SHEET_NAME);
-    let spreadsheet;
-    if (files.hasNext()) {
-      spreadsheet = SpreadsheetApp.open(files.next());
-    } else {
-      spreadsheet = SpreadsheetApp.create(LOG_SHEET_NAME);
-      DriveApp.getFileById(spreadsheet.getId()).moveTo(root);
-      spreadsheet.getActiveSheet().appendRow(["受信日時", "回答者", "フォームID", "放送回ID", "期間ID", "添付数", "JSONファイル"]);
-    }
-    spreadsheet.getActiveSheet().appendRow(row);
+    const sheet = getLogSheet(root);
+    ensureLogHeader(sheet);
+    sheet.appendRow(row);
   } catch (error) {
     // ログ追記の失敗で回答受信全体を失敗にしない
   }
+}
+
+function getLogSheet(root) {
+  const files = root.getFilesByName(LOG_SHEET_NAME);
+  let spreadsheet;
+  if (files.hasNext()) {
+    spreadsheet = SpreadsheetApp.open(files.next());
+  } else {
+    spreadsheet = SpreadsheetApp.create(LOG_SHEET_NAME);
+    DriveApp.getFileById(spreadsheet.getId()).moveTo(root);
+  }
+  return spreadsheet.getActiveSheet();
+}
+
+function ensureLogHeader(sheet) {
+  const currentWidth = Math.max(sheet.getLastColumn(), LOG_HEADERS.length);
+  const currentHeaders =
+    sheet.getLastRow() > 0 && currentWidth > 0
+      ? sheet.getRange(1, 1, 1, currentWidth).getValues()[0]
+      : [];
+  let shouldWrite = sheet.getLastRow() === 0;
+  const nextHeaders = [];
+  for (let i = 0; i < LOG_HEADERS.length; i += 1) {
+    nextHeaders[i] = currentHeaders[i] || LOG_HEADERS[i];
+    if (nextHeaders[i] !== LOG_HEADERS[i]) {
+      nextHeaders[i] = LOG_HEADERS[i];
+      shouldWrite = true;
+    }
+  }
+  if (currentHeaders.length < LOG_HEADERS.length) shouldWrite = true;
+  if (shouldWrite) {
+    sheet.getRange(1, 1, 1, LOG_HEADERS.length).setValues([nextHeaders]);
+    sheet.setFrozenRows(1);
+  }
+}
+
+function formatEpisodeForLog(episode, fallbackId) {
+  const parts = [];
+  if (episode.date) parts.push(episode.date);
+  if (episode.title) parts.push(episode.title);
+  if (episode.slot) parts.push(episode.slot);
+  return parts.join(" / ") || fallbackId || "";
+}
+
+function formatPeriodForLog(period) {
+  if (!period || (!period.title && !period.startDate && !period.endDate)) return "";
+  const range = formatDateRangeForLog(period.startDate, period.endDate);
+  return [period.title || period.id || "", range].filter(Boolean).join(" / ");
+}
+
+function formatDateRangeForLog(startDate, endDate) {
+  if (!startDate && !endDate) return "指定なし";
+  if (startDate && endDate) return startDate + " 〜 " + endDate;
+  if (startDate) return startDate + " 〜";
+  return "〜 " + endDate;
+}
+
+function formatSavedFilesForLog(savedFiles) {
+  return (savedFiles || [])
+    .map(function (file) {
+      return [file.fileName || "", file.url || ""].filter(Boolean).join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function collectSavedFilesFromPayload(payload) {
+  const collected = [];
+  const seen = {};
+  const addAttachment = function (attachment) {
+    if (!attachment) return;
+    const url = attachment.driveUrl || attachment.url || attachment.sourceUrl || "";
+    const key = attachment.driveFileId || url || attachment.fileName || "";
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    collected.push({ fileName: attachment.fileName || "", url: url });
+  };
+  const response = payload.response || {};
+  (response.attachments || []).forEach(addAttachment);
+  (payload.rawAnswers || []).forEach(function (answer) {
+    if (!answer) return;
+    addAttachment(answer.attachment);
+    if (answer.track) addAttachment(answer.track.audio);
+  });
+  return collected;
+}
+
+function formatRawAnswersForLog(rawAnswers) {
+  return (rawAnswers || [])
+    .map(function (answer) {
+      if (!answer) return "";
+      const body = compactLogLines([
+        answer.answer && answer.answer !== "-" ? answer.answer : "",
+        answer.track ? formatTrackForLog(answer.track) : "",
+        answer.attachment ? "添付: " + formatAttachmentForLog(answer.attachment) : "",
+        answer.xContact ? "連絡先: " + formatValueForLog(answer.xContact) : ""
+      ]);
+      return (answer.label || answer.id || "質問") + (answer.useLabel ? "（" + answer.useLabel + "）" : "") + "\n" + (body || "未回答");
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
+function formatTracksForLog(rawAnswers) {
+  return (rawAnswers || [])
+    .filter(function (answer) {
+      return answer && answer.track;
+    })
+    .map(function (answer) {
+      const trackLog = formatTrackForLog(answer.track);
+      return trackLog ? (answer.label || "楽曲") + "\n" + trackLog : "";
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
+function formatTrackForLog(track) {
+  if (!track) return "";
+  return compactLogLines([
+    track.title ? "楽曲名: " + track.title : "",
+    track.artist ? "アーティスト名: " + track.artist : "",
+    track.aiArtist ? "AIアーティスト名: " + track.aiArtist : "",
+    track.url ? "楽曲URL: " + track.url : "",
+    track.audioUrl ? "大容量音源URL: " + track.audioUrl : "",
+    track.audio ? "添付音源: " + formatAttachmentForLog(track.audio) : ""
+  ]);
+}
+
+function formatAttachmentForLog(attachment) {
+  if (!attachment) return "";
+  return compactLogLines([
+    attachment.fileName || "",
+    attachment.mimeType ? "形式: " + attachment.mimeType : "",
+    attachment.size ? "サイズ: " + attachment.size + " bytes" : "",
+    attachment.driveUrl || attachment.url || attachment.sourceUrl || "",
+    attachment.driveFileId ? "Drive ID: " + attachment.driveFileId : ""
+  ]);
+}
+
+function formatValueForLog(value) {
+  if (value === null || typeof value === "undefined") return "";
+  if (typeof value === "string") {
+    if (value.indexOf("data:") === 0 && value.indexOf(";base64,") > -1) return "[base64データ省略]";
+    return value;
+  }
+  if (typeof value !== "object") return String(value);
+  if (Array.isArray(value)) {
+    return value.map(formatValueForLog).filter(Boolean).join(" / ");
+  }
+  const sanitized = {};
+  for (const key in value) {
+    if (key === "dataUrl") {
+      sanitized[key] = "[base64データ省略]";
+    } else if (key === "audio" || key === "attachment") {
+      sanitized[key] = formatAttachmentForLog(value[key]);
+    } else {
+      sanitized[key] = formatValueForLog(value[key]);
+    }
+  }
+  return JSON.stringify(sanitized);
+}
+
+function compactLogLines(lines) {
+  return (lines || [])
+    .map(function (line) {
+      return String(line || "").trim();
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function truncateForLogCell(value) {
+  const text = String(value || "");
+  const maxLength = 45000;
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength) + "\n...（長いため省略。全文はJSONファイルを確認してください）";
 }
 
 function handleSubmissionStatus(params) {
