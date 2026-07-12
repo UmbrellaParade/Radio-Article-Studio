@@ -342,6 +342,29 @@ const makeFormPreset = (form, name = "") => ({
   form: makeFormSnapshot(form)
 });
 
+const findBuiltInFormPresetForForm = (form, builtInFormPresets = []) => {
+  if (!form) return null;
+  const exact = builtInFormPresets.find((preset) => preset.sourceId === form.id);
+  if (exact) return exact;
+
+  const formType = normalizeKey(form.type);
+  if (formType) {
+    const typeMatch = builtInFormPresets.find((preset) => normalizeKey(preset.form?.type) === formType);
+    if (typeMatch) return typeMatch;
+  }
+
+  const key = normalizeKey([form.name, form.shareSlug, form.type].filter(Boolean).join(" "));
+  const sourceId =
+    /リスナー|listener|応募曲|oubo/.test(key)
+      ? "form_listener"
+      : /ゲスト|guest/.test(key)
+        ? "form_guest"
+        : /パーソナリティ|personality|運営/.test(key)
+          ? "form_personality"
+          : "";
+  return sourceId ? builtInFormPresets.find((preset) => preset.sourceId === sourceId) ?? null : null;
+};
+
 function readUiState() {
   try {
     const raw = localStorage.getItem(UI_STATE_KEY);
@@ -2560,15 +2583,14 @@ function Forms({
     window.setTimeout(() => setPresetMessage(""), 2400);
   };
 
-  const getBuiltInPresetForForm = (form) =>
-    builtInFormPresets.find((preset) => preset.sourceId === form.id) ?? null;
+  const getBuiltInPresetForForm = (form) => findBuiltInFormPresetForForm(form, builtInFormPresets);
 
   const overwriteFormBuiltInPreset = (form) => {
     const targetPreset = getBuiltInPresetForForm(form);
     if (!targetPreset) return;
     const presetName = targetPreset.name.replace(/^標準: /, "").replace("（上書き済み）", "");
     overwriteBuiltInFormPreset(targetPreset.sourceId, form);
-    setPresetMessage(`標準プリセット「${presetName}」を、このフォーム内容で上書きしました。`);
+    setPresetMessage(`標準プリセット「${presetName}」を、このフォーム内容で上書きしました。次にプリセットから追加する時もこの内容を使います。`);
     window.setTimeout(() => setPresetMessage(""), 3000);
   };
 
@@ -2679,9 +2701,9 @@ function Forms({
                     className="secondary"
                     onClick={() => overwriteFormBuiltInPreset(form)}
                     disabled={!builtInTarget}
-                    title={builtInTarget ? `標準プリセット「${builtInTargetName}」をこのフォーム内容で上書き` : "標準プリセットと対応するフォームだけ上書きできます"}
+                    title={builtInTarget ? `標準プリセット「${builtInTargetName}」をこのフォーム内容で上書き` : "フォーム種別や名前から対応する標準プリセットを見つけられません"}
                   >
-                    <Save size={16} />このフォームを標準へ上書き
+                    <Save size={16} />{builtInTargetName ? `${builtInTargetName}へ上書き` : "対応する標準へ上書き"}
                   </button>
                   <button className="icon-danger" onClick={() => deleteForm(form)} title="削除バックアップを残してフォームを削除"><Trash2 size={16} /></button>
                 </div>

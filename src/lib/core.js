@@ -2330,7 +2330,8 @@ export function migrateData(input) {
         kind: "track",
         required: existingTrack?.required ?? true,
         use: existingTrack?.use || "article",
-        help: existingTrack?.help || ""
+        help: existingTrack?.help || "",
+        trackFields: normalizeTrackFields(existingTrack?.trackFields)
       };
       const rest = questions.filter((question) => question.id !== trackQuestion.id && !isLegacyTrackQuestion(question));
       const insertAfterId = isListenerForm ? "q_artist" : "q_owner";

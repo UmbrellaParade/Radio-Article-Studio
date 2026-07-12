@@ -762,6 +762,9 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     };
   };
 
+  const hasTrackDeliveryAnswer = (answer) =>
+    Boolean(answer?.audio?.dataUrl || String(answer?.audioUrl || "").trim());
+
   const submit = async (event) => {
     event.preventDefault();
     const invalidTrackUrlQuestion = form.questions.find(
@@ -770,6 +773,13 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     if (invalidTrackUrlQuestion) {
       setFormError(`${invalidTrackUrlQuestion.label}: ${TRACK_URL_ERROR_MESSAGE}`);
       event.currentTarget.reportValidity();
+      return;
+    }
+    const missingTrackDeliveryQuestion = form.questions.find(
+      (question) => question.kind === "track" && question.required && !hasTrackDeliveryAnswer(answers[question.id])
+    );
+    if (missingTrackDeliveryQuestion) {
+      setFormError(`${missingTrackDeliveryQuestion.label}: 音源ファイルをアップロードするか、大容量音源URLを入力してください。`);
       return;
     }
     setFormError("");
@@ -880,7 +890,6 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             <span>{field.label}</span>
             <input
               type="url"
-              required={Boolean(question.required && !answers[question.id]?.audio?.dataUrl)}
               placeholder={field.placeholder || ""}
               value={answers[question.id]?.audioUrl ?? ""}
               onChange={(event) => updateTrackAnswer(question.id, { audioUrl: event.target.value })}
@@ -900,7 +909,6 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               <span>{audioField.label}</span>
               <input
                 type="file"
-                required={Boolean(question.required && !answers[question.id]?.audioUrl)}
                 accept={AUDIO_FILE_ACCEPT}
                 onChange={(event) => updateTrackFileAnswer(question.id, event)}
               />
