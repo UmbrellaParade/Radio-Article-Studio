@@ -127,6 +127,7 @@ export const TRACK_FIELD_TYPE_OPTIONS = [
   ["audioUrl", "大容量音源URL"],
   ["title", "楽曲名"],
   ["artist", "アーティスト名"],
+  ["aiArtist", "AIアーティスト名"],
   ["url", "楽曲URL"]
 ];
 
@@ -160,6 +161,14 @@ export const DEFAULT_TRACK_FIELDS = [
     type: "artist",
     label: "アーティスト名",
     help: "記事や紹介欄に載せる正式表記を入力してください。",
+    note: "",
+    placeholder: ""
+  },
+  {
+    id: "aiArtist",
+    type: "aiArtist",
+    label: "AIアーティスト名",
+    help: "Sunoなどで使っているAIアーティスト名や名義があれば入力してください。",
     note: "",
     placeholder: ""
   },
@@ -492,10 +501,11 @@ export const isSunoShortUrl = (url = "") => /suno\.com\/s\/[A-Za-z0-9_-]+/i.test
 export const formatAnswerValue = (value) => {
   if (!value) return "-";
   if (typeof value === "object" && value.fileName) return `${value.fileName} (${Math.round((value.size || 0) / 1024 / 1024 * 10) / 10}MB)`;
-  if (typeof value === "object" && ("title" in value || "url" in value || "audio" in value || "audioUrl" in value)) {
+  if (typeof value === "object" && ("title" in value || "artist" in value || "aiArtist" in value || "url" in value || "audio" in value || "audioUrl" in value)) {
     return compactLines([
       `楽曲名: ${value.title || "-"}`,
       `アーティスト名: ${value.artist || "-"}`,
+      `AIアーティスト名: ${value.aiArtist || "-"}`,
       `楽曲URL: ${value.url || "-"}`,
       `音源ファイル: ${formatAnswerValue(value.audio)}`,
       `大容量音源URL: ${value.audioUrl || "-"}`

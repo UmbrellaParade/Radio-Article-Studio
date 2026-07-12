@@ -471,6 +471,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       [questionId]: {
         title: "",
         artist: "",
+        aiArtist: "",
         url: "",
         audio: null,
         ...(current[questionId] ?? {}),
@@ -695,6 +696,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
         questionLabel: `${question.label}: 音源ファイル`,
         trackTitle: answers[question.id].title || "",
         trackArtist: answers[question.id].artist || "",
+        trackAiArtist: answers[question.id].aiArtist || "",
         trackUrl: answers[question.id].url || "",
         fileName: answers[question.id].audio.fileName,
         mimeType: answers[question.id].audio.mimeType,
@@ -762,6 +764,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
         use: question.use,
         useLabel: QUESTION_USE_LABELS[question.use] ?? question.use,
         answer: formatAnswerValue(answers[question.id]),
+        trackFields: question.kind === "track" ? normalizeTrackFields(question.trackFields) : null,
         attachment: question.kind === "file" || question.kind === "image" ? answers[question.id] || null : question.kind === "track" ? answers[question.id]?.audio || null : null,
         track: question.kind === "track" ? answers[question.id] || null : null,
         xContact: question.kind === "x_contact" ? answers[question.id] || null : null
@@ -896,6 +899,19 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               placeholder={field.placeholder || ""}
               value={answers[question.id]?.artist ?? ""}
               onChange={(event) => updateTrackAnswer(question.id, { artist: event.target.value })}
+            />
+            {field.help && <small>{field.help}</small>}
+          </label>
+        );
+      }
+      if (field.type === "aiArtist") {
+        return (
+          <label key={field.type}>
+            <span>{field.label}</span>
+            <input
+              placeholder={field.placeholder || ""}
+              value={answers[question.id]?.aiArtist ?? ""}
+              onChange={(event) => updateTrackAnswer(question.id, { aiArtist: event.target.value })}
             />
             {field.help && <small>{field.help}</small>}
           </label>

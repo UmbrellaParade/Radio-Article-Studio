@@ -21,7 +21,7 @@ const SECRET_TOKEN = "ここを好きな合言葉に変更";
 // このサイズ以下の画像（ゲストアイコンなど）は、Drive保存に加えて回答JSONにも残す。
 // サムネ合成でそのまま使えるようにするため。音源はDrive保存のみ。
 const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
-const SCRIPT_VERSION = "2026-07-13-all-questions-columns";
+const SCRIPT_VERSION = "2026-07-13-track-subcolumns";
 
 const RESPONSES_DIR = "_responses";
 const FORMS_DIR = "_forms";
@@ -34,6 +34,15 @@ const LOG_SHEET_NAME = "回答ログ";
 // このタブには受信の控えだけを最小限で残す。
 const RECEIPT_SHEET_NAME = "受信ログ";
 const RECEIPT_HEADERS = ["受信日時", "回答者", "フォーム名", "添付数", "回答JSON"];
+const TRACK_SHEET_FIELD_DEFAULTS = [
+  { type: "title", label: "楽曲名" },
+  { type: "artist", label: "アーティスト名" },
+  { type: "aiArtist", label: "AIアーティスト名" },
+  { type: "url", label: "楽曲URL（YouTube / Suno）" },
+  { type: "audioUrl", label: "大容量音源URL（Driveなど）" },
+  { type: "audio", label: "音源アップロード" },
+  { type: "savedAudioUrl", label: "音源保存URL" }
+];
 
 function jsonOutput(body) {
   return ContentService.createTextOutput(JSON.stringify(body)).setMimeType(ContentService.MimeType.JSON);
@@ -319,9 +328,11 @@ function loadPublishedFormDefinitions(root) {
       if (definitions[form.id] && definitions[form.id].updatedAt >= updatedAt) continue;
       definitions[form.id] = {
         name: form.name || form.id,
-        labels: (form.questions || []).map(function (question) {
-          return String(question.label || question.id || "質問");
-        }),
+        labels: flattenLabels(
+          (form.questions || []).map(function (question) {
+            return getQuestionSheetLabels(question);
+          })
+        ),
         updatedAt: updatedAt
       };
     } catch (error) {
@@ -342,27 +353,105 @@ function appendFormAnswerRow(root, payload, receivedAt, definitionsInput) {
   // 全質問の列順は「公開済みフォーム定義」→「送信ペイロードのフォーム定義」→「回答に含まれる質問」の順で決める
   const formQuestionLabels = definition
     ? definition.labels
-    : (form.questions || []).map(function (question) {
-        return String(question.label || question.id || "質問");
-      });
+    : flattenLabels(
+        (form.questions || []).map(function (question) {
+          return getQuestionSheetLabels(question);
+        })
+      );
   const sheetName = sanitizeName((definition && definition.name) || form.name || response.formId || "回答", "回答");
   const sheet = getResponseSheet(root, sheetName);
   const labels = formQuestionLabels.concat(
-    answers.map(function (answer) {
-      return String(answer.label || answer.id || "質問");
-    })
+    flattenLabels(
+      answers.map(function (answer) {
+        return getAnswerSheetLabels(answer);
+      })
+    )
   );
   const headers = upsertFormSheetHeader(sheet, labels);
   const answerByLabel = {};
   answers.forEach(function (answer) {
-    const label = String(answer.label || answer.id || "質問");
-    const cell = formatAnswerCell(answer);
-    answerByLabel[label] = answerByLabel[label] ? answerByLabel[label] + "\n" + cell : cell;
+    addAnswerCells(answerByLabel, answer);
   });
   const row = headers.map(function (header, index) {
     return index === 0 ? receivedAt || new Date() : answerByLabel[header] || "";
   });
   sheet.appendRow(row);
+}
+
+function flattenLabels(groups) {
+  const labels = [];
+  (groups || []).forEach(function (group) {
+    (Array.isArray(group) ? group : [group]).forEach(function (label) {
+      const value = String(label || "").trim();
+      if (value) labels.push(value);
+    });
+  });
+  return labels;
+}
+
+function getQuestionSheetLabels(question) {
+  if (question && question.kind === "track") {
+    return getTrackSheetItems(question.label, question.trackFields).map(function (item) {
+      return item.label;
+    });
+  }
+  return [String((question && (question.label || question.id)) || "質問")];
+}
+
+function getAnswerSheetLabels(answer) {
+  if (answer && answer.kind === "track") {
+    return getTrackSheetItems(answer.label, answer.trackFields).map(function (item) {
+      return item.label;
+    });
+  }
+  return [String((answer && (answer.label || answer.id)) || "質問")];
+}
+
+function getTrackSheetItems(baseLabel, trackFields) {
+  const base = String(baseLabel || "楽曲").trim() || "楽曲";
+  const labelMap = {};
+  (Array.isArray(trackFields) ? trackFields : []).forEach(function (field) {
+    if (!field || !field.type) return;
+    labelMap[field.type] = field.label || "";
+  });
+  return TRACK_SHEET_FIELD_DEFAULTS.map(function (defaults) {
+    return {
+      type: defaults.type,
+      label: base + " / " + (labelMap[defaults.type] || defaults.label)
+    };
+  });
+}
+
+function addAnswerCells(answerByLabel, answer) {
+  if (!answer) return;
+  if (answer.kind === "track" && answer.track) {
+    addTrackAnswerCells(answerByLabel, answer);
+    return;
+  }
+  const label = String(answer.label || answer.id || "質問");
+  addMergedAnswerCell(answerByLabel, label, formatAnswerCell(answer));
+}
+
+function addTrackAnswerCells(answerByLabel, answer) {
+  const track = answer.track || {};
+  const audio = track.audio || answer.attachment || {};
+  const items = getTrackSheetItems(answer.label, answer.trackFields);
+  const values = {
+    title: track.title || "",
+    artist: track.artist || "",
+    aiArtist: track.aiArtist || "",
+    url: track.url || "",
+    audioUrl: track.audioUrl || "",
+    audio: audio.fileName || "",
+    savedAudioUrl: audio.driveUrl || audio.url || audio.sourceUrl || ""
+  };
+  items.forEach(function (item) {
+    addMergedAnswerCell(answerByLabel, item.label, values[item.type] || "");
+  });
+}
+
+function addMergedAnswerCell(answerByLabel, label, cell) {
+  answerByLabel[label] = answerByLabel[label] ? answerByLabel[label] + "\n" + cell : cell;
 }
 
 // 1行目のヘッダー（受信日時＋質問列）を維持する。質問が増えた場合は右に列を足す。
