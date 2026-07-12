@@ -51,6 +51,7 @@ import {
   QUESTION_USE_LABELS,
   QUESTION_KIND_OPTIONS,
   normalizeTrackFields,
+  normalizeSubmissionLimit,
   TRACK_URL_ERROR_MESSAGE,
   TRACK_URL_PATTERN,
   detectUrlType,
@@ -254,6 +255,8 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
   const [formError, setFormError] = useState("");
   const [submitStatus, setSubmitStatus] = useState("");
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [submissionStatus, setSubmissionStatus] = useState({ loading: false, count: null, error: "" });
+  const submissionLimit = normalizeSubmissionLimit(form?.submissionLimit);
 
   useEffect(() => {
     setAnswers({});
@@ -261,6 +264,39 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     setSubmitStatus("");
     setSubmitBusy(false);
   }, [form?.id, period?.id, episode?.id]);
+
+  useEffect(() => {
+    const endpointUrl = String(submission.endpointUrl || "").trim();
+    if (!form?.id || !submissionLimit || !endpointUrl) {
+      setSubmissionStatus({ loading: false, count: null, error: "" });
+      return undefined;
+    }
+    let cancelled = false;
+    setSubmissionStatus({ loading: true, count: null, error: "" });
+    getFromGasEndpoint(endpointUrl, {
+      action: "submissionStatus",
+      formId: form.id,
+      periodId: period?.id || "",
+      folder: String(submission.driveFolderUrl || "").trim()
+    })
+      .then((result) => {
+        if (!cancelled) {
+          setSubmissionStatus({
+            loading: false,
+            count: Number.isFinite(Number(result.count)) ? Number(result.count) : 0,
+            error: ""
+          });
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSubmissionStatus({ loading: false, count: null, error: error?.message || "応募数を確認できませんでした。" });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form?.id, period?.id, submission.endpointUrl, submission.driveFolderUrl, submissionLimit]);
 
   if (payload?.loading) {
     return (
@@ -285,6 +321,54 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               ? `この短いURLはまだ有効化されていない可能性があります。URLを送ってくれた運営側へご連絡ください。`
               : "URLが途中で切れている可能性があります。URLを送ってくれた運営側へご連絡ください。"}
           </p>
+        </article>
+      </main>
+    );
+  }
+
+  const today = formatLocalDate();
+  const closedNotice = (() => {
+    const dateRules = [
+      { label: "フォーム受付期間", startDate: form.receptionStartDate || "", endDate: form.receptionEndDate || "" },
+      { label: "応募期間", startDate: period?.startDate || "", endDate: period?.endDate || "" }
+    ];
+    for (const rule of dateRules) {
+      if (rule.startDate && today < rule.startDate) {
+        return {
+          title: "受付開始前です",
+          body: `${rule.label}は ${formatDateRange(rule.startDate, rule.endDate)} です。`
+        };
+      }
+      if (rule.endDate && today > rule.endDate) {
+        return {
+          title: "受付は終了しました",
+          body: `${rule.label}は ${formatDateRange(rule.startDate, rule.endDate)} でした。`
+        };
+      }
+    }
+    if (submissionLimit && submissionStatus.count !== null && submissionStatus.count >= submissionLimit) {
+      return {
+        title: "応募上限に達しました",
+        body: `このフォームの受付数が上限（${submissionLimit}件）に達しました。`
+      };
+    }
+    return null;
+  })();
+
+  if (closedNotice) {
+    return (
+      <main className="app-shell public-shell">
+        <Header logoSrc={logoSrc} />
+        <article className="panel closed-form-panel">
+          <p className="eyebrow slim">Shared Form</p>
+          <h2>{closedNotice.title}</h2>
+          <p className="muted">{closedNotice.body}</p>
+          <div className="public-context">
+            <span>フォーム: {form.name}</span>
+            {(form.receptionStartDate || form.receptionEndDate) && <span>受付条件: {formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>}
+            {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
+            {submissionLimit ? <span>応募数: {submissionStatus.count ?? "-"} / {submissionLimit}</span> : <span>応募数: 制限なし</span>}
+          </div>
         </article>
       </main>
     );
@@ -470,6 +554,32 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
       version: 1,
       type: "radio-article-studio-response",
       exportedAt: new Date().toISOString(),
+      form: {
+        id: form.id,
+        name: form.name,
+        type: form.type,
+        receptionStartDate: form.receptionStartDate || "",
+        receptionEndDate: form.receptionEndDate || "",
+        submissionLimit
+      },
+      period: period
+        ? {
+            id: period.id,
+            title: period.title,
+            type: period.type,
+            startDate: period.startDate,
+            endDate: period.endDate,
+            episodeId: period.episodeId
+          }
+        : null,
+      episode: episode
+        ? {
+            id: episode.id,
+            title: episode.title,
+            date: episode.date,
+            slot: episode.slot
+          }
+        : null,
       response: {
         id: newId("res"),
         submittedAt: new Date().toISOString(),
@@ -558,10 +668,14 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             <p className="eyebrow slim">Shared Form</p>
             <h2>{form.name}</h2>
             {form.description && <p className="muted">{form.description}</p>}
-            {(period || episode) && (
+            {(period || episode || form.receptionStartDate || form.receptionEndDate || submissionLimit > 0) && (
               <div className="public-context">
+                {(form.receptionStartDate || form.receptionEndDate) && <span>受付条件: {formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>}
                 {period && <span>応募期間: {period.title || period.id} / {formatDateRange(period.startDate, period.endDate)}</span>}
                 {episode && <span>放送回: {episode.date || "-"} {episode.title || ""}</span>}
+                {submissionLimit > 0 && (
+                  <span>応募数: {submissionStatus.loading ? "確認中" : submissionStatus.count !== null ? `${submissionStatus.count} / ${submissionLimit}` : `上限 ${submissionLimit}件`}</span>
+                )}
               </div>
             )}
           </div>
@@ -569,6 +683,9 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
 
         {formError && <p className="form-error">{formError}</p>}
         {submitStatus && <p className="submit-status">{submitStatus}</p>}
+        {submissionLimit > 0 && submissionStatus.error && (
+          <p className="hint-text">応募数の確認ができませんでした。送信時にも受付状況を確認します。</p>
+        )}
 
         <nav className="form-toc" aria-label="フォーム目次">
           <strong>目次</strong>

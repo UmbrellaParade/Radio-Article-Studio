@@ -127,6 +127,92 @@ h1 {
   color: #fff;
 }
 
+.floating-nav {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.floating-nav details,
+.floating-top-button {
+  pointer-events: auto;
+}
+
+.floating-nav details {
+  position: relative;
+}
+
+.floating-nav summary,
+.floating-top-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid #241f2f;
+  border-radius: 999px;
+  background: #241f2f;
+  color: #fff;
+  box-shadow: 0 18px 34px -24px rgba(36, 31, 47, .8);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.floating-nav summary {
+  list-style: none;
+}
+
+.floating-nav summary::-webkit-details-marker {
+  display: none;
+}
+
+.floating-nav details[open] summary {
+  background: #0a6670;
+  border-color: #0a6670;
+}
+
+.floating-nav-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: grid;
+  gap: 6px;
+  min-width: 184px;
+  padding: 8px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: rgba(255, 253, 248, .98);
+  box-shadow: 0 18px 48px -28px rgba(36, 31, 47, .9);
+}
+
+.floating-nav-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #241f2f;
+  text-align: left;
+  font-weight: 800;
+}
+
+.floating-nav-menu button.active {
+  border-color: #8bd7df;
+  background: #eefbfd;
+  color: #0a6670;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -563,6 +649,20 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.form-availability-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fbf6ed;
+}
+
+.form-availability-panel .subhead {
+  margin-bottom: 0;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -946,6 +1046,39 @@ textarea {
   color: #0a6670;
 }
 
+.collapsible-share summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.collapsible-share summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-share:not([open]) > :not(summary) {
+  display: none;
+}
+
+.collapsible-share summary span {
+  margin-top: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #e7ded1;
+  color: #51495f;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.collapsible-share[open] summary span {
+  background: #241f2f;
+  color: #fff;
+}
+
 .song-card-title {
   display: flex;
   flex-wrap: wrap;
@@ -985,6 +1118,11 @@ textarea {
   margin-top: 4px;
   color: #665d70;
   line-height: 1.7;
+}
+
+.collapsible-share summary span {
+  display: inline-flex;
+  margin-top: 0;
 }
 
 .public-context {
@@ -1097,6 +1235,11 @@ textarea {
 
 .public-head h2 {
   margin-top: 10px;
+}
+
+.closed-form-panel {
+  max-width: 760px;
+  margin: 0 auto;
 }
 
 .public-form {
@@ -1725,6 +1868,23 @@ textarea {
   .app-nav button svg {
     width: 18px;
     height: 18px;
+  }
+
+  .floating-nav {
+    right: 10px;
+    bottom: calc(78px + env(safe-area-inset-bottom));
+  }
+
+  .floating-nav summary,
+  .floating-top-button {
+    min-height: 38px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .floating-nav-menu {
+    max-height: min(68vh, 420px);
+    overflow-y: auto;
   }
 
   .workspace,

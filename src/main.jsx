@@ -260,6 +260,27 @@ const moveArrayItem = (items = [], fromIndex, toIndex) => {
 
 const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 
+const MAIN_NAV_ITEMS = [
+  ["dashboard", "ダッシュボード", Radio],
+  ["imports", "取り込み", Upload],
+  ["episodes", "放送回", CalendarDays],
+  ["forms", "フォーム", Send],
+  ["periods", "応募期間", CalendarDays],
+  ["responses", "回答", ClipboardCopy],
+  ["tracks", "楽曲", Music],
+  ["assets", "素材", Image],
+  ["social", "SNS告知", Share2],
+  ["pack", "Codexパック", FileText],
+  ["settings", "設定", Settings]
+];
+
+const sanitizeLimitInput = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const limit = Math.floor(Number(text));
+  return Number.isFinite(limit) && limit > 0 ? String(limit) : "";
+};
+
 function App() {
   const logoSrc = `${import.meta.env.BASE_URL}assets/umbrella-parade-logo.png`;
   const [data, setData] = useState(loadData);
@@ -574,6 +595,9 @@ function App() {
         status: "準備中",
         shareSlug: "",
         description: "",
+        receptionStartDate: "",
+        receptionEndDate: "",
+        submissionLimit: "",
         questions: [
           { id: newId("q"), label: "質問文", kind: "short", required: false, use: "article" }
         ]
@@ -1428,19 +1452,7 @@ ${socialRows || "-"}
       <Header logoSrc={logoSrc} />
 
       <nav className="app-nav" aria-label="Main navigation">
-        {[
-          ["dashboard", "ダッシュボード", Radio],
-          ["imports", "取り込み", Upload],
-          ["episodes", "放送回", CalendarDays],
-          ["forms", "フォーム", Send],
-          ["periods", "応募期間", CalendarDays],
-          ["responses", "回答", ClipboardCopy],
-          ["tracks", "楽曲", Music],
-          ["assets", "素材", Image],
-          ["social", "SNS告知", Share2],
-          ["pack", "Codexパック", FileText],
-          ["settings", "設定", Settings]
-        ].map(([key, label, Icon]) => (
+        {MAIN_NAV_ITEMS.map(([key, label, Icon]) => (
           <button className={active === key ? "active" : ""} key={key} onClick={() => setActive(key)}>
             <Icon size={17} />
             <span>{label}</span>
@@ -1605,7 +1617,39 @@ ${socialRows || "-"}
           )}
         </section>
       </div>
+      <FloatingNavigator active={active} setActive={setActive} />
     </main>
+  );
+}
+
+function FloatingNavigator({ active, setActive }) {
+  const goToPanel = (key) => {
+    setActive(key);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  };
+
+  return (
+    <div className="floating-nav" aria-label="ツール内ナビゲーション">
+      <details>
+        <summary>
+          <FileText size={16} />
+          <span>目次</span>
+          <ChevronDown size={14} />
+        </summary>
+        <div className="floating-nav-menu">
+          {MAIN_NAV_ITEMS.map(([key, label, Icon]) => (
+            <button key={key} className={active === key ? "active" : ""} onClick={() => goToPanel(key)}>
+              <Icon size={15} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </details>
+      <button className="floating-top-button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+        <ArrowUp size={16} />
+        <span>上へ</span>
+      </button>
+    </div>
   );
 }
 
@@ -2192,11 +2236,12 @@ function ApplicationPeriods({
                   </button>
                 </div>
               </div>
-              <div className="share-box">
-                <div>
-                  <strong><Share2 size={16} />長いURL（すぐ使える）</strong>
-                  <span>短いURLを有効化する前に使える予備URLです。フォーム内容をURLに含めるため長くなります。</span>
-                </div>
+              <details className="share-box collapsible-share">
+                <summary>
+                  <strong><Share2 size={16} />長いURL（予備）</strong>
+                  <span>必要な時だけ開く</span>
+                </summary>
+                <p className="hint-text">短いURLを有効化する前に使える予備URLです。フォーム内容をURLに含めるため長くなります。</p>
                 <input readOnly value={shareUrl} onFocus={(event) => event.target.select()} />
                 <div className="inline-actions">
                   <button className="secondary" onClick={() => copyPeriodShareUrl(period)} disabled={!shareUrl}>
@@ -2213,7 +2258,7 @@ function ApplicationPeriods({
                     <input type="file" accept=".csv,text/csv" onChange={(event) => importPeriodCsvFile(period, event)} />
                   </label>
                 </div>
-              </div>
+              </details>
             </article>
           );
         })}
@@ -2307,6 +2352,31 @@ function Forms({
               <Field label="短縮ID" value={form.shareSlug} onChange={(value) => patchItem("forms", form.id, { shareSlug: value })} placeholder="例: guest-form" />
               <TextArea label="説明" value={form.description} onChange={(value) => patchItem("forms", form.id, { description: value })} />
             </div>
+            <div className="form-availability-panel">
+              <div className="subhead">受付条件</div>
+              <p className="hint-text">日付と応募数は空欄なら制限なしです。期間外、または応募数上限に達したフォームは回答画面に表示されません。</p>
+              <div className="form-grid">
+                <Field
+                  label="受付開始"
+                  type="date"
+                  value={form.receptionStartDate || ""}
+                  onChange={(value) => patchItem("forms", form.id, { receptionStartDate: value })}
+                />
+                <Field
+                  label="受付終了"
+                  type="date"
+                  value={form.receptionEndDate || ""}
+                  onChange={(value) => patchItem("forms", form.id, { receptionEndDate: value })}
+                />
+                <Field
+                  label="応募数上限"
+                  type="number"
+                  value={form.submissionLimit || ""}
+                  onChange={(value) => patchItem("forms", form.id, { submissionLimit: sanitizeLimitInput(value) })}
+                  placeholder="未指定"
+                />
+              </div>
+            </div>
             <div className="share-box short-share">
               <div>
                 <strong><Share2 size={16} />短いURL</strong>
@@ -2331,11 +2401,12 @@ function Forms({
                 </button>
               </div>
             </div>
-            <div className="share-box">
-              <div>
-                <strong><Share2 size={16} />長いURL（すぐ使える）</strong>
-                <span>短いURLを有効化する前に使える予備URLです。フォーム内容をURLに含めるため長くなります。期間を指定する場合は「応募期間管理」のURLを使います。</span>
-              </div>
+            <details className="share-box collapsible-share">
+              <summary>
+                <strong><Share2 size={16} />長いURL（予備）</strong>
+                <span>必要な時だけ開く</span>
+              </summary>
+              <p className="hint-text">短いURLを有効化する前に使える予備URLです。フォーム内容をURLに含めるため長くなります。期間を指定する場合は「応募期間管理」のURLを使います。</p>
               <input readOnly value={makePortableShareUrl(form, settings)} onFocus={(event) => event.target.select()} />
               <div className="inline-actions">
                 <button className="secondary" onClick={() => copyShareUrl(form)}>
@@ -2345,7 +2416,7 @@ function Forms({
                   <ClipboardCopy size={16} />{copiedFormId === `${form.id}:short` ? "コピー済み" : "管理端末用URLをコピー"}
                 </button>
               </div>
-            </div>
+            </details>
             <div className="question-list">
               <div className="subhead">質問項目</div>
               <p className="hint-text">入力形式: 楽曲を選ぶと「音源アップロード・楽曲名・アーティスト名・楽曲URL」のまとまりが表示されます。質問と楽曲内項目は上下ボタンで並び替えできます。</p>

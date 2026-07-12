@@ -56,6 +56,7 @@ function doGet(e) {
     const action = params.action || "ping";
     if (action === "ping") return jsonOutput({ ok: true, now: new Date().toISOString() });
     if (action === "getForm") return handleGetForm(params);
+    if (action === "submissionStatus") return handleSubmissionStatus(params);
     if (action === "listResponses") {
       requireToken(params.token);
       return handleListResponses(params);
@@ -118,11 +119,73 @@ function nowStamp() {
   return Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyyMMdd-HHmmss");
 }
 
+function todayDateString() {
+  return Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd");
+}
+
+function normalizeSubmissionLimit(value) {
+  const limit = Math.floor(Number(value || 0));
+  return isFinite(limit) && limit > 0 ? limit : 0;
+}
+
+function countSubmittedResponses(root, formId, periodId) {
+  const targetFormId = String(formId || "").trim();
+  const targetPeriodId = String(periodId || "").trim();
+  if (!targetFormId) return 0;
+  const responsesFolder = getOrCreateFolder(root, RESPONSES_DIR);
+  const files = responsesFolder.getFiles();
+  let count = 0;
+  while (files.hasNext()) {
+    const file = files.next();
+    if (file.getName().slice(-5) !== ".json") continue;
+    try {
+      const payload = JSON.parse(file.getBlob().getDataAsString("UTF-8"));
+      const response = payload.response || {};
+      if (String(response.formId || "") !== targetFormId) continue;
+      if (targetPeriodId && String(response.periodId || "") !== targetPeriodId) continue;
+      count += 1;
+    } catch (error) {
+      // 壊れたJSONは件数確認から除外
+    }
+  }
+  return count;
+}
+
+function enforceSubmissionAvailability(root, payload) {
+  const form = payload.form || {};
+  const period = payload.period || {};
+  const response = payload.response || {};
+  const today = todayDateString();
+  const dateRules = [
+    { label: "フォーム受付期間", startDate: form.receptionStartDate || "", endDate: form.receptionEndDate || "" },
+    { label: "応募期間", startDate: period.startDate || "", endDate: period.endDate || "" }
+  ];
+  for (let i = 0; i < dateRules.length; i += 1) {
+    const rule = dateRules[i];
+    if (rule.startDate && today < rule.startDate) {
+      throw new Error(rule.label + "の開始前です。");
+    }
+    if (rule.endDate && today > rule.endDate) {
+      throw new Error(rule.label + "は終了しています。");
+    }
+  }
+
+  const limit = normalizeSubmissionLimit(form.submissionLimit);
+  if (!limit) return;
+  const formId = response.formId || form.id || "";
+  const periodId = response.periodId || period.id || "";
+  const count = countSubmittedResponses(root, formId, periodId);
+  if (count >= limit) {
+    throw new Error("応募数の上限に達しています。");
+  }
+}
+
 // ---- 回答受信 ----
 
 function handleSubmitResponse(payload) {
   const root = getRootFolder(payload.driveFolderUrl || (payload.submission && payload.submission.driveFolderUrl));
   const response = payload.response || {};
+  enforceSubmissionAvailability(root, payload);
   const stamp = nowStamp();
   const respondent = sanitizeName(response.respondent, "回答者");
   const episodeLabel = sanitizeName(
@@ -203,6 +266,18 @@ function appendLogRow(root, row) {
   } catch (error) {
     // ログ追記の失敗で回答受信全体を失敗にしない
   }
+}
+
+function handleSubmissionStatus(params) {
+  const formId = String(params.formId || "").trim();
+  if (!formId) throw new Error("formIdがありません。");
+  const root = getRootFolder(params.folder);
+  const periodId = String(params.periodId || "").trim();
+  return jsonOutput({
+    ok: true,
+    count: countSubmittedResponses(root, formId, periodId),
+    now: new Date().toISOString()
+  });
 }
 
 // ---- 回答一覧配信（ツールの「新着回答を同期」） ----

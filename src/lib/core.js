@@ -183,6 +183,11 @@ export const normalizeTrackFields = (fields) => {
   return normalized;
 };
 
+export const normalizeSubmissionLimit = (value) => {
+  const limit = Math.floor(Number(value || 0));
+  return Number.isFinite(limit) && limit > 0 ? limit : 0;
+};
+
 export const TRACK_URL_ERROR_MESSAGE = "楽曲URLはYouTubeまたはSunoのURLを入力してください。";
 export const TRACK_URL_PATTERN = "https?://([A-Za-z0-9-]+\\.)?(youtube\\.com|suno\\.com)(/.*)?|https?://youtu\\.be(/.*)?";
 
@@ -1932,6 +1937,9 @@ export const makeSharePayload = (form, settings = sampleData.settings, context =
       name: form.name,
       type: form.type,
       description: form.description,
+      receptionStartDate: form.receptionStartDate || "",
+      receptionEndDate: form.receptionEndDate || "",
+      submissionLimit: normalizeSubmissionLimit(form.submissionLimit),
       questions: (form.questions ?? []).map((question) =>
         question.kind === "track" ? { ...question, trackFields: normalizeTrackFields(question.trackFields) } : question
       )
@@ -2284,7 +2292,14 @@ export function migrateData(input) {
         : nextQuestion;
     });
 
-    return { ...form, shareSlug: form.shareSlug || getFormPublishedSlug(form), questions };
+    return {
+      ...form,
+      receptionStartDate: form.receptionStartDate || "",
+      receptionEndDate: form.receptionEndDate || "",
+      submissionLimit: normalizeSubmissionLimit(form.submissionLimit) || "",
+      shareSlug: form.shareSlug || getFormPublishedSlug(form),
+      questions
+    };
   });
 
   const settings = { ...sampleData.settings, ...(input.settings ?? {}) };
