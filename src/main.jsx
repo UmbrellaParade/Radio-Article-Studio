@@ -306,6 +306,19 @@ const makeImagePreviewUrl = (url = "") => {
   return trimmed;
 };
 
+const getGoogleDriveImageUrls = (url = "") => {
+  const driveFileId = getGoogleDriveFileId(url);
+  if (!driveFileId) return [];
+  const id = encodeURIComponent(driveFileId);
+  return [
+    `https://drive.google.com/thumbnail?id=${id}&sz=w1200`,
+    `https://lh3.googleusercontent.com/d/${id}=w1200`,
+    `https://drive.google.com/uc?export=view&id=${id}`,
+    `https://drive.google.com/uc?export=download&id=${id}`,
+    `https://drive.usercontent.google.com/download?id=${id}&export=view&authuser=0`
+  ];
+};
+
 const makeCanvasImageProxyUrl = (url = "") => {
   const trimmed = String(url).trim();
   if (!isWebUrl(trimmed) || /(?:^|\/\/)(?:images\.weserv\.nl|wsrv\.nl)\//i.test(trimmed)) return "";
@@ -325,10 +338,7 @@ const getCanvasImageSourceCandidates = (src = "") => {
 
   const previewUrl = makeImagePreviewUrl(trimmed);
   add(previewUrl);
-  const driveFileId = getGoogleDriveFileId(trimmed);
-  if (driveFileId) {
-    add(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(driveFileId)}`);
-  }
+  getGoogleDriveImageUrls(trimmed).forEach(add);
 
   [...candidates].forEach((candidate) => add(makeCanvasImageProxyUrl(candidate)));
   return candidates;
@@ -1253,6 +1263,8 @@ const getTrackColumnField = (label = "") => {
 const getTrackColumnGroup = (label = "") => {
   const rawText = String(label || "");
   const text = rawText.normalize("NFKC");
+  const introSongMatch = text.match(/紹介\s*曲\s*(\d+)/i);
+  if (introSongMatch) return Number(introSongMatch[1]) || 1;
   const selectionMatch = text.match(/(?:選曲|曲|楽曲|song|track)\s*(\d+)/i);
   if (selectionMatch) return Number(selectionMatch[1]) || 1;
   const bracketNumberMatch = text.match(/[【［\[\(（]\s*(\d+)\s*[】］\]\)）]/);
