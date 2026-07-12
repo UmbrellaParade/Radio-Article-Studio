@@ -265,7 +265,6 @@ const MAIN_NAV_ITEMS = [
   ["imports", "取り込み", Upload],
   ["episodes", "放送回", CalendarDays],
   ["forms", "フォーム", Send],
-  ["periods", "応募期間", CalendarDays],
   ["responses", "回答", ClipboardCopy],
   ["tracks", "楽曲", Music],
   ["assets", "素材", Image],
@@ -1537,20 +1536,6 @@ ${socialRows || "-"}
               moveTrackField={moveTrackField}
               resetTrackFields={resetTrackFields}
               removeQuestion={removeQuestion}
-            />
-          )}
-          {active === "periods" && (
-            <ApplicationPeriods
-              periods={data.applicationPeriods}
-              episodes={data.episodes}
-              forms={data.forms}
-              settings={data.settings}
-              patchItem={patchItem}
-              removeItem={removeItem}
-              addPeriod={addApplicationPeriod}
-              importPeriodCsvUrl={importPeriodCsvUrl}
-              importPeriodCsvFile={importPeriodCsvFile}
-              importingSource={importingSource}
             />
           )}
           {active === "responses" && (

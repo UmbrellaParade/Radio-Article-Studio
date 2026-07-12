@@ -659,6 +659,87 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const renderTrackQuestionFields = (question) => {
+    const trackFields = normalizeTrackFields(question.trackFields);
+    const audioField = trackFields.find((field) => field.type === "audio");
+    const detailFields = trackFields.filter((field) => field.type !== "audio");
+
+    const renderDetailField = (field) => {
+      if (field.type === "title") {
+        return (
+          <label key={field.type}>
+            <span>{field.label}</span>
+            <input
+              required={Boolean(question.required)}
+              placeholder={field.placeholder || ""}
+              value={answers[question.id]?.title ?? ""}
+              onChange={(event) => updateTrackAnswer(question.id, { title: event.target.value })}
+            />
+            {field.help && <small>{field.help}</small>}
+          </label>
+        );
+      }
+      if (field.type === "artist") {
+        return (
+          <label key={field.type}>
+            <span>{field.label}</span>
+            <input
+              required={Boolean(question.required)}
+              placeholder={field.placeholder || ""}
+              value={answers[question.id]?.artist ?? ""}
+              onChange={(event) => updateTrackAnswer(question.id, { artist: event.target.value })}
+            />
+            {field.help && <small>{field.help}</small>}
+          </label>
+        );
+      }
+      if (field.type === "url") {
+        return (
+          <label key={field.type}>
+            <span>{field.label}</span>
+            <input
+              type="url"
+              required={Boolean(question.required)}
+              pattern={TRACK_URL_PATTERN}
+              title={TRACK_URL_ERROR_MESSAGE}
+              placeholder={field.placeholder || ""}
+              value={answers[question.id]?.url ?? ""}
+              onChange={(event) => updateTrackUrlAnswer(question.id, event)}
+              onInvalid={(event) => event.target.setCustomValidity(event.target.value ? TRACK_URL_ERROR_MESSAGE : "")}
+              onInput={(event) => event.target.setCustomValidity(isSupportedTrackUrl(event.target.value) ? "" : TRACK_URL_ERROR_MESSAGE)}
+            />
+            {field.help && <small>{field.help}</small>}
+          </label>
+        );
+      }
+      return null;
+    };
+
+    return (
+      <div className="track-question-fields">
+        {audioField && (
+          <div className="track-audio-upload-block">
+            <label>
+              <span>{audioField.label}</span>
+              <input
+                type="file"
+                required={Boolean(question.required)}
+                accept={AUDIO_FILE_ACCEPT}
+                onChange={(event) => updateTrackFileAnswer(question.id, event)}
+              />
+              {(answers[question.id]?.audio?.fileName || audioField.help) && (
+                <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : audioField.help}</small>
+              )}
+            </label>
+            <TrackPreview track={answers[question.id]} />
+            {audioField.note && <p className="hint-text track-entry-help">{audioField.note}</p>}
+          </div>
+        )}
+        {detailFields.map(renderDetailField)}
+      </div>
+    );
+  };
+
   return (
     <main className="app-shell public-shell">
       <Header logoSrc={logoSrc} />
@@ -727,78 +808,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
                   )}
                 </div>
               ) : question.kind === "track" ? (
-                <div className="track-question-fields">
-                  {normalizeTrackFields(question.trackFields).map((field) => {
-                    if (field.type === "audio") {
-                      return (
-                        <React.Fragment key={field.type}>
-                          <label>
-                            <span>{field.label}</span>
-                            <input
-                              type="file"
-                              required={Boolean(question.required)}
-                              accept={AUDIO_FILE_ACCEPT}
-                              onChange={(event) => updateTrackFileAnswer(question.id, event)}
-                            />
-                            {(answers[question.id]?.audio?.fileName || field.help) && (
-                              <small>{answers[question.id]?.audio?.fileName ? `選択済み: ${formatAnswerValue(answers[question.id].audio)}` : field.help}</small>
-                            )}
-                          </label>
-                          <TrackPreview track={answers[question.id]} />
-                          {field.note && <p className="hint-text track-entry-help">{field.note}</p>}
-                        </React.Fragment>
-                      );
-                    }
-                    if (field.type === "title") {
-                      return (
-                        <label key={field.type}>
-                          <span>{field.label}</span>
-                          <input
-                            required={Boolean(question.required)}
-                            placeholder={field.placeholder || ""}
-                            value={answers[question.id]?.title ?? ""}
-                            onChange={(event) => updateTrackAnswer(question.id, { title: event.target.value })}
-                          />
-                          {field.help && <small>{field.help}</small>}
-                        </label>
-                      );
-                    }
-                    if (field.type === "artist") {
-                      return (
-                        <label key={field.type}>
-                          <span>{field.label}</span>
-                          <input
-                            required={Boolean(question.required)}
-                            placeholder={field.placeholder || ""}
-                            value={answers[question.id]?.artist ?? ""}
-                            onChange={(event) => updateTrackAnswer(question.id, { artist: event.target.value })}
-                          />
-                          {field.help && <small>{field.help}</small>}
-                        </label>
-                      );
-                    }
-                    if (field.type === "url") {
-                      return (
-                        <label key={field.type}>
-                          <span>{field.label}</span>
-                          <input
-                            type="url"
-                            required={Boolean(question.required)}
-                            pattern={TRACK_URL_PATTERN}
-                            title={TRACK_URL_ERROR_MESSAGE}
-                            placeholder={field.placeholder || ""}
-                            value={answers[question.id]?.url ?? ""}
-                            onChange={(event) => updateTrackUrlAnswer(question.id, event)}
-                            onInvalid={(event) => event.target.setCustomValidity(event.target.value ? TRACK_URL_ERROR_MESSAGE : "")}
-                            onInput={(event) => event.target.setCustomValidity(isSupportedTrackUrl(event.target.value) ? "" : TRACK_URL_ERROR_MESSAGE)}
-                          />
-                          {field.help && <small>{field.help}</small>}
-                        </label>
-                      );
-                    }
-                    return null;
-                  })}
-                </div>
+                renderTrackQuestionFields(question)
               ) : question.kind === "x_contact" ? (
                 <div className="x-contact-block">
                   <label>

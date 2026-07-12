@@ -861,6 +861,11 @@ textarea {
   gap: 6px;
 }
 
+.track-audio-upload-block {
+  display: grid;
+  gap: 10px;
+}
+
 .track-question-fields label span {
   color: #6b6175;
   font-size: 12px;
