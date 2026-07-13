@@ -897,6 +897,11 @@ h1 {
 }
 
 .track-record {
+  border-color: var(--form-color-mid, #ded2c2);
+  border-left: 7px solid var(--form-color, #8bd7df);
+  background:
+    linear-gradient(90deg, var(--form-color-soft, rgba(139, 215, 223, .14)), rgba(255, 253, 248, 0) 42%),
+    #fffdf8;
   transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
 }
 

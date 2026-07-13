@@ -283,6 +283,11 @@ const UI_STATE_KEY = `${STORAGE_KEY}:ui`;
 const formAnchorId = (formId) => `form-section-${formId}`;
 const googleFormAnchorId = (formId) => `google-form-section-${formId}`;
 const DEFAULT_GOOGLE_FORM_IDS = new Set(["google_form_guest", "google_form_listener", "google_form_kaname"]);
+const TRACK_SOURCE_GOOGLE_FORM_ID = {
+  ゲスト曲: "google_form_guest",
+  リスナー応募曲: "google_form_listener",
+  パーソナリティ曲: "google_form_kaname"
+};
 
 const getTrackFieldDefaults = (settings = {}) => normalizeTrackFields(settings.trackFieldDefaults);
 
@@ -301,6 +306,14 @@ const getFormColorStyle = (color) => {
     "--form-color-soft": hexToRgba(normalized, 0.14),
     "--form-color-mid": hexToRgba(normalized, 0.32)
   };
+};
+
+const getGoogleFormColorForTrack = (track = {}, googleForms = []) => {
+  const formId =
+    TRACK_SOURCE_GOOGLE_FORM_ID[track.source] ||
+    (/リスナー/.test(track.source || "") ? "google_form_listener" : /パーソナリティ|かなめ/.test(track.source || "") ? "google_form_kaname" : "google_form_guest");
+  const form = googleForms.find((item) => item.id === formId);
+  return normalizeFormColor(form?.color, formId === "google_form_listener" ? "#f3c96b" : formId === "google_form_kaname" ? "#bfa7f2" : "#8bd7df");
 };
 
 const cloneFormQuestion = (question) => ({
@@ -1841,6 +1854,7 @@ ${socialRows || "-"}
               addTrack={addTrack}
               moveTrack={moveTrack}
               dropTrack={dropTrack}
+              googleForms={data.googleForms ?? []}
             />
           )}
           {active === "listenerIcons" && (
@@ -3321,7 +3335,7 @@ function ListenerIcons({ tracks, patchItem }) {
   );
 }
 
-function Tracks({ tracks, patchItem, removeItem, addTrack, moveTrack, dropTrack }) {
+function Tracks({ tracks, patchItem, removeItem, addTrack, moveTrack, dropTrack, googleForms = [] }) {
   const [draggedTrackId, setDraggedTrackId] = useState("");
   const [dragOverTrackId, setDragOverTrackId] = useState("");
 
@@ -3365,6 +3379,7 @@ function Tracks({ tracks, patchItem, removeItem, addTrack, moveTrack, dropTrack 
           const audio = track.audio;
           const audioDownloadUrl = makeDirectAudioDownloadUrl(track.audioFile);
           const isDriveAudio = Boolean(getGoogleDriveFileId(track.audioFile));
+          const trackColor = getGoogleFormColorForTrack(track, googleForms);
           return (
             <article
               className={[
@@ -3373,6 +3388,7 @@ function Tracks({ tracks, patchItem, removeItem, addTrack, moveTrack, dropTrack 
                 draggedTrackId === track.id ? "dragging" : "",
                 dragOverTrackId === track.id && draggedTrackId !== track.id ? "drag-over" : ""
               ].filter(Boolean).join(" ")}
+              style={getFormColorStyle(trackColor)}
               key={track.id}
               onDragOver={(event) => {
                 event.preventDefault();
