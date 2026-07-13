@@ -1870,6 +1870,8 @@ ${socialRows || "-"}
               applyBellboTrackUrl={applyBellboTrackUrl}
               importingSource={importingSource}
               googleForms={data.googleForms ?? []}
+              collapsibleState={collapsibleState}
+              setCollapsibleOpen={setCollapsibleOpen}
             />
           )}
           {active === "episodes" && (
@@ -2165,7 +2167,9 @@ function ImportsPanel({
   clearImportPreview,
   applyBellboTrackUrl,
   importingSource,
-  googleForms = []
+  googleForms = [],
+  collapsibleState,
+  setCollapsibleOpen
 }) {
   return (
     <div className="view-stack">
@@ -2198,6 +2202,8 @@ function ImportsPanel({
           loading={importingSource === "guest"}
           kind="guest"
           color={getGoogleFormColorForImportKind("guest", googleForms)}
+          collapsibleState={collapsibleState}
+          setCollapsibleOpen={setCollapsibleOpen}
         />
         <SourceImportCard
           title="リスナー応募曲"
@@ -2213,6 +2219,8 @@ function ImportsPanel({
           loading={importingSource === "listener"}
           kind="listener"
           color={getGoogleFormColorForImportKind("listener", googleForms)}
+          collapsibleState={collapsibleState}
+          setCollapsibleOpen={setCollapsibleOpen}
         />
         <SourceImportCard
           title="パーソナリティ曲シート"
@@ -2228,6 +2236,8 @@ function ImportsPanel({
           loading={importingSource === "personality"}
           kind="personality"
           color={getGoogleFormColorForImportKind("personality", googleForms)}
+          collapsibleState={collapsibleState}
+          setCollapsibleOpen={setCollapsibleOpen}
         />
       </div>
 
@@ -2276,19 +2286,34 @@ function SourceImportCard({
   onClearPreview,
   loading = false,
   kind,
-  color
+  color,
+  collapsibleState,
+  setCollapsibleOpen
 }) {
   const columns = Object.keys(preview?.rows?.[0] ?? {}).filter(Boolean);
   const allPreviewRows = preview ? buildImportPreviewRows(preview.rows, kind, preview.mapping) : [];
   const previewRows = allPreviewRows.slice(0, 8);
+  const statusText = preview ? "プレビューあり" : loading ? "読み込み中" : value ? "URL入力済み" : "未設定";
   const columnLabels = { "": "自動判定" };
   columns.forEach((column) => {
     columnLabels[column] = column;
   });
 
   return (
-    <article className="record import-card" style={getFormColorStyle(color)}>
-      <h2><i className="form-color-dot" aria-hidden="true" />{title}</h2>
+    <PersistentDetails
+      persistKey={`imports:${kind}:card`}
+      defaultOpen
+      collapsibleState={collapsibleState}
+      setCollapsibleOpen={setCollapsibleOpen}
+      className="record import-card collapsible-record"
+      style={getFormColorStyle(color)}
+    >
+      <summary className="record-summary">
+        <strong><i className="form-color-dot" aria-hidden="true" />{title}</strong>
+        <span>{statusText}</span>
+        {preview && <span>{preview.rows.length}行 / {allPreviewRows.length}件候補</span>}
+      </summary>
+      <div className="record-body">
       <p className="muted">{description}</p>
       <div className="import-steps" aria-label="取り込み手順">
         {["URL入力", "読み込み", "プレビュー", "反映"].map((step, index) => (
@@ -2364,7 +2389,8 @@ function SourceImportCard({
           )}
         </div>
       )}
-    </article>
+      </div>
+    </PersistentDetails>
   );
 }
 

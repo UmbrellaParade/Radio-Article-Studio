@@ -391,6 +391,16 @@ h1 {
     #fffdf8;
 }
 
+.import-card .record-summary {
+  background:
+    linear-gradient(90deg, var(--form-color-soft, rgba(139, 215, 223, .14)), rgba(255, 250, 242, 0) 50%),
+    #fffaf2;
+}
+
+.import-card[open] .record-summary {
+  border-bottom-color: var(--form-color-mid, #eadfce);
+}
+
 .import-card h2 {
   display: inline-flex;
   align-items: center;
