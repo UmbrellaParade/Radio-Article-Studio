@@ -381,7 +381,7 @@ h1 {
   font-size: 28px;
 }
 
-.import-card {
+.record.import-card {
   display: grid;
   gap: 12px;
   border-color: var(--form-color-mid, #ded2c2);
