@@ -894,6 +894,112 @@ h1 {
   box-shadow: 0 0 0 3px #241f2f;
 }
 
+.google-form-message-panel {
+  border-color: var(--form-color-mid, #d6ccbd);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .72), var(--form-color-soft, rgba(15, 159, 134, .1))),
+    #fbf6ed;
+}
+
+.message-workspace {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.15fr) minmax(300px, .85fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.message-editor,
+.message-subpanel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: rgba(255, 253, 248, .86);
+}
+
+.message-editor textarea {
+  min-height: 260px;
+}
+
+.message-preview {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e1d6c8;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.message-preview strong {
+  color: #5e5669;
+  font-size: 12px;
+}
+
+.message-preview pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  color: #3d3748;
+  font: inherit;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.message-side-stack,
+.message-preset-actions,
+.message-block-list,
+.message-block-form,
+.message-block-edit-fields {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.message-preset-actions {
+  grid-template-columns: minmax(150px, 1fr) auto auto 38px;
+  align-items: end;
+}
+
+.message-block-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto 38px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #e0d7c8;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.message-block-row.editing {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+}
+
+.message-block-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.message-block-row strong,
+.message-block-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-block-row small {
+  color: #756d7d;
+}
+
+.message-block-edit-fields textarea,
+.message-block-form textarea {
+  min-height: 120px;
+}
+
 .track-meta-grid {
   display: grid;
   grid-template-columns: 88px minmax(150px, 220px) minmax(220px, .9fr) minmax(320px, 1.4fr);
@@ -2398,6 +2504,10 @@ textarea {
   .bellbo-url-row,
   .form-grid,
   .form-preset-panel,
+  .message-workspace,
+  .message-preset-actions,
+  .message-block-row,
+  .message-block-row.editing,
   .track-meta-grid,
   .question-row,
   .track-field-row,

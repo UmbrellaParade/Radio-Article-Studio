@@ -2046,10 +2046,63 @@ export const formatDateRange = (startDate = "", endDate = "") => {
   return startDate || endDate || "期間未設定";
 };
 
+export const DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE = [
+  "こんばんは！",
+  "",
+  "Sunoパ！の「{formName}」を送ります。",
+  "以下のURLから入力をお願いします。",
+  "{formUrl}",
+  "",
+  "入力内容は番組準備やアーカイブ記事制作に使わせてもらいます。",
+  "よろしくお願いします！"
+].join("\n");
+
+export const DEFAULT_GOOGLE_FORM_MESSAGE_BLOCKS = [
+  {
+    id: "form-purpose",
+    name: "フォームの目的",
+    body: [
+      "このフォームでは、番組内で紹介する内容や、アーカイブ記事に載せてよい情報を確認させてもらいます。",
+      "公開してほしくない内容や表記の注意点があれば、該当欄に書いてください。"
+    ].join("\n")
+  },
+  {
+    id: "track-notes",
+    name: "楽曲応募の補足",
+    body: [
+      "楽曲を送る場合は、楽曲名・アーティスト名・YouTube/Suno URLを確認してから送信してください。",
+      "音源ファイルが大きい場合は、Google Driveなどの共有URLでも大丈夫です。"
+    ].join("\n")
+  }
+];
+
+export const DEFAULT_GOOGLE_FORM_MESSAGE_PRESETS = [
+  {
+    id: "basic",
+    name: "基本のフォーム案内",
+    body: DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE
+  },
+  {
+    id: "friendly",
+    name: "少しやわらかめ",
+    body: [
+      "こんばんは！",
+      "",
+      "Sunoパ！用のフォームを送ります＾＾",
+      "こちらから入力してもらえると助かります。",
+      "{formUrl}",
+      "",
+      "わかる範囲で大丈夫なので、よろしくお願いします！"
+    ].join("\n")
+  }
+];
+
+export const GOOGLE_FORM_MESSAGE_VARIABLES = ["{formName}", "{formUrl}", "{editUrl}", "{memo}"];
+
 export const defaultGoogleForms = [
-  { id: "google_form_guest", name: "ゲスト回アンケートフォーム", url: "", editUrl: "", memo: "", color: "#8bd7df" },
-  { id: "google_form_listener", name: "リスナー楽曲応募フォーム", url: "", editUrl: "", memo: "", color: "#f3c96b" },
-  { id: "google_form_kaname", name: "かなめちゃん専用フォーム", url: "", editUrl: "", memo: "", color: "#bfa7f2" }
+  { id: "google_form_guest", name: "ゲスト回アンケートフォーム", url: "", editUrl: "", messageDraft: DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE, messagePresets: [], messageBlocks: [], memo: "", color: "#8bd7df" },
+  { id: "google_form_listener", name: "リスナー楽曲応募フォーム", url: "", editUrl: "", messageDraft: DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE, messagePresets: [], messageBlocks: [], memo: "", color: "#f3c96b" },
+  { id: "google_form_kaname", name: "かなめちゃん専用フォーム", url: "", editUrl: "", messageDraft: DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE, messagePresets: [], messageBlocks: [], memo: "", color: "#bfa7f2" }
 ];
 
 export const sampleData = {
@@ -2437,6 +2490,17 @@ export function migrateData(input) {
     name: form?.name || fallback.name || "追加したGoogleフォーム",
     url: form?.url || "",
     editUrl: form?.editUrl || form?.adminUrl || "",
+    messageDraft: form?.messageDraft || form?.guestDmDraft || fallback.messageDraft || DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE,
+    messagePresets: Array.isArray(form?.messagePresets)
+      ? form.messagePresets
+      : Array.isArray(form?.dmPresets)
+        ? form.dmPresets
+        : fallback.messagePresets || [],
+    messageBlocks: Array.isArray(form?.messageBlocks)
+      ? form.messageBlocks
+      : Array.isArray(form?.templateBlocks)
+        ? form.templateBlocks
+        : fallback.messageBlocks || [],
     memo: form?.memo || "",
     color: normalizeFormColor(form?.color, fallback.color || FORM_COLOR_PALETTE[index % FORM_COLOR_PALETTE.length])
   });

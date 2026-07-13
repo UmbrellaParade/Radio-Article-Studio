@@ -48,6 +48,10 @@ import {
   DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
   DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
   DEFAULT_AUDIO_SAVE_MEMO,
+  DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE,
+  DEFAULT_GOOGLE_FORM_MESSAGE_BLOCKS,
+  DEFAULT_GOOGLE_FORM_MESSAGE_PRESETS,
+  GOOGLE_FORM_MESSAGE_VARIABLES,
   publicAsset,
   GUEST_BADGE_ASSET_URL,
   openThumbnailImageDb,
@@ -283,6 +287,8 @@ const UI_STATE_KEY = `${STORAGE_KEY}:ui`;
 const formAnchorId = (formId) => `form-section-${formId}`;
 const googleFormAnchorId = (formId) => `google-form-section-${formId}`;
 const DEFAULT_GOOGLE_FORM_IDS = new Set(["google_form_guest", "google_form_listener", "google_form_kaname"]);
+const DEFAULT_GOOGLE_FORM_MESSAGE_PRESET_IDS = new Set(DEFAULT_GOOGLE_FORM_MESSAGE_PRESETS.map((preset) => preset.id));
+const DEFAULT_GOOGLE_FORM_MESSAGE_BLOCK_IDS = new Set(DEFAULT_GOOGLE_FORM_MESSAGE_BLOCKS.map((block) => block.id));
 const TRACK_SOURCE_GOOGLE_FORM_ID = {
   ゲスト曲: "google_form_guest",
   リスナー応募曲: "google_form_listener",
@@ -314,6 +320,32 @@ const getGoogleFormColorForTrack = (track = {}, googleForms = []) => {
     (/リスナー/.test(track.source || "") ? "google_form_listener" : /パーソナリティ|かなめ/.test(track.source || "") ? "google_form_kaname" : "google_form_guest");
   const form = googleForms.find((item) => item.id === formId);
   return normalizeFormColor(form?.color, formId === "google_form_listener" ? "#f3c96b" : formId === "google_form_kaname" ? "#bfa7f2" : "#8bd7df");
+};
+
+const renderGoogleFormMessage = (template = "", form = {}) => {
+  const values = {
+    formName: form.name || "Googleフォーム",
+    formUrl: form.url || "（外部URL未登録）",
+    editUrl: form.editUrl || "（制作先URL未登録）",
+    memo: form.memo || ""
+  };
+  return String(template || "").replace(/\{\{?\s*([a-zA-Z0-9_]+)\s*\}\}?/g, (match, key) => values[key] ?? match);
+};
+
+const getGoogleFormMessagePresets = (form = {}) => {
+  const savedPresets = Array.isArray(form.messagePresets) ? form.messagePresets : [];
+  const savedById = new Map(savedPresets.map((preset) => [preset.id, preset]));
+  const defaultPresets = DEFAULT_GOOGLE_FORM_MESSAGE_PRESETS.map((preset) => ({ ...preset, ...savedById.get(preset.id) }));
+  const customPresets = savedPresets.filter((preset) => !DEFAULT_GOOGLE_FORM_MESSAGE_PRESET_IDS.has(preset.id));
+  return [...defaultPresets, ...customPresets];
+};
+
+const getGoogleFormMessageBlocks = (form = {}) => {
+  const savedBlocks = Array.isArray(form.messageBlocks) ? form.messageBlocks : [];
+  const savedById = new Map(savedBlocks.map((block) => [block.id, block]));
+  const defaultBlocks = DEFAULT_GOOGLE_FORM_MESSAGE_BLOCKS.map((block) => ({ ...block, ...savedById.get(block.id) }));
+  const customBlocks = savedBlocks.filter((block) => !DEFAULT_GOOGLE_FORM_MESSAGE_BLOCK_IDS.has(block.id));
+  return [...defaultBlocks, ...customBlocks];
 };
 
 const cloneFormQuestion = (question) => ({
@@ -812,6 +844,9 @@ function App() {
         name: "追加したGoogleフォーム",
         url: "",
         editUrl: "",
+        messageDraft: DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE,
+        messagePresets: [],
+        messageBlocks: [],
         memo: "",
         color: normalizeFormColor(FORM_COLOR_PALETTE[googleForms.length % FORM_COLOR_PALETTE.length])
       }
@@ -2607,6 +2642,10 @@ function GoogleForms({
   setCollapsibleOpen
 }) {
   const [copiedFormId, setCopiedFormId] = useState("");
+  const [selectedMessagePresetIds, setSelectedMessagePresetIds] = useState({});
+  const [newMessagePresetNames, setNewMessagePresetNames] = useState({});
+  const [newMessageBlockDrafts, setNewMessageBlockDrafts] = useState({});
+  const [editingMessageBlock, setEditingMessageBlock] = useState({ formId: "", blockId: "", name: "", body: "" });
 
   const detailsProps = (persistKey, defaultOpen = false) => ({
     persistKey,
@@ -2621,6 +2660,121 @@ function GoogleForms({
     await navigator.clipboard.writeText(url);
     setCopiedFormId(form.id);
     window.setTimeout(() => setCopiedFormId(""), 1800);
+  };
+
+  const copyMessage = async (form) => {
+    await navigator.clipboard.writeText(renderGoogleFormMessage(form.messageDraft || DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE, form));
+    setCopiedFormId(`${form.id}:message`);
+    window.setTimeout(() => setCopiedFormId(""), 1800);
+  };
+
+  const getSelectedMessagePresetId = (form) => selectedMessagePresetIds[form.id] || "basic";
+
+  const setSelectedMessagePresetId = (formId, presetId) => {
+    setSelectedMessagePresetIds((current) => ({ ...current, [formId]: presetId }));
+  };
+
+  const setNewMessagePresetName = (formId, value) => {
+    setNewMessagePresetNames((current) => ({ ...current, [formId]: value }));
+  };
+
+  const setNewMessageBlockDraft = (formId, patch) => {
+    setNewMessageBlockDrafts((current) => ({
+      ...current,
+      [formId]: {
+        name: "",
+        body: "",
+        ...(current[formId] ?? {}),
+        ...patch
+      }
+    }));
+  };
+
+  const insertMessageBlock = (form, block) => {
+    if (!block?.body) return;
+    const current = form.messageDraft || "";
+    patchGoogleForm(form.id, { messageDraft: `${current}${current.trim() ? "\n\n" : ""}${block.body}` });
+  };
+
+  const saveMessageBlock = (form) => {
+    const draft = newMessageBlockDrafts[form.id] ?? {};
+    const name = String(draft.name || "").trim();
+    const body = String(draft.body || "").trim();
+    if (!name || !body) return;
+    patchGoogleForm(form.id, {
+      messageBlocks: [
+        ...(form.messageBlocks || []),
+        { id: newId("msg_block"), name, body }
+      ]
+    });
+    setNewMessageBlockDrafts((current) => ({ ...current, [form.id]: { name: "", body: "" } }));
+  };
+
+  const startEditMessageBlock = (form, block) => {
+    setEditingMessageBlock({ formId: form.id, blockId: block.id, name: block.name, body: block.body });
+  };
+
+  const cancelEditMessageBlock = () => {
+    setEditingMessageBlock({ formId: "", blockId: "", name: "", body: "" });
+  };
+
+  const saveEditedMessageBlock = (form) => {
+    const name = editingMessageBlock.name.trim();
+    const body = editingMessageBlock.body.trim();
+    if (editingMessageBlock.formId !== form.id || !editingMessageBlock.blockId || !name || !body) return;
+    const savedBlocks = form.messageBlocks || [];
+    const editedBlock = { id: editingMessageBlock.blockId, name, body };
+    const exists = savedBlocks.some((block) => block.id === editingMessageBlock.blockId);
+    patchGoogleForm(form.id, {
+      messageBlocks: exists
+        ? savedBlocks.map((block) => (block.id === editingMessageBlock.blockId ? editedBlock : block))
+        : [...savedBlocks, editedBlock]
+    });
+    cancelEditMessageBlock();
+  };
+
+  const removeMessageBlock = (form, blockId) => {
+    patchGoogleForm(form.id, { messageBlocks: (form.messageBlocks || []).filter((block) => block.id !== blockId) });
+    if (editingMessageBlock.formId === form.id && editingMessageBlock.blockId === blockId) cancelEditMessageBlock();
+  };
+
+  const applyMessagePreset = (form, preset) => {
+    if (!preset) return;
+    setSelectedMessagePresetId(form.id, preset.id);
+    patchGoogleForm(form.id, { messageDraft: preset.body });
+  };
+
+  const saveMessagePreset = (form) => {
+    const body = String(form.messageDraft || "").trim();
+    if (!body) return;
+    const customPresetCount = (form.messagePresets || []).filter((preset) => !DEFAULT_GOOGLE_FORM_MESSAGE_PRESET_IDS.has(preset.id)).length;
+    const name = String(newMessagePresetNames[form.id] || "").trim() || `DMプリセット ${customPresetCount + 1}`;
+    const preset = { id: newId("msg_preset"), name, body: form.messageDraft };
+    patchGoogleForm(form.id, { messagePresets: [preset, ...(form.messagePresets || [])] });
+    setSelectedMessagePresetId(form.id, preset.id);
+    setNewMessagePresetName(form.id, "");
+  };
+
+  const overwriteMessagePreset = (form, selectedPreset) => {
+    if (!selectedPreset) return;
+    const savedPresets = form.messagePresets || [];
+    const nextPreset = {
+      id: selectedPreset.id,
+      name: String(newMessagePresetNames[form.id] || "").trim() || selectedPreset.name,
+      body: form.messageDraft || ""
+    };
+    const exists = savedPresets.some((preset) => preset.id === selectedPreset.id);
+    patchGoogleForm(form.id, {
+      messagePresets: exists
+        ? savedPresets.map((preset) => (preset.id === selectedPreset.id ? nextPreset : preset))
+        : [nextPreset, ...savedPresets]
+    });
+    setNewMessagePresetName(form.id, "");
+  };
+
+  const removeMessagePreset = (form, selectedPresetId) => {
+    patchGoogleForm(form.id, { messagePresets: (form.messagePresets || []).filter((preset) => preset.id !== selectedPresetId) });
+    if (!DEFAULT_GOOGLE_FORM_MESSAGE_PRESET_IDS.has(selectedPresetId)) setSelectedMessagePresetId(form.id, "basic");
   };
 
   return (
@@ -2641,6 +2795,13 @@ function GoogleForms({
           const canOpenEditUrl = isWebUrl(editUrl);
           const isDefault = DEFAULT_GOOGLE_FORM_IDS.has(form.id);
           const color = normalizeFormColor(form.color, FORM_COLOR_PALETTE[index % FORM_COLOR_PALETTE.length]);
+          const messagePresets = getGoogleFormMessagePresets(form);
+          const messageBlocks = getGoogleFormMessageBlocks(form);
+          const selectedPresetId = getSelectedMessagePresetId(form);
+          const selectedPreset = messagePresets.find((preset) => preset.id === selectedPresetId) ?? messagePresets[0];
+          const selectedSavedPreset = (form.messagePresets || []).find((preset) => preset.id === selectedPreset?.id);
+          const newBlockDraft = newMessageBlockDrafts[form.id] ?? { name: "", body: "" };
+          const renderedMessage = renderGoogleFormMessage(form.messageDraft || DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE, form);
           return (
             <PersistentDetails
               {...detailsProps(`googleForm:${form.id}:record`, true)}
@@ -2697,6 +2858,136 @@ function GoogleForms({
                 />
               </div>
               {url && !canOpen && <p className="hint-text">URLは https:// から始まる形式で登録してください。</p>}
+              <PersistentDetails {...detailsProps(`googleForm:${form.id}:message`)} className="collapsible-section google-form-message-panel">
+                <summary><strong>送付メッセージ</strong><span>{form.messageDraft ? "作成済み" : "未入力"}</span></summary>
+                <div className="message-workspace">
+                  <div className="message-editor">
+                    <div className="record-head compact">
+                      <div>
+                        <strong>メッセージ本文</strong>
+                        <p className="muted">フォームURLを送るDMや連絡文をここで作れます。</p>
+                      </div>
+                      <div className="inline-actions">
+                        <button className="secondary" onClick={() => patchGoogleForm(form.id, { messageDraft: DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE })}>
+                          <RotateCcw size={16} />初期文
+                        </button>
+                        <button className="secondary" onClick={() => copyMessage(form)}>
+                          <ClipboardCopy size={16} />{copiedFormId === `${form.id}:message` ? "コピー済み" : "コピー"}
+                        </button>
+                      </div>
+                    </div>
+                    <textarea value={form.messageDraft || ""} onChange={(event) => patchGoogleForm(form.id, { messageDraft: event.target.value })} />
+                    <p className="hint-text">差し込み: {GOOGLE_FORM_MESSAGE_VARIABLES.join(" / ")}。コピー時に実際の内容へ置き換わります。</p>
+                    <div className="message-preview">
+                      <strong>コピー内容プレビュー</strong>
+                      <pre>{renderedMessage}</pre>
+                    </div>
+                  </div>
+                  <div className="message-side-stack">
+                    <section className="message-subpanel">
+                      <div className="record-head compact">
+                        <strong>DMプリセット</strong>
+                        <button className="secondary" onClick={() => applyMessagePreset(form, selectedPreset)} disabled={!selectedPreset}>
+                          <Send size={16} />反映
+                        </button>
+                      </div>
+                      <select value={selectedPreset?.id || ""} onChange={(event) => setSelectedMessagePresetId(form.id, event.target.value)}>
+                        {messagePresets.map((preset) => (
+                          <option key={preset.id} value={preset.id}>{preset.name}</option>
+                        ))}
+                      </select>
+                      <div className="message-preset-actions">
+                        <Field
+                          label="プリセット名"
+                          value={newMessagePresetNames[form.id] || ""}
+                          onChange={(value) => setNewMessagePresetName(form.id, value)}
+                          placeholder="プリセット名"
+                        />
+                        <button className="secondary" onClick={() => saveMessagePreset(form)}>
+                          <Plus size={16} />現在の文面を保存
+                        </button>
+                        <button className="secondary" onClick={() => overwriteMessagePreset(form, selectedPreset)} disabled={!selectedPreset}>
+                          <Save size={16} />選択プリセットを上書き
+                        </button>
+                        <button
+                          className="icon-danger"
+                          onClick={() => removeMessagePreset(form, selectedPreset?.id)}
+                          disabled={!selectedSavedPreset}
+                          aria-label={DEFAULT_GOOGLE_FORM_MESSAGE_PRESET_IDS.has(selectedPreset?.id) ? "DMプリセットを初期状態に戻す" : "DMプリセットを削除"}
+                          title={DEFAULT_GOOGLE_FORM_MESSAGE_PRESET_IDS.has(selectedPreset?.id) ? "初期状態に戻す" : "削除"}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </section>
+                    <section className="message-subpanel">
+                      <div className="record-head compact">
+                        <strong>文章ブロック</strong>
+                      </div>
+                      <div className="message-block-list">
+                        {messageBlocks.map((block) => {
+                          const saved = (form.messageBlocks || []).some((item) => item.id === block.id);
+                          const editing = editingMessageBlock.formId === form.id && editingMessageBlock.blockId === block.id;
+                          return (
+                            <div className={editing ? "message-block-row editing" : "message-block-row"} key={block.id}>
+                              {editing ? (
+                                <>
+                                  <div className="message-block-edit-fields">
+                                    <Field label="ブロック名" value={editingMessageBlock.name} onChange={(value) => setEditingMessageBlock((current) => ({ ...current, name: value }))} />
+                                    <textarea value={editingMessageBlock.body} onChange={(event) => setEditingMessageBlock((current) => ({ ...current, body: event.target.value }))} />
+                                  </div>
+                                  <button className="secondary" onClick={() => saveEditedMessageBlock(form)} disabled={!editingMessageBlock.name.trim() || !editingMessageBlock.body.trim()}>
+                                    <Save size={16} />保存
+                                  </button>
+                                  <button className="secondary" onClick={cancelEditMessageBlock}>
+                                    <X size={16} />キャンセル
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <div>
+                                    <strong>{block.name}</strong>
+                                    <small>{block.body.split("\n")[0]}</small>
+                                  </div>
+                                  <button className="secondary" onClick={() => insertMessageBlock(form, block)}>挿入</button>
+                                  <button className="secondary" onClick={() => startEditMessageBlock(form, block)}>
+                                    <Save size={16} />編集
+                                  </button>
+                                  <button
+                                    className="icon-danger"
+                                    onClick={() => removeMessageBlock(form, block.id)}
+                                    disabled={!saved}
+                                    aria-label={DEFAULT_GOOGLE_FORM_MESSAGE_BLOCK_IDS.has(block.id) ? "文章ブロックを初期状態に戻す" : "文章ブロックを削除"}
+                                    title={DEFAULT_GOOGLE_FORM_MESSAGE_BLOCK_IDS.has(block.id) ? "初期状態に戻す" : "削除"}
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="message-block-form">
+                        <Field
+                          label="ブロック名"
+                          value={newBlockDraft.name}
+                          onChange={(value) => setNewMessageBlockDraft(form.id, { name: value })}
+                          placeholder="例: 入力時のお願い"
+                        />
+                        <textarea
+                          value={newBlockDraft.body}
+                          onChange={(event) => setNewMessageBlockDraft(form.id, { body: event.target.value })}
+                          placeholder="挿入したい文章ブロック"
+                        />
+                        <button className="secondary" onClick={() => saveMessageBlock(form)} disabled={!newBlockDraft.name?.trim() || !newBlockDraft.body?.trim()}>
+                          <Plus size={16} />ブロック登録
+                        </button>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </PersistentDetails>
               <PersistentDetails {...detailsProps(`googleForm:${form.id}:color`)} className="collapsible-section">
                 <summary><strong>表示色</strong><span>{color}</span></summary>
                 <div className="form-grid">
