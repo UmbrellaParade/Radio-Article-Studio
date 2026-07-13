@@ -225,6 +225,19 @@ export const loadCanvasImage = async (src) => {
   throw lastError;
 };
 
+export const loadCanvasImageAsDataUrl = async (src, maxSide = 1200) => {
+  const image = await loadCanvasImage(src);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const scale = Math.min(1, maxSide / Math.max(width || maxSide, height || maxSide));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round((width || maxSide) * scale));
+  canvas.height = Math.max(1, Math.round((height || maxSide) * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+};
+
 export function drawCoverAt(ctx, image, x, y, width, height, crop = {}) {
   const cropX = clampNumber(crop.cropX, 50, 0, 100);
   const cropY = clampNumber(crop.cropY, 50, 0, 100);

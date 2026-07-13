@@ -302,7 +302,8 @@ export const mergeGuestIcons = (currentStudio = defaultThumbnailStudio, incoming
     ...defaultThumbnailStudio,
     ...currentStudio,
     guestIcon: nextIcons[0] ?? { ...defaultThumbnailStudio.guestIcon },
-    guestIcons: nextIcons
+    guestIcons: nextIcons,
+    generated: incomingIcon ? {} : currentStudio.generated ?? {}
   };
 };
 

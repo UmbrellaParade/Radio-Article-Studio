@@ -208,6 +208,7 @@ import {
 import {
   fileToDataUrl,
   assertCanvasImageReadable,
+  loadCanvasImageAsDataUrl,
   loadCanvasImageSource,
   loadCanvasImage,
   drawCoverAt,
@@ -354,6 +355,7 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
   const [previewImage, setPreviewImage] = useState(null);
   const [collapsedSliderKeys, setCollapsedSliderKeys] = useState({ standfm1x1: true, stream9x16: true });
   const [generatingKey, setGeneratingKey] = useState("");
+  const externalIconHydrationRef = useRef(new Set());
   const thumbnailDate = studio.date || episodeDate || "";
   const generated = studio.generated ?? {};
   const layoutPresetOverrides = studio.layoutPresetOverrides ?? {};
@@ -541,6 +543,65 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
       window.clearTimeout(timer);
     };
   }, [thumbnailDate, guestName, guestIconPreviewKey, thumbnailTemplatePreviewKey]);
+
+  useEffect(() => {
+    const externalIcons = guestIcons.filter((icon) => icon.dataUrl && !String(icon.dataUrl).startsWith("data:"));
+    const pendingIcons = externalIcons.filter((icon) => {
+      const key = `${icon.id || icon.name}:${icon.dataUrl}`;
+      return !externalIconHydrationRef.current.has(key);
+    });
+    if (!pendingIcons.length) return undefined;
+
+    let active = true;
+    pendingIcons.forEach((icon) => externalIconHydrationRef.current.add(`${icon.id || icon.name}:${icon.dataUrl}`));
+
+    Promise.allSettled(
+      pendingIcons.map(async (icon) => {
+        const dataUrl = await loadCanvasImageAsDataUrl(icon.dataUrl);
+        return { sourceUrl: icon.dataUrl, dataUrl };
+      })
+    )
+      .then((results) => {
+        const convertedIcons = results
+          .filter((result) => result.status === "fulfilled")
+          .map((result) => result.value);
+        if (!active) return;
+        if (!convertedIcons.length) {
+          setMessage("外部URLのゲストアイコンをサムネ合成用に取り込めませんでした。Google Drive画像の場合は共有設定を確認するか、画像ファイルを直接登録してください。");
+          return;
+        }
+        const convertedBySource = new Map(convertedIcons.map((icon) => [icon.sourceUrl, icon.dataUrl]));
+        const presetKeys = THUMBNAIL_PRESETS.map((preset) => preset.key);
+        forgetGeneratedImages(presetKeys);
+        updateStudio((current) => {
+          const currentIcons = normalizeGuestIconList(current.guestIcon, current.guestIcons);
+          const nextGuestIcons = currentIcons.map((icon) =>
+            convertedBySource.has(icon.dataUrl)
+              ? { ...icon, sourceUrl: icon.dataUrl, dataUrl: convertedBySource.get(icon.dataUrl) }
+              : icon
+          );
+          return {
+            ...defaultThumbnailStudio,
+            ...current,
+            generated: removeGeneratedRecords(current.generated, presetKeys),
+            guestIcon: nextGuestIcons[0] ?? { ...defaultThumbnailStudio.guestIcon },
+            guestIcons: nextGuestIcons
+          };
+        });
+        setMessage(
+          convertedIcons.length === pendingIcons.length
+            ? "外部URLのゲストアイコンをサムネ合成用に取り込みました。プレビューと生成に反映されます。"
+            : `外部URLのゲストアイコン${convertedIcons.length}件をサムネ合成用に取り込みました。取り込めなかった画像はDrive共有設定を確認するか、画像ファイルを直接登録してください。`
+        );
+      })
+      .catch(() => {
+        if (active) setMessage("外部URLのゲストアイコンをサムネ合成用に取り込めませんでした。Google Drive画像の場合は共有設定を確認するか、画像ファイルを直接登録してください。");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [guestIconPreviewKey]);
 
   const handleTemplateFile = async (presetKey, event) => {
     const file = event.target.files?.[0];
