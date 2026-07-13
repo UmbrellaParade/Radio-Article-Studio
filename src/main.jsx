@@ -11,6 +11,7 @@ import {
   Download,
   FileText,
   FolderOpen,
+  GripVertical,
   Image,
   Link,
   Mic2,
@@ -269,8 +270,8 @@ const MAIN_NAV_ITEMS = [
   ["imports", "取り込み", Upload],
   ["episodes", "放送回", CalendarDays],
   ["forms", "Googleフォーム", Send],
-  ["responses", "回答", ClipboardCopy],
   ["tracks", "楽曲", Music],
+  ["listenerIcons", "応募者アイコン", Image],
   ["assets", "素材", Image],
   ["social", "SNS告知", Share2],
   ["pack", "Codexパック", FileText],
@@ -713,6 +714,39 @@ function App() {
       }
     ]);
     setActive("tracks");
+  };
+
+  const reorderEpisodeTracks = (updater) => {
+    if (!selectedEpisode) return;
+    setData((current) => {
+      const ordered = current.tracks
+        .filter((track) => track.episodeId === selectedEpisode.id)
+        .sort((a, b) => Number(a.slotNo) - Number(b.slotNo));
+      const nextOrdered = updater(ordered);
+      const slotNoById = new Map(nextOrdered.map((track, index) => [track.id, index + 1]));
+      return {
+        ...current,
+        tracks: current.tracks.map((track) =>
+          slotNoById.has(track.id) ? { ...track, slotNo: slotNoById.get(track.id) } : track
+        )
+      };
+    });
+  };
+
+  const moveTrack = (trackId, direction) => {
+    reorderEpisodeTracks((ordered) => {
+      const fromIndex = ordered.findIndex((track) => track.id === trackId);
+      return moveArrayItem(ordered, fromIndex, fromIndex + direction);
+    });
+  };
+
+  const dropTrack = (draggedTrackId, targetTrackId) => {
+    if (!draggedTrackId || !targetTrackId || draggedTrackId === targetTrackId) return;
+    reorderEpisodeTracks((ordered) => {
+      const fromIndex = ordered.findIndex((track) => track.id === draggedTrackId);
+      const toIndex = ordered.findIndex((track) => track.id === targetTrackId);
+      return moveArrayItem(ordered, fromIndex, toIndex);
+    });
   };
 
   const addAsset = () => {
@@ -1799,21 +1833,18 @@ ${socialRows || "-"}
               setCollapsibleOpen={setCollapsibleOpen}
             />
           )}
-          {active === "responses" && (
-            <Responses
-              forms={data.forms}
-              responses={data.responses}
+          {active === "tracks" && (
+            <Tracks
+              tracks={episodeTracks}
               patchItem={patchItem}
               removeItem={removeItem}
-              addResponse={addResponse}
-              importResponseJson={importResponseJson}
-              syncResponses={syncResponses}
-              syncState={syncState}
-              lastResponseSyncAt={data.settings.lastResponseSyncAt || ""}
+              addTrack={addTrack}
+              moveTrack={moveTrack}
+              dropTrack={dropTrack}
             />
           )}
-          {active === "tracks" && (
-            <Tracks tracks={episodeTracks} patchItem={patchItem} removeItem={removeItem} addTrack={addTrack} />
+          {active === "listenerIcons" && (
+            <ListenerIcons tracks={episodeTracks.filter((track) => track.source === "リスナー応募曲")} patchItem={patchItem} />
           )}
           {active === "assets" && (
             <Assets
@@ -1987,15 +2018,19 @@ function RestoreDataView({ logoSrc, payload, restoreData }) {
 function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
   const articleUrl = selectedEpisode?.articleUrl || buildArticleUrl(data.settings.wordpressSite, selectedEpisode?.articleSlug);
   const articleThumbnailReady = Boolean(data.thumbnailStudio?.generated?.article16x9);
+  const listenerTracks = episodeTracks.filter((track) => track.source === "リスナー応募曲");
+  const listenerIconCount = listenerTracks.filter((track) => track.ownerIconUrl).length;
   const stats = [
     ["放送回", data.episodes.length, CalendarDays],
     ["この回の楽曲", episodeTracks.length, Music],
+    ["応募者アイコン", listenerTracks.length ? `${listenerIconCount}/${listenerTracks.length}` : "-", Image],
     ["記事アイキャッチ", articleThumbnailReady ? "済" : "未", Image],
     ["Codexパック", selectedEpisode ? "作成" : "-", FileText]
   ];
   const statTargets = {
     放送回: "episodes",
     この回の楽曲: "tracks",
+    応募者アイコン: "listenerIcons",
     記事アイキャッチ: "assets",
     Codexパック: "pack"
   };
@@ -2018,8 +2053,9 @@ function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
         <div className="button-row">
           <button className="secondary" onClick={() => setActive("imports")}>1. 取り込み</button>
           <button className="secondary" onClick={() => setActive("tracks")}>2. 楽曲確認</button>
-          <button className="secondary" onClick={() => setActive("assets")}>3. サムネ作成</button>
-          <button className="primary" onClick={() => setActive("pack")}>4. Codexパック</button>
+          <button className="secondary" onClick={() => setActive("listenerIcons")}>3. 応募者アイコン</button>
+          <button className="secondary" onClick={() => setActive("assets")}>4. サムネ作成</button>
+          <button className="primary" onClick={() => setActive("pack")}>5. Codexパック</button>
         </div>
       </article>
 
@@ -3214,7 +3250,81 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
   );
 }
 
-function Tracks({ tracks, patchItem, removeItem, addTrack }) {
+function ListenerIcons({ tracks, patchItem }) {
+  const listenerTracks = tracks.filter((track) => track.source === "リスナー応募曲");
+
+  return (
+    <div className="view-stack">
+      <SectionTitle
+        title="応募者アイコン管理"
+        subtitle="リスナー応募曲の応募者名とアイコン画像を確認します。ここで登録したアイコンは、応募曲見出し下サムネとCodexパックに使われます。"
+      />
+      {listenerTracks.length === 0 ? (
+        <article className="panel">
+          <p className="hint-text">この放送回にはリスナー応募曲がまだありません。取り込み後、または楽曲管理で紹介枠を「リスナー応募曲」にするとここに表示されます。</p>
+        </article>
+      ) : (
+        <div className="records listener-icon-records">
+          {listenerTracks.map((track) => {
+            const iconUrl = String(track.ownerIconUrl || "").trim();
+            const previewUrl = makeImagePreviewUrl(iconUrl);
+            const canOpen = isWebUrl(iconUrl);
+            return (
+              <article className="record listener-icon-card" key={track.id}>
+                <div className="listener-icon-preview">
+                  {previewUrl ? (
+                    <img src={previewUrl} alt={`${track.artist || "応募者"} アイコン`} />
+                  ) : (
+                    <span>{String(track.artist || "未").slice(0, 2)}</span>
+                  )}
+                </div>
+                <div className="listener-icon-body">
+                  <div className="record-head compact">
+                    <div>
+                      <strong>{track.artist || "応募者名未入力"}</strong>
+                      <p className="muted">{track.slotNo}. {track.title || "楽曲名未入力"}</p>
+                    </div>
+                    <div className="inline-actions">
+                      {canOpen ? (
+                        <a className="secondary" href={iconUrl} target="_blank" rel="noreferrer">
+                          <Link size={16} />画像を開く
+                        </a>
+                      ) : (
+                        <button className="secondary" disabled>
+                          <Link size={16} />画像を開く
+                        </button>
+                      )}
+                      <button className="secondary" onClick={() => patchItem("tracks", track.id, { ownerIconUrl: "" })} disabled={!iconUrl}>
+                        <X size={16} />解除
+                      </button>
+                    </div>
+                  </div>
+                  <div className="form-grid">
+                    <Field label="応募者名" value={track.artist || ""} onChange={(value) => patchItem("tracks", track.id, { artist: value })} />
+                    <Field label="楽曲名" value={track.title || ""} onChange={(value) => patchItem("tracks", track.id, { title: value })} />
+                    <Field
+                      label="応募者アイコンURL"
+                      value={track.ownerIconUrl || ""}
+                      onChange={(value) => patchItem("tracks", track.id, { ownerIconUrl: value })}
+                      placeholder="Google Driveや画像URL"
+                      wide
+                    />
+                  </div>
+                  {iconUrl && !canOpen && <p className="hint-text">画像URLは https:// から始まる形式で登録してください。</p>}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Tracks({ tracks, patchItem, removeItem, addTrack, moveTrack, dropTrack }) {
+  const [draggedTrackId, setDraggedTrackId] = useState("");
+  const [dragOverTrackId, setDragOverTrackId] = useState("");
+
   const updateTrackUrl = (track, url) => {
     patchItem("tracks", track.id, { url, urlType: detectUrlType(url), embedUrl: makeEmbedUrl(url) || track.embedUrl });
   };
@@ -3234,20 +3344,66 @@ function Tracks({ tracks, patchItem, removeItem, addTrack }) {
       // 保存先選択のキャンセルは運用上よくあるので、画面上のエラーにはしない。
     }
   };
+  const startDragTrack = (event, trackId) => {
+    setDraggedTrackId(trackId);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", trackId);
+  };
+  const dropOnTrack = (event, targetTrackId) => {
+    event.preventDefault();
+    const sourceTrackId = event.dataTransfer.getData("text/plain") || draggedTrackId;
+    dropTrack(sourceTrackId, targetTrackId);
+    setDraggedTrackId("");
+    setDragOverTrackId("");
+  };
 
   return (
     <div className="view-stack">
       <SectionTitle title="楽曲/音源管理" subtitle="1曲を1ブロックで管理します。楽曲名、楽曲URL、音源ファイルをまとめて入力します。" action={<button className="primary" onClick={addTrack}><Plus size={16} />楽曲追加</button>} />
       <div className="records">
-        {tracks.map((track) => {
+        {tracks.map((track, trackIndex) => {
           const audio = track.audio;
           const audioDownloadUrl = makeDirectAudioDownloadUrl(track.audioFile);
           const isDriveAudio = Boolean(getGoogleDriveFileId(track.audioFile));
           return (
-            <article className="record" key={track.id}>
+            <article
+              className={[
+                "record",
+                "track-record",
+                draggedTrackId === track.id ? "dragging" : "",
+                dragOverTrackId === track.id && draggedTrackId !== track.id ? "drag-over" : ""
+              ].filter(Boolean).join(" ")}
+              key={track.id}
+              onDragOver={(event) => {
+                event.preventDefault();
+                if (dragOverTrackId !== track.id) setDragOverTrackId(track.id);
+              }}
+              onDragLeave={() => setDragOverTrackId((current) => (current === track.id ? "" : current))}
+              onDrop={(event) => dropOnTrack(event, track.id)}
+              onDragEnd={() => {
+                setDraggedTrackId("");
+                setDragOverTrackId("");
+              }}
+            >
               <div className="record-head">
                 <strong>{track.slotNo}. {track.title || "楽曲名未入力"} / {track.artist || "アーティスト未入力"}</strong>
-                <button className="icon-danger" onClick={() => removeItem("tracks", track.id)}><Trash2 size={16} /></button>
+                <div className="track-order-actions">
+                  <button className="icon-secondary" onClick={() => moveTrack(track.id, -1)} disabled={trackIndex === 0} aria-label="この楽曲を上へ" title="上へ"><ArrowUp size={16} /></button>
+                  <button className="icon-secondary" onClick={() => moveTrack(track.id, 1)} disabled={trackIndex === tracks.length - 1} aria-label="この楽曲を下へ" title="下へ"><ArrowDown size={16} /></button>
+                  <span
+                    className="drag-handle"
+                    title="ドラッグで並び替え"
+                    draggable
+                    onDragStart={(event) => startDragTrack(event, track.id)}
+                    onDragEnd={() => {
+                      setDraggedTrackId("");
+                      setDragOverTrackId("");
+                    }}
+                  >
+                    <GripVertical size={16} />ドラッグ
+                  </span>
+                  <button className="icon-danger" onClick={() => removeItem("tracks", track.id)}><Trash2 size={16} /></button>
+                </div>
               </div>
               <div className="track-meta-grid">
                 <Field label="曲順" type="number" value={track.slotNo} onChange={(value) => patchItem("tracks", track.id, { slotNo: value })} />
@@ -3585,13 +3741,13 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
         <div className="record-head">
           <div>
             <h2>詳細設定</h2>
-            <p className="muted">Googleフォーム管理・回答管理・応募期間管理は上部ナビからも開けます。</p>
+            <p className="muted">Googleフォーム管理・楽曲管理・素材管理は上部ナビからも開けます。</p>
           </div>
         </div>
         <div className="advanced-actions">
           <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />Googleフォーム管理</button>
-          <button className="secondary" onClick={() => setActive("responses")}><ClipboardCopy size={16} />回答管理</button>
-          <button className="secondary" onClick={() => setActive("periods")}><CalendarDays size={16} />応募期間管理</button>
+          <button className="secondary" onClick={() => setActive("tracks")}><Music size={16} />楽曲管理</button>
+          <button className="secondary" onClick={() => setActive("listenerIcons")}><Image size={16} />応募者アイコン</button>
         </div>
       </article>
       <article className="panel">
