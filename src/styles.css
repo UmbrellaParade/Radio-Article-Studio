@@ -958,8 +958,19 @@ h1 {
 }
 
 .message-preset-actions {
-  grid-template-columns: minmax(150px, 1fr) auto auto 38px;
-  align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  align-items: stretch;
+}
+
+.message-preset-actions .field {
+  grid-column: 1 / -1;
+}
+
+.message-preset-actions .secondary,
+.message-preset-actions .icon-danger {
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .message-block-row {
