@@ -21,6 +21,7 @@ export const GAS_DIRECT_UPLOAD_LIMIT_MB = 35;
 export const MAX_SUBMISSION_BYTES = DEFAULT_ATTACHMENT_LIMIT_MB * 1024 * 1024;
 export const DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL = "";
 export const DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL = "";
+export const DEFAULT_WORK_START_PACK_TOOL_URL = "https://umbrellaparade.github.io/sunopa-work-start-pack-tool/";
 export const DEFAULT_AUDIO_SAVE_MEMO = "PC: デスクトップのポン出し音源一覧 / Drive: 指定フォルダー";
 export const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
 export const GUEST_BADGE_ASSET_URL = publicAsset("thumbnail-overlays/guest-in-badge.png");
@@ -2119,6 +2120,7 @@ export const sampleData = {
     responseDriveFolderUrl: DEFAULT_RESPONSE_DRIVE_FOLDER_URL,
     thumbnailDriveEndpointUrl: DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
     thumbnailDriveFolderUrl: DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
+    workStartPackToolUrl: DEFAULT_WORK_START_PACK_TOOL_URL,
     audioSaveMemo: DEFAULT_AUDIO_SAVE_MEMO,
     trackFieldDefaults: DEFAULT_TRACK_FIELDS,
     responseSyncToken: "",
@@ -2520,6 +2522,7 @@ export function migrateData(input) {
   if (!("responseDriveFolderUrl" in settings)) settings.responseDriveFolderUrl = DEFAULT_RESPONSE_DRIVE_FOLDER_URL;
   if (!("thumbnailDriveEndpointUrl" in settings)) settings.thumbnailDriveEndpointUrl = DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL;
   if (!("thumbnailDriveFolderUrl" in settings)) settings.thumbnailDriveFolderUrl = DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL;
+  if (!settings.workStartPackToolUrl) settings.workStartPackToolUrl = DEFAULT_WORK_START_PACK_TOOL_URL;
   if (!settings.audioSaveMemo) settings.audioSaveMemo = DEFAULT_AUDIO_SAVE_MEMO;
   settings.trackFieldDefaults = normalizeTrackFields(settings.trackFieldDefaults);
   if (!("responseSyncToken" in settings)) settings.responseSyncToken = "";

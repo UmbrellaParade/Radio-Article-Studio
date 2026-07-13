@@ -66,7 +66,8 @@ Implemented:
 21. Instant short-URL form publishing via the endpoint ("短いURLを公開/更新"), with the legacy repo-committed JSON as fallback.
 22. Thumbnail Drive save with verified results through the same endpoint.
 23. Codex pack folder export: writes codex_request.md plus article-images/ PNGs directly into a chosen local folder.
-24. Editable extra X contact accounts for shared form contact blocks.
+24. Sunoパ！作業開始パックツール向けJSON export and SE_Pon registration list copy.
+25. Editable extra X contact accounts for shared form contact blocks.
 
 The import workflow currently supports public Google Sheets CSV/export URLs and local CSV files. Application periods connect a date range, target episode, form, and listener submission sheet. Shared forms can use short `#/r/{id}` URLs after the app-generated Codex activation request is applied. They also keep compressed portable `#/s/...` URLs as immediate fallback links, so the form can open on devices that do not have the operator's local browser data even before a short URL is activated. Short reference URLs such as `#/p/...` and `#/f/...` are kept as management-device shortcuts only. Forms can use a song field that groups title, YouTube/Suno-only URL input, WAV/MP3 upload, and a preview player in one block. Guest forms can also use an image field for the guest icon. When a response JSON or imported guest sheet includes a guest icon image, the thumbnail composer automatically registers it as the current guest icon. They can also use an X contact block that explains why Bellbo/Kaname follows are needed for DM contact while keeping the respondent's X URL usable for article promotion. The operator can import the response JSON, preview/download attached audio and images, and automatically add grouped song answers to the track list. Private Google account OAuth, Google Drive folder sync, WordPress draft posting, and SE_Pon automation are planned for later phases.
 

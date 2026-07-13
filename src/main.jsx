@@ -47,6 +47,7 @@ import {
   MAX_ATTACHMENT_LIMIT_MB,
   DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
   DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
+  DEFAULT_WORK_START_PACK_TOOL_URL,
   DEFAULT_AUDIO_SAVE_MEMO,
   DEFAULT_GOOGLE_FORM_MESSAGE_TEMPLATE,
   DEFAULT_GOOGLE_FORM_MESSAGE_BLOCKS,
@@ -465,6 +466,142 @@ const sanitizeAttachmentLimitInput = (value) => {
   return String(normalizeAttachmentLimitMb(text));
 };
 
+const normalizePersonLookupKey = (value = "") =>
+  normalizeKey(
+    String(value || "")
+      .replace(/さん$/g, "")
+      .replace(/[☂🦐]/g, "")
+  );
+
+const makeResponseXUrlMap = (responses = []) => {
+  const map = new Map();
+  responses.forEach((response) => {
+    const text = compactLines([response.publicInfo, response.articleUse, response.internalOnly, response.constraints]);
+    const handle = extractXHandleFromText(text);
+    const xUrl = handle ? makeXUrl(handle) : "";
+    if (!xUrl) return;
+    [response.respondent, ensureGuestHonorific(response.respondent || "")].filter(Boolean).forEach((name) => {
+      const key = normalizePersonLookupKey(name);
+      if (key && !map.has(key)) map.set(key, xUrl);
+    });
+  });
+  return map;
+};
+
+const classifyWorkStartSongType = (track = {}) => {
+  const source = String(track.source || "");
+  const artist = String(track.artist || "");
+  const combined = `${source} ${artist}`;
+  if (/かなめ|kaname/i.test(combined)) return { songType: "かなめ🦐曲" };
+  if (/べるぼ|ベルボ|bellbo/i.test(combined)) return { songType: "べるぼ☂曲" };
+  if (/ゲスト|紹介曲|ゲスト紹介曲/i.test(source)) return { songType: "ゲスト曲" };
+  if (/リスナー|応募|応募者/i.test(source)) return { songType: "応募者曲" };
+  return {
+    songType: "応募者曲",
+    warning: `song_typeを判定できなかったため応募者曲にしました: source="${source || "-"}" / artist="${artist || "-"}" / title="${track.title || "-"}"`
+  };
+};
+
+const hasWorkStartSongContent = (track = {}) =>
+  Boolean(String(track.title || track.url || track.audioFile || "").trim());
+
+const makeWorkStartTrackEntry = (track, index, xUrlByName, selectedEpisode) => {
+  const { songType, warning } = classifyWorkStartSongType(track);
+  const songUrl = track.url || "";
+  const detectedUrlType = detectUrlType(songUrl);
+  const artistKey = normalizePersonLookupKey(track.artist || "");
+  const guestKey = normalizePersonLookupKey(selectedEpisode?.guestName || "");
+  const xUrl = track.xUrl || track.x_url || xUrlByName.get(artistKey) || (songType === "ゲスト曲" ? xUrlByName.get(guestKey) : "") || "";
+  const song = {
+    slot_no: String(track.slotNo || index + 1),
+    song_type: songType,
+    name: track.artist || "",
+    title: track.title || "",
+    ai_artist: track.aiArtist || "",
+    song_url: songUrl,
+    url_type: detectedUrlType === "YouTube" || detectedUrlType === "Suno" ? detectedUrlType : "",
+    audio_path: track.audioFile || track.audio?.fileName || "",
+    icon_path: track.ownerIconUrl || "",
+    thumbnail_source: track.thumbnailSource || track.thumbnailUrl || songUrl,
+    article_points: track.articlePoint || "",
+    x_url: xUrl
+  };
+  return { track, song, warning };
+};
+
+const orderWorkStartEntries = (entries = [], selectedEpisode = {}) => {
+  const sorted = [...entries].sort((left, right) => Number(left.track.slotNo || 0) - Number(right.track.slotNo || 0));
+  if (!/ゲスト/.test(`${selectedEpisode?.type || ""} ${selectedEpisode?.title || ""}`)) return sorted;
+  const guest = sorted.filter((entry) => entry.song.song_type === "ゲスト曲");
+  const kaname = sorted.filter((entry) => entry.song.song_type === "かなめ🦐曲");
+  const bellbo = sorted.filter((entry) => entry.song.song_type === "べるぼ☂曲");
+  const applicants = sorted.filter((entry) => entry.song.song_type === "応募者曲");
+  const used = new Set([...guest.slice(0, 1), ...kaname, ...bellbo, ...guest.slice(1), ...applicants]);
+  const rest = sorted.filter((entry) => !used.has(entry));
+  return [...guest.slice(0, 1), ...kaname, ...bellbo, ...guest.slice(1), ...applicants, ...rest];
+};
+
+const buildWorkStartTransfer = ({ selectedEpisode, episodeTracks = [], episodeResponses = [], settings = {} }) => {
+  const xUrlByName = makeResponseXUrlMap(episodeResponses);
+  const entries = episodeTracks
+    .filter(hasWorkStartSongContent)
+    .map((track, index) => makeWorkStartTrackEntry(track, index, xUrlByName, selectedEpisode));
+  const orderedEntries = orderWorkStartEntries(entries, selectedEpisode);
+  const songs = orderedEntries.map((entry) => entry.song);
+  const warnings = orderedEntries.map((entry) => entry.warning).filter(Boolean);
+  const sePonOrder = songs.map((song, index) => ({
+    order: index + 1,
+    slot_no: song.slot_no,
+    song_type: song.song_type,
+    name: song.name,
+    title: song.title,
+    song_url: song.song_url,
+    audio_path: song.audio_path
+  }));
+  return {
+    type: "sunopa-work-start-pack-transfer",
+    version: 1,
+    source: "Radio-Article-Studio",
+    generatedAt: new Date().toISOString(),
+    episode: {
+      id: selectedEpisode?.id || "",
+      title: selectedEpisode?.title || "",
+      date: selectedEpisode?.date || "",
+      articleType: selectedEpisode?.type || "",
+      archiveUrl: selectedEpisode?.standfmUrl || "",
+      guestName: selectedEpisode?.guestName || "",
+      wordpressSite: settings.wordpressSite || ""
+    },
+    songs,
+    sePon: {
+      target: "🎵 放送「曲・BGM」",
+      repeatOn: true,
+      note: "全曲リピートON。曲数は回ごとに可変。",
+      order: sePonOrder
+    },
+    ...(warnings.length ? { warnings } : {})
+  };
+};
+
+const buildSePonRegistrationList = (transfer) => {
+  const songs = transfer?.songs ?? [];
+  const lines = [
+    "SE_Pon登録リスト",
+    "登録先: 🎵 放送「曲・BGM」",
+    "全曲リピートON: はい",
+    `曲数: ${songs.length}曲（曲数は回ごとに可変）`,
+    ""
+  ];
+  songs.forEach((song, index) => {
+    lines.push(`${index + 1}. ${song.title || "曲名未入力"} / ${song.name || "名前未入力"} / ${song.song_type}`);
+    lines.push(`   楽曲URL: ${song.song_url || "-"}`);
+    lines.push(`   音源: ${song.audio_path || "-"}`);
+    if (song.ai_artist) lines.push(`   AIアーティスト: ${song.ai_artist}`);
+    if (song.article_points) lines.push(`   記事ポイント: ${song.article_points}`);
+  });
+  return lines.join("\n");
+};
+
 function App() {
   const logoSrc = `${import.meta.env.BASE_URL}assets/umbrella-parade-logo.png`;
   const [data, setData] = useState(loadData);
@@ -479,7 +616,10 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [thumbnailBundleCopied, setThumbnailBundleCopied] = useState(false);
   const [fullPackCopied, setFullPackCopied] = useState(false);
+  const [workStartPackCopied, setWorkStartPackCopied] = useState(false);
+  const [sePonListCopied, setSePonListCopied] = useState(false);
   const [thumbnailTransferText, setThumbnailTransferText] = useState("");
+  const [workStartTransferText, setWorkStartTransferText] = useState("");
   const [transferCopied, setTransferCopied] = useState(false);
   const [sharedPayload, setSharedPayload] = useState(readSharedFormPayload);
   const [restorePayload, setRestorePayload] = useState(readRestorePayload);
@@ -1589,10 +1729,45 @@ ${socialRows || "-"}
 - WordPress認証情報はチャットで別途共有する。`;
   }, [data.settings, data.thumbnailStudio, data.socialPromos, episodeResponses, episodeTracks, selectedEpisode]);
 
+  const workStartTransfer = useMemo(
+    () =>
+      buildWorkStartTransfer({
+        selectedEpisode,
+        episodeTracks,
+        episodeResponses,
+        settings: data.settings
+      }),
+    [data.settings, episodeResponses, episodeTracks, selectedEpisode]
+  );
+  const workStartPackJson = useMemo(() => JSON.stringify(workStartTransfer, null, 2), [workStartTransfer]);
+  const sePonRegistrationList = useMemo(() => buildSePonRegistrationList(workStartTransfer), [workStartTransfer]);
+
   const copyPack = async () => {
     await navigator.clipboard.writeText(codexPack);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  const copyWorkStartPackJson = async () => {
+    setWorkStartTransferText(workStartPackJson);
+    try {
+      await navigator.clipboard.writeText(workStartPackJson);
+    } catch {
+      // The textarea below still exposes the JSON when clipboard access is blocked.
+    }
+    setWorkStartPackCopied(true);
+    window.setTimeout(() => setWorkStartPackCopied(false), 1800);
+  };
+
+  const copySePonRegistrationList = async () => {
+    setWorkStartTransferText(sePonRegistrationList);
+    try {
+      await navigator.clipboard.writeText(sePonRegistrationList);
+    } catch {
+      // The textarea below still exposes the list when clipboard access is blocked.
+    }
+    setSePonListCopied(true);
+    window.setTimeout(() => setSePonListCopied(false), 1800);
   };
 
   const exportPackToFolder = async () => {
@@ -1939,6 +2114,12 @@ ${socialRows || "-"}
               articleThumbnailCount={CODEX_THUMBNAIL_PRESETS.filter((preset) => data.thumbnailStudio?.generated?.[preset.key]).length}
               listenerHeadingThumbnailCount={episodeTracks.filter((track) => track.source === "リスナー応募曲").length}
               thumbnailTransferText={thumbnailTransferText}
+              workStartTransferText={workStartTransferText}
+              copyWorkStartPackJson={copyWorkStartPackJson}
+              workStartPackCopied={workStartPackCopied}
+              copySePonRegistrationList={copySePonRegistrationList}
+              sePonListCopied={sePonListCopied}
+              workStartPackToolUrl={data.settings.workStartPackToolUrl || DEFAULT_WORK_START_PACK_TOOL_URL}
               exportPackToFolder={exportPackToFolder}
               packExportMessage={packExportMessage}
             />
@@ -3997,6 +4178,12 @@ function CodexPack({
   articleThumbnailCount,
   listenerHeadingThumbnailCount,
   thumbnailTransferText,
+  workStartTransferText,
+  copyWorkStartPackJson,
+  workStartPackCopied,
+  copySePonRegistrationList,
+  sePonListCopied,
+  workStartPackToolUrl,
   exportPackToFolder,
   packExportMessage
 }) {
@@ -4017,8 +4204,22 @@ function CodexPack({
             <ClipboardCopy size={16} />{thumbnailBundleCopied ? "記事画像JSONコピー済み" : "記事画像JSONをコピー"}
           </button>
         </div>
+        <div className="button-row pack-tool-actions">
+          <button className="secondary" onClick={copyWorkStartPackJson}>
+            <ClipboardCopy size={16} />{workStartPackCopied ? "作業開始JSONコピー済み" : "作業開始パック用JSONをコピー"}
+          </button>
+          <button className="secondary" onClick={copySePonRegistrationList}>
+            <ClipboardCopy size={16} />{sePonListCopied ? "SE_Ponリストコピー済み" : "SE_Pon登録リストをコピー"}
+          </button>
+          <a className="secondary button-link" href={workStartPackToolUrl || DEFAULT_WORK_START_PACK_TOOL_URL} target="_blank" rel="noreferrer">
+            <Link size={16} />作業開始パックツールを開く
+          </a>
+        </div>
         {packExportMessage && <p className="hint-text">{packExportMessage}</p>}
         <p className="hint-text">Codexへ送る画像: 記事アイキャッチ16:9 {articleThumbnailCount}件 / 応募曲見出し下PNG {listenerHeadingThumbnailCount}件。stand.fm 1:1 と配信背景9:16は記事作成パックには含めません。</p>
+        {workStartTransferText && (
+          <textarea className="pack-output thumbnail-transfer-output" value={workStartTransferText} readOnly />
+        )}
         {thumbnailTransferText && (
           <textarea className="pack-output thumbnail-transfer-output" value={thumbnailTransferText} readOnly />
         )}
@@ -4121,6 +4322,7 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
           <Field label="WordPressサイト" value={settings.wordpressSite} onChange={(value) => updateSettings({ wordpressSite: value })} />
           <Field label="SE_Pon URL" value={settings.sePonUrl} onChange={(value) => updateSettings({ sePonUrl: value })} />
+          <Field label="作業開始パックツールURL" value={settings.workStartPackToolUrl || DEFAULT_WORK_START_PACK_TOOL_URL} onChange={(value) => updateSettings({ workStartPackToolUrl: value })} placeholder={DEFAULT_WORK_START_PACK_TOOL_URL} wide />
           <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptのWebアプリURL" wide />
           <p className="hint-text wide">docs/google-apps-script/Code.gs をApps Scriptにデプロイして、WebアプリURLをここに貼ります。フォーム送信の受信、新着回答の同期、短いURL公開がこの1本で動きます。</p>
           <Field label="回答同期トークン" value={settings.responseSyncToken || ""} onChange={(value) => updateSettings({ responseSyncToken: value })} placeholder="Apps ScriptのSECRET_TOKENと同じ文字列" wide />
