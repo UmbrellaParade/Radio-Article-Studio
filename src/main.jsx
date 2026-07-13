@@ -2642,10 +2642,23 @@ function GoogleForms({
           const isDefault = DEFAULT_GOOGLE_FORM_IDS.has(form.id);
           const color = normalizeFormColor(form.color, FORM_COLOR_PALETTE[index % FORM_COLOR_PALETTE.length]);
           return (
-            <article className="record google-form-record" key={form.id} id={googleFormAnchorId(form.id)} style={getFormColorStyle(color)}>
+            <PersistentDetails
+              {...detailsProps(`googleForm:${form.id}:record`, true)}
+              className="record collapsible-record google-form-record"
+              key={form.id}
+              id={googleFormAnchorId(form.id)}
+              style={getFormColorStyle(color)}
+            >
+              <summary className="record-summary">
+                <strong><i className="form-color-dot" aria-hidden="true" />{index + 1}. {form.name || "Googleフォーム名未入力"}</strong>
+                <span>{canOpen ? "外部URL登録済み" : "外部URL未登録"}</span>
+                <span>{canOpenEditUrl ? "制作先登録済み" : "制作先未登録"}</span>
+                <span>{form.memo ? "メモあり" : "メモなし"}</span>
+              </summary>
+              <div className="record-body">
               <div className="record-head compact">
                 <div>
-                  <strong>{index + 1}. {form.name || "Googleフォーム名未入力"}</strong>
+                  <strong>共有URL</strong>
                   <p className="muted">{canOpen ? "URL登録済み" : "URL未登録"}</p>
                 </div>
                 <div className="inline-actions">
@@ -2743,7 +2756,8 @@ function GoogleForms({
                 </div>
                 {editUrl && !canOpenEditUrl && <p className="hint-text">制作先URLは https:// から始まる形式で登録してください。</p>}
               </PersistentDetails>
-            </article>
+              </div>
+            </PersistentDetails>
           );
         })}
       </div>
