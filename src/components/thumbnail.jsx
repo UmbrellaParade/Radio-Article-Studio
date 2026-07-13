@@ -353,10 +353,13 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
   const [templateBaseImages, setTemplateBaseImages] = useState({});
   const [livePreviewImages, setLivePreviewImages] = useState({});
   const [previewImage, setPreviewImage] = useState(null);
-  const [collapsedSliderKeys, setCollapsedSliderKeys] = useState({ standfm1x1: true, stream9x16: true });
   const [generatingKey, setGeneratingKey] = useState("");
   const externalIconHydrationRef = useRef(new Set());
   const thumbnailDate = studio.date || episodeDate || "";
+  const collapsedSliderKeys = {
+    ...defaultThumbnailStudio.collapsedSliderKeys,
+    ...(studio.collapsedSliderKeys ?? {})
+  };
   const generated = studio.generated ?? {};
   const layoutPresetOverrides = studio.layoutPresetOverrides ?? {};
   const customLayoutPresets = studio.customLayoutPresets ?? [];
@@ -1106,7 +1109,20 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
   };
 
   const togglePlacementControls = (presetKey) => {
-    setCollapsedSliderKeys((current) => ({ ...current, [presetKey]: !current[presetKey] }));
+    updateStudio((current) => {
+      const currentCollapsed = {
+        ...defaultThumbnailStudio.collapsedSliderKeys,
+        ...(current.collapsedSliderKeys ?? {})
+      };
+      return {
+        ...defaultThumbnailStudio,
+        ...current,
+        collapsedSliderKeys: {
+          ...currentCollapsed,
+          [presetKey]: !currentCollapsed[presetKey]
+        }
+      };
+    });
   };
 
   const modalPreset = previewImage ? THUMBNAIL_PRESETS.find((preset) => preset.key === previewImage.presetKey) : null;

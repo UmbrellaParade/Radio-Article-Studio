@@ -661,6 +661,7 @@ export const defaultThumbnailStudio = {
   layoutPresetVersion: THUMBNAIL_LAYOUT_PRESET_VERSION,
   layoutPresetOverrides: {},
   customLayoutPresets: [],
+  collapsedSliderKeys: { standfm1x1: true, stream9x16: true },
   generated: {},
   autoGenerateRequestedAt: "",
   templates: Object.fromEntries(
@@ -2539,6 +2540,10 @@ export function migrateData(input) {
       activeLayoutPreset: activeLayoutPresetId,
       layoutPresetOverrides,
       customLayoutPresets,
+      collapsedSliderKeys: {
+        ...defaultThumbnailStudio.collapsedSliderKeys,
+        ...(rawThumbnailStudio.collapsedSliderKeys ?? {})
+      },
       generated: shouldRefreshBuiltInLayout ? {} : rawThumbnailStudio.generated ?? {},
       autoGenerateRequestedAt: shouldRefreshBuiltInLayout ? "" : rawThumbnailStudio.autoGenerateRequestedAt ?? ""
     },
