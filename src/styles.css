@@ -384,6 +384,18 @@ h1 {
 .import-card {
   display: grid;
   gap: 12px;
+  border-color: var(--form-color-mid, #ded2c2);
+  border-left: 7px solid var(--form-color, #8bd7df);
+  background:
+    linear-gradient(90deg, var(--form-color-soft, rgba(139, 215, 223, .14)), rgba(255, 253, 248, 0) 42%),
+    #fffdf8;
+}
+
+.import-card h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
 }
 
 .import-steps {
@@ -406,9 +418,9 @@ h1 {
 }
 
 .import-steps span.active {
-  border-color: #14b6c8;
-  background: #ecfbfd;
-  color: #0a6670;
+  border-color: var(--form-color, #14b6c8);
+  background: var(--form-color-soft, #ecfbfd);
+  color: #241f2f;
 }
 
 .import-preview {
@@ -416,9 +428,11 @@ h1 {
   gap: 12px;
   margin-top: 4px;
   padding: 14px;
-  border: 1px solid #8bd7df;
+  border: 1px solid var(--form-color-mid, #8bd7df);
   border-radius: 8px;
-  background: #f3fcfd;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .86), var(--form-color-soft, rgba(139, 215, 223, .12))),
+    #fffdf8;
 }
 
 .import-mapping {

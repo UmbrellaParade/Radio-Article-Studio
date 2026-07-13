@@ -294,6 +294,11 @@ const TRACK_SOURCE_GOOGLE_FORM_ID = {
   リスナー応募曲: "google_form_listener",
   パーソナリティ曲: "google_form_kaname"
 };
+const IMPORT_KIND_GOOGLE_FORM_ID = {
+  guest: "google_form_guest",
+  listener: "google_form_listener",
+  personality: "google_form_kaname"
+};
 
 const getTrackFieldDefaults = (settings = {}) => normalizeTrackFields(settings.trackFieldDefaults);
 
@@ -318,6 +323,12 @@ const getGoogleFormColorForTrack = (track = {}, googleForms = []) => {
   const formId =
     TRACK_SOURCE_GOOGLE_FORM_ID[track.source] ||
     (/リスナー/.test(track.source || "") ? "google_form_listener" : /パーソナリティ|かなめ/.test(track.source || "") ? "google_form_kaname" : "google_form_guest");
+  const form = googleForms.find((item) => item.id === formId);
+  return normalizeFormColor(form?.color, formId === "google_form_listener" ? "#f3c96b" : formId === "google_form_kaname" ? "#bfa7f2" : "#8bd7df");
+};
+
+const getGoogleFormColorForImportKind = (kind = "", googleForms = []) => {
+  const formId = IMPORT_KIND_GOOGLE_FORM_ID[kind] || "google_form_guest";
   const form = googleForms.find((item) => item.id === formId);
   return normalizeFormColor(form?.color, formId === "google_form_listener" ? "#f3c96b" : formId === "google_form_kaname" ? "#bfa7f2" : "#8bd7df");
 };
@@ -1858,6 +1869,7 @@ ${socialRows || "-"}
               clearImportPreview={clearImportPreview}
               applyBellboTrackUrl={applyBellboTrackUrl}
               importingSource={importingSource}
+              googleForms={data.googleForms ?? []}
             />
           )}
           {active === "episodes" && (
@@ -2152,7 +2164,8 @@ function ImportsPanel({
   applyImportPreview,
   clearImportPreview,
   applyBellboTrackUrl,
-  importingSource
+  importingSource,
+  googleForms = []
 }) {
   return (
     <div className="view-stack">
@@ -2184,6 +2197,7 @@ function ImportsPanel({
           onClearPreview={() => clearImportPreview("guest")}
           loading={importingSource === "guest"}
           kind="guest"
+          color={getGoogleFormColorForImportKind("guest", googleForms)}
         />
         <SourceImportCard
           title="リスナー応募曲"
@@ -2198,6 +2212,7 @@ function ImportsPanel({
           onClearPreview={() => clearImportPreview("listener")}
           loading={importingSource === "listener"}
           kind="listener"
+          color={getGoogleFormColorForImportKind("listener", googleForms)}
         />
         <SourceImportCard
           title="パーソナリティ曲シート"
@@ -2212,6 +2227,7 @@ function ImportsPanel({
           onClearPreview={() => clearImportPreview("personality")}
           loading={importingSource === "personality"}
           kind="personality"
+          color={getGoogleFormColorForImportKind("personality", googleForms)}
         />
       </div>
 
@@ -2259,7 +2275,8 @@ function SourceImportCard({
   onApplyPreview,
   onClearPreview,
   loading = false,
-  kind
+  kind,
+  color
 }) {
   const columns = Object.keys(preview?.rows?.[0] ?? {}).filter(Boolean);
   const allPreviewRows = preview ? buildImportPreviewRows(preview.rows, kind, preview.mapping) : [];
@@ -2270,8 +2287,8 @@ function SourceImportCard({
   });
 
   return (
-    <article className="record import-card">
-      <h2>{title}</h2>
+    <article className="record import-card" style={getFormColorStyle(color)}>
+      <h2><i className="form-color-dot" aria-hidden="true" />{title}</h2>
       <p className="muted">{description}</p>
       <div className="import-steps" aria-label="取り込み手順">
         {["URL入力", "読み込み", "プレビュー", "反映"].map((step, index) => (
