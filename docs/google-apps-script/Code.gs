@@ -23,7 +23,7 @@ const SECRET_TOKEN = "ここを好きな合言葉に変更";
 // サムネ合成でそのまま使えるようにするため。音源はDrive保存のみ。
 const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 const DRIVE_IMAGE_DATA_URL_MAX_BYTES = 8 * 1024 * 1024;
-const SCRIPT_VERSION = "2026-07-13-track-subcolumns";
+const SCRIPT_VERSION = "2026-07-15-drive-icon-data-url";
 
 const RESPONSES_DIR = "_responses";
 const FORMS_DIR = "_forms";
