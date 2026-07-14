@@ -522,8 +522,7 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
               icons: guestIcons,
               date: thumbnailDate,
               guestName,
-              iconDataUrlResolver: resolveIconDataUrl,
-              requireIcon: guestIcons.length > 0
+              iconDataUrlResolver: resolveIconDataUrl
             });
             return [preset.key, dataUrl, template];
           } catch {
@@ -892,8 +891,7 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
         icons: guestIcons,
         date: thumbnailDate,
         guestName,
-        iconDataUrlResolver: resolveIconDataUrl,
-        requireIcon: guestIcons.length > 0
+        iconDataUrlResolver: resolveIconDataUrl
       });
       const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, guestName);
       setGeneratedImages((current) => ({ ...current, [preset.key]: dataUrl }));
@@ -928,8 +926,7 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
           icons: guestIcons,
           date: thumbnailDate,
           guestName,
-          iconDataUrlResolver: resolveIconDataUrl,
-          requireIcon: guestIcons.length > 0
+          iconDataUrlResolver: resolveIconDataUrl
         });
         const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, guestName);
         imageEntries.push([preset.key, dataUrl]);

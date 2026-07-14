@@ -799,8 +799,7 @@ function App() {
               icons: hydratedGuestIcons,
               date: thumbnailDate,
               guestName: currentGuestName,
-              iconDataUrlResolver: resolveIconDataUrl,
-              requireIcon: hydratedGuestIcons.length > 0
+              iconDataUrlResolver: resolveIconDataUrl
             });
             const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, currentGuestName);
             return [preset.key, generatedRecord];
