@@ -785,7 +785,11 @@ function App() {
     const thumbnailDate = studio.date || selectedEpisode.date || "";
     const currentGuestName = selectedEpisode.guestName || "";
     const resolveIconDataUrl = (src) =>
-      fetchDriveImageDataUrlFromGas(data.settings?.responseEndpointUrl, data.settings?.responseSyncToken, src);
+      fetchDriveImageDataUrlFromGas(
+        [data.settings?.responseEndpointUrl, data.settings?.thumbnailDriveEndpointUrl],
+        data.settings?.responseSyncToken,
+        src
+      );
 
     hydrateGuestIconsForCanvas(studio.guestIcon, guestIcons, resolveIconDataUrl)
       .then((hydratedGuestIcons) =>
@@ -856,7 +860,13 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [data.thumbnailStudio?.autoGenerateRequestedAt, selectedEpisode, data.settings?.responseEndpointUrl, data.settings?.responseSyncToken]);
+  }, [
+    data.thumbnailStudio?.autoGenerateRequestedAt,
+    selectedEpisode,
+    data.settings?.responseEndpointUrl,
+    data.settings?.thumbnailDriveEndpointUrl,
+    data.settings?.responseSyncToken
+  ]);
 
   const updateData = (key, updater) => {
     setData((current) => ({

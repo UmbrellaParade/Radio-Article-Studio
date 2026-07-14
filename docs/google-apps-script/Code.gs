@@ -22,6 +22,7 @@ const SECRET_TOKEN = "ここを好きな合言葉に変更";
 // このサイズ以下の画像（ゲストアイコンなど）は、Drive保存に加えて回答JSONにも残す。
 // サムネ合成でそのまま使えるようにするため。音源はDrive保存のみ。
 const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const DRIVE_IMAGE_DATA_URL_MAX_BYTES = 8 * 1024 * 1024;
 const SCRIPT_VERSION = "2026-07-13-track-subcolumns";
 
 const RESPONSES_DIR = "_responses";
@@ -158,7 +159,7 @@ function handleGetDriveFileDataUrl(params) {
     throw new Error("The requested Drive file is not an image.");
   }
   const bytes = blob.getBytes();
-  if (bytes.length > INLINE_IMAGE_MAX_BYTES) {
+  if (bytes.length > DRIVE_IMAGE_DATA_URL_MAX_BYTES) {
     throw new Error("The requested image is too large for thumbnail composition.");
   }
   return jsonOutput({

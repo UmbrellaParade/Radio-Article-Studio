@@ -51,15 +51,31 @@ export const getFromGasEndpoint = async (endpointUrl, params = {}) => {
 };
 
 export const fetchDriveImageDataUrlFromGas = async (endpointUrl, token, imageUrl) => {
-  const trimmedEndpoint = String(endpointUrl || "").trim();
+  const endpointInputs = Array.isArray(endpointUrl) ? endpointUrl : [endpointUrl];
   const fileId = getGoogleDriveFileIdFromUrl(imageUrl);
-  if (!trimmedEndpoint || !String(token || "").trim() || !fileId) return "";
-  const result = await getFromGasEndpoint(trimmedEndpoint, {
-    action: "getDriveFileDataUrl",
-    token,
-    fileId
-  });
-  return result?.dataUrl || "";
+  const tokenText = String(token || "").trim();
+  if (!tokenText || !fileId) return "";
+
+  const appConfig = await loadAppConfig(import.meta.env.BASE_URL).catch(() => ({}));
+  const endpoints = [...endpointInputs, appConfig.formEndpointUrl]
+    .map((endpoint) => String(endpoint || "").trim())
+    .filter(Boolean)
+    .filter((endpoint, index, list) => list.indexOf(endpoint) === index);
+  if (!endpoints.length) return "";
+
+  for (const endpoint of endpoints) {
+    try {
+      const result = await getFromGasEndpoint(endpoint, {
+        action: "getDriveFileDataUrl",
+        token: tokenText,
+        fileId
+      });
+      if (result?.dataUrl) return result.dataUrl;
+    } catch {
+      // Try the next configured endpoint.
+    }
+  }
+  return "";
 };
 
 // GitHub Pagesに置く公開設定ファイル。公開フォームページ（運営のlocalStorageを持たない端末）が

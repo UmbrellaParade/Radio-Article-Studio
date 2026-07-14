@@ -378,7 +378,7 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
   const guestIcons = normalizeGuestIconList(studio.guestIcon, studio.guestIcons);
   const guestIconPreviewKey = guestIcons.map((icon) => `${icon.name}:${icon.dataUrl.slice(0, 80)}:${icon.cropX}:${icon.cropY}:${icon.cropZoom}`).join("|");
   const resolveIconDataUrl = (src) =>
-    fetchDriveImageDataUrlFromGas(settings.responseEndpointUrl, settings.responseSyncToken, src);
+    fetchDriveImageDataUrlFromGas([settings.responseEndpointUrl, settings.thumbnailDriveEndpointUrl], settings.responseSyncToken, src);
   const getHydratedTemplate = (presetKey) => {
     const template = getNormalizedThumbnailTemplate(presetKey, studio.templates?.[presetKey]);
     if (!isCustomTemplate(template)) return template;
@@ -549,11 +549,19 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
       active = false;
       window.clearTimeout(timer);
     };
-  }, [thumbnailDate, guestName, guestIconPreviewKey, thumbnailTemplatePreviewKey, settings.responseEndpointUrl, settings.responseSyncToken]);
+  }, [
+    thumbnailDate,
+    guestName,
+    guestIconPreviewKey,
+    thumbnailTemplatePreviewKey,
+    settings.responseEndpointUrl,
+    settings.thumbnailDriveEndpointUrl,
+    settings.responseSyncToken
+  ]);
 
   useEffect(() => {
     const externalIcons = guestIcons.filter((icon) => icon.dataUrl && !String(icon.dataUrl).startsWith("data:"));
-    const hydrationContextKey = `${settings.responseEndpointUrl || ""}:${settings.responseSyncToken ? "token" : ""}`;
+    const hydrationContextKey = `${settings.responseEndpointUrl || ""}:${settings.thumbnailDriveEndpointUrl || ""}:${settings.responseSyncToken ? "token" : ""}`;
     const pendingIcons = externalIcons.filter((icon) => {
       const key = `${hydrationContextKey}:${icon.id || icon.name}:${icon.dataUrl}`;
       return !externalIconHydrationRef.current.has(key);
@@ -612,7 +620,7 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
     return () => {
       active = false;
     };
-  }, [guestIconPreviewKey, settings.responseEndpointUrl, settings.responseSyncToken]);
+  }, [guestIconPreviewKey, settings.responseEndpointUrl, settings.thumbnailDriveEndpointUrl, settings.responseSyncToken]);
 
   const handleTemplateFile = async (presetKey, event) => {
     const file = event.target.files?.[0];
