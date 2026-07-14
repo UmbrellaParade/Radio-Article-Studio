@@ -8,6 +8,7 @@
 //   2. ツールの「新着回答を同期」への回答一覧配信（doGet action=listResponses）
 //   3. 短いURLフォーム定義の公開/配信（doPost action=publishForm / doGet action=getForm）
 //   4. サムネPNGのDrive保存（doPost action=saveThumbnails）
+//   5. Drive画像のサムネ合成用dataURL配信（doGet action=getDriveFileDataUrl）
 //
 // セットアップ手順は docs/google-drive-response-endpoint.md を参照。
 
@@ -78,6 +79,10 @@ function doGet(e) {
       requireToken(params.token);
       return handleListResponses(params);
     }
+    if (action === "getDriveFileDataUrl") {
+      requireToken(params.token);
+      return handleGetDriveFileDataUrl(params);
+    }
     return jsonOutput({ ok: false, error: "未対応のactionです: " + action });
   } catch (error) {
     return jsonOutput({ ok: false, error: errorMessage(error) });
@@ -130,6 +135,39 @@ function decodeDataUrl(dataUrl) {
   const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
   if (!match) return null;
   return Utilities.newBlob(Utilities.base64Decode(match[2]), match[1]);
+}
+
+function extractDriveFileId(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const idParam = text.match(/[?&]id=([-\w]{20,})/);
+  if (idParam) return idParam[1];
+  const filePath = text.match(/\/file\/d\/([-\w]{20,})/);
+  if (filePath) return filePath[1];
+  const rawId = text.match(/^[-\w]{20,}$/);
+  return rawId ? rawId[0] : "";
+}
+
+function handleGetDriveFileDataUrl(params) {
+  const fileId = extractDriveFileId(params.fileId || params.url);
+  if (!fileId) throw new Error("Drive fileId is missing.");
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  const mimeType = blob.getContentType() || "";
+  if (mimeType.indexOf("image/") !== 0) {
+    throw new Error("The requested Drive file is not an image.");
+  }
+  const bytes = blob.getBytes();
+  if (bytes.length > INLINE_IMAGE_MAX_BYTES) {
+    throw new Error("The requested image is too large for thumbnail composition.");
+  }
+  return jsonOutput({
+    ok: true,
+    fileName: file.getName(),
+    mimeType: mimeType,
+    size: bytes.length,
+    dataUrl: "data:" + mimeType + ";base64," + Utilities.base64Encode(bytes)
+  });
 }
 
 function nowStamp() {

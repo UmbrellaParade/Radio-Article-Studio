@@ -16,6 +16,21 @@ const parseGasResult = async (response) => {
   return result;
 };
 
+const getGoogleDriveFileIdFromUrl = (url = "") => {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("drive.google.com") && !host.includes("docs.google.com")) return "";
+    const idParam = parsed.searchParams.get("id");
+    if (idParam) return idParam;
+    return parsed.pathname.match(/\/file\/d\/([^/]+)/)?.[1] ?? "";
+  } catch {
+    return trimmed.match(/(?:id=|\/file\/d\/)([A-Za-z0-9_-]+)/)?.[1] ?? "";
+  }
+};
+
 export const postToGasEndpoint = async (endpointUrl, payload) => {
   const response = await fetch(String(endpointUrl).trim(), {
     method: "POST",
@@ -33,6 +48,18 @@ export const getFromGasEndpoint = async (endpointUrl, params = {}) => {
   });
   const response = await fetch(url.toString(), { redirect: "follow", cache: "no-store" });
   return parseGasResult(response);
+};
+
+export const fetchDriveImageDataUrlFromGas = async (endpointUrl, token, imageUrl) => {
+  const trimmedEndpoint = String(endpointUrl || "").trim();
+  const fileId = getGoogleDriveFileIdFromUrl(imageUrl);
+  if (!trimmedEndpoint || !String(token || "").trim() || !fileId) return "";
+  const result = await getFromGasEndpoint(trimmedEndpoint, {
+    action: "getDriveFileDataUrl",
+    token,
+    fileId
+  });
+  return result?.dataUrl || "";
 };
 
 // GitHub Pagesに置く公開設定ファイル。公開フォームページ（運営のlocalStorageを持たない端末）が

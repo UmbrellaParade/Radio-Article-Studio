@@ -205,10 +205,10 @@ import {
   migrateData,
   loadData
 } from "../lib/core.js";
+import { fetchDriveImageDataUrlFromGas } from "../lib/gas.js";
 import {
   fileToDataUrl,
   assertCanvasImageReadable,
-  loadCanvasImageAsDataUrl,
   loadCanvasImageSource,
   loadCanvasImage,
   drawCoverAt,
@@ -220,6 +220,7 @@ import {
   drawDateBadge,
   drawGuestName,
   drawGuestBadge,
+  hydrateGuestIconForCanvas,
   renderThumbnail,
   renderListenerHeadingThumbnail,
   saveThumbnailDataUrl
@@ -376,6 +377,8 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
   const activeLayoutPresetHasOverride = Boolean(layoutPresetOverrides[activeLayoutPresetId]);
   const guestIcons = normalizeGuestIconList(studio.guestIcon, studio.guestIcons);
   const guestIconPreviewKey = guestIcons.map((icon) => `${icon.name}:${icon.dataUrl.slice(0, 80)}:${icon.cropX}:${icon.cropY}:${icon.cropZoom}`).join("|");
+  const resolveIconDataUrl = (src) =>
+    fetchDriveImageDataUrlFromGas(settings.responseEndpointUrl, settings.responseSyncToken, src);
   const getHydratedTemplate = (presetKey) => {
     const template = getNormalizedThumbnailTemplate(presetKey, studio.templates?.[presetKey]);
     if (!isCustomTemplate(template)) return template;
@@ -518,7 +521,9 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
               icon: studio.guestIcon,
               icons: guestIcons,
               date: thumbnailDate,
-              guestName
+              guestName,
+              iconDataUrlResolver: resolveIconDataUrl,
+              requireIcon: guestIcons.length > 0
             });
             return [preset.key, dataUrl, template];
           } catch {
@@ -545,23 +550,27 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
       active = false;
       window.clearTimeout(timer);
     };
-  }, [thumbnailDate, guestName, guestIconPreviewKey, thumbnailTemplatePreviewKey]);
+  }, [thumbnailDate, guestName, guestIconPreviewKey, thumbnailTemplatePreviewKey, settings.responseEndpointUrl, settings.responseSyncToken]);
 
   useEffect(() => {
     const externalIcons = guestIcons.filter((icon) => icon.dataUrl && !String(icon.dataUrl).startsWith("data:"));
+    const hydrationContextKey = `${settings.responseEndpointUrl || ""}:${settings.responseSyncToken ? "token" : ""}`;
     const pendingIcons = externalIcons.filter((icon) => {
-      const key = `${icon.id || icon.name}:${icon.dataUrl}`;
+      const key = `${hydrationContextKey}:${icon.id || icon.name}:${icon.dataUrl}`;
       return !externalIconHydrationRef.current.has(key);
     });
     if (!pendingIcons.length) return undefined;
 
     let active = true;
-    pendingIcons.forEach((icon) => externalIconHydrationRef.current.add(`${icon.id || icon.name}:${icon.dataUrl}`));
+    pendingIcons.forEach((icon) => externalIconHydrationRef.current.add(`${hydrationContextKey}:${icon.id || icon.name}:${icon.dataUrl}`));
 
     Promise.allSettled(
       pendingIcons.map(async (icon) => {
-        const dataUrl = await loadCanvasImageAsDataUrl(icon.dataUrl);
-        return { sourceUrl: icon.dataUrl, dataUrl };
+        const hydratedIcon = await hydrateGuestIconForCanvas(icon, resolveIconDataUrl);
+        if (!String(hydratedIcon.dataUrl || "").startsWith("data:")) {
+          throw new Error("guest-icon-hydration-failed");
+        }
+        return { sourceUrl: icon.dataUrl, dataUrl: hydratedIcon.dataUrl };
       })
     )
       .then((results) => {
@@ -604,7 +613,7 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
     return () => {
       active = false;
     };
-  }, [guestIconPreviewKey]);
+  }, [guestIconPreviewKey, settings.responseEndpointUrl, settings.responseSyncToken]);
 
   const handleTemplateFile = async (presetKey, event) => {
     const file = event.target.files?.[0];
@@ -882,7 +891,9 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
         icon: studio.guestIcon,
         icons: guestIcons,
         date: thumbnailDate,
-        guestName
+        guestName,
+        iconDataUrlResolver: resolveIconDataUrl,
+        requireIcon: guestIcons.length > 0
       });
       const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, guestName);
       setGeneratedImages((current) => ({ ...current, [preset.key]: dataUrl }));
@@ -916,7 +927,9 @@ export function ThumbnailComposer({ studio, updateStudio, guestName, episodeDate
           icon: studio.guestIcon,
           icons: guestIcons,
           date: thumbnailDate,
-          guestName
+          guestName,
+          iconDataUrlResolver: resolveIconDataUrl,
+          requireIcon: guestIcons.length > 0
         });
         const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, guestName);
         imageEntries.push([preset.key, dataUrl]);

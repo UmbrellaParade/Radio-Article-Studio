@@ -238,6 +238,41 @@ export const loadCanvasImageAsDataUrl = async (src, maxSide = 1200) => {
   return canvas.toDataURL("image/png");
 };
 
+export const hydrateGuestIconForCanvas = async (guestIcon, imageDataUrlResolver) => {
+  if (!guestIcon?.dataUrl || String(guestIcon.dataUrl).startsWith("data:")) return guestIcon;
+  const sources = [guestIcon.dataUrl, guestIcon.sourceUrl].map((source) => String(source || "").trim()).filter(Boolean);
+  const uniqueSources = [...new Set(sources)];
+
+  for (const source of uniqueSources) {
+    if (imageDataUrlResolver) {
+      try {
+        const dataUrl = await imageDataUrlResolver(source);
+        if (dataUrl && String(dataUrl).startsWith("data:")) {
+          return { ...guestIcon, sourceUrl: guestIcon.sourceUrl || guestIcon.dataUrl, dataUrl };
+        }
+      } catch {
+        // Fall through to public URL/CORS candidates.
+      }
+    }
+
+    try {
+      const dataUrl = await loadCanvasImageAsDataUrl(source);
+      if (dataUrl && String(dataUrl).startsWith("data:")) {
+        return { ...guestIcon, sourceUrl: guestIcon.sourceUrl || guestIcon.dataUrl, dataUrl };
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return guestIcon;
+};
+
+export const hydrateGuestIconsForCanvas = async (icon, icons = [], imageDataUrlResolver) => {
+  const guestIcons = normalizeGuestIconList(icon, icons);
+  return Promise.all(guestIcons.map((guestIcon) => hydrateGuestIconForCanvas(guestIcon, imageDataUrlResolver)));
+};
+
 export function drawCoverAt(ctx, image, x, y, width, height, crop = {}) {
   const cropX = clampNumber(crop.cropX, 50, 0, 100);
   const cropY = clampNumber(crop.cropY, 50, 0, 100);
@@ -398,7 +433,7 @@ export function drawGuestBadge(ctx, preset, template, hasGuestContent, badgeImag
   ctx.restore();
 }
 
-export async function renderThumbnail({ preset, template, icon, icons = [], date, guestName }) {
+export async function renderThumbnail({ preset, template, icon, icons = [], date, guestName, iconDataUrlResolver, requireIcon = false }) {
   const normalizedTemplate = getNormalizedThumbnailTemplate(preset.key, template);
   const templateSource = getTemplateSource(normalizedTemplate);
   if (!templateSource) throw new Error("template-missing");
@@ -406,7 +441,7 @@ export async function renderThumbnail({ preset, template, icon, icons = [], date
   canvas.width = preset.width;
   canvas.height = preset.height;
   const ctx = canvas.getContext("2d");
-  const guestIcons = normalizeGuestIconList(icon, icons);
+  const guestIcons = await hydrateGuestIconsForCanvas(icon, icons, iconDataUrlResolver);
   const [baseImage, loadedIcons, badgeImage] = await Promise.all([
     loadCanvasImage(templateSource),
     Promise.all(
@@ -423,6 +458,9 @@ export async function renderThumbnail({ preset, template, icon, icons = [], date
 
   const iconSlots = getThumbnailIconSlots(normalizedTemplate);
   const drawableIcons = loadedIcons.filter(({ image }) => image).slice(0, iconSlots.length);
+  if (requireIcon && guestIcons.length > 0 && drawableIcons.length === 0) {
+    throw new Error("guest-icon-unreadable");
+  }
   drawableIcons.forEach(({ guestIcon, image: iconImage }, index) => {
     const slot = iconSlots[index] ?? iconSlots[0];
     const diameter = Math.round((Math.min(preset.width, preset.height) * Number(slot.size || 28)) / 100);

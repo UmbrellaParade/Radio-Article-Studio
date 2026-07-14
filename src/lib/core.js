@@ -288,6 +288,7 @@ export const makeGuestIconFromAttachment = (attachment, fallbackName = "guest-ic
     ? {
         name: attachment.fileName || attachment.questionLabel || fallbackName,
         dataUrl: makeImagePreviewUrl(attachment.dataUrl || attachment.sourceUrl || attachment.url || ""),
+        sourceUrl: attachment.sourceUrl || attachment.url || "",
         cropX: 50,
         cropY: 50,
         cropZoom: 100,
@@ -694,6 +695,7 @@ export const normalizeGuestIconList = (guestIcon = defaultThumbnailStudio.guestI
       id: icon.id || `guest_icon_${index}`,
       name: icon.name || `guest-icon-${index + 1}`,
       dataUrl: icon.dataUrl,
+      sourceUrl: icon.sourceUrl || "",
       cropX: clampNumber(icon.cropX, 50, 0, 100),
       cropY: clampNumber(icon.cropY, 50, 0, 100),
       cropZoom: clampNumber(icon.cropZoom ?? icon.zoom, 100, 100, 300)

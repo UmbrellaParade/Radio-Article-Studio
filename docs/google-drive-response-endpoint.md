@@ -9,6 +9,7 @@ Radio Article StudioはGitHub Pages上の静的アプリなので、回答の受
 - ツールの「新着回答を同期」ボタンへの回答一覧配信（手動JSON読み込みが不要になる）
 - フォームの短いURL（`#/r/{slug}`）の即時公開（Codexへのコミット依頼が不要になる）
 - サムネPNGのDrive保存
+- Drive上のゲストアイコン画像を、サムネ合成用のdataURLとして取得（`doGet action=getDriveFileDataUrl`）
 
 ## 保存先フォルダー構成
 

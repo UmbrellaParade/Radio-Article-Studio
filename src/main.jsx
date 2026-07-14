@@ -29,7 +29,7 @@ import {
   ZoomIn
 } from "lucide-react";
 import "./styles.css";
-import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./lib/gas.js";
+import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig, fetchDriveImageDataUrlFromGas } from "./lib/gas.js";
 
 import {
   STORAGE_KEY,
@@ -237,6 +237,7 @@ import {
   drawDateBadge,
   drawGuestName,
   drawGuestBadge,
+  hydrateGuestIconsForCanvas,
   renderThumbnail,
   renderListenerHeadingThumbnail,
   saveThumbnailDataUrl
@@ -783,23 +784,30 @@ function App() {
     const guestIcons = normalizeGuestIconList(studio.guestIcon, studio.guestIcons);
     const thumbnailDate = studio.date || selectedEpisode.date || "";
     const currentGuestName = selectedEpisode.guestName || "";
+    const resolveIconDataUrl = (src) =>
+      fetchDriveImageDataUrlFromGas(data.settings?.responseEndpointUrl, data.settings?.responseSyncToken, src);
 
-    Promise.all(
-      THUMBNAIL_PRESETS.map(async (preset) => {
-        const template = await resolveThumbnailTemplateForRender(preset.key, studio.templates?.[preset.key]);
-        const dataUrl = await renderThumbnail({
-          preset,
-          template,
-          icon: studio.guestIcon,
-          icons: guestIcons,
-          date: thumbnailDate,
-          guestName: currentGuestName
-        });
-        const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, currentGuestName);
-        return [preset.key, generatedRecord];
-      }).map((task) => task.catch(() => null))
-    )
-      .then((entries) => {
+    hydrateGuestIconsForCanvas(studio.guestIcon, guestIcons, resolveIconDataUrl)
+      .then((hydratedGuestIcons) =>
+        Promise.all(
+          THUMBNAIL_PRESETS.map(async (preset) => {
+            const template = await resolveThumbnailTemplateForRender(preset.key, studio.templates?.[preset.key]);
+            const dataUrl = await renderThumbnail({
+              preset,
+              template,
+              icon: hydratedGuestIcons[0] ?? studio.guestIcon,
+              icons: hydratedGuestIcons,
+              date: thumbnailDate,
+              guestName: currentGuestName,
+              iconDataUrlResolver: resolveIconDataUrl,
+              requireIcon: hydratedGuestIcons.length > 0
+            });
+            const { generatedRecord } = await saveThumbnailDataUrl(preset, dataUrl, currentGuestName);
+            return [preset.key, generatedRecord];
+          }).map((task) => task.catch(() => null))
+        ).then((entries) => ({ entries, hydratedGuestIcons }))
+      )
+      .then(({ entries, hydratedGuestIcons }) => {
         const generatedEntries = entries.filter(Boolean);
         if (generatedEntries.length === 0) throw new Error("AUTO_THUMBNAIL_GENERATION_FAILED");
         if (cancelled) return;
@@ -814,6 +822,8 @@ function App() {
                 ...(current.thumbnailStudio?.generated ?? {}),
                 ...Object.fromEntries(generatedEntries)
               },
+              guestIcon: hydratedGuestIcons[0] ?? current.thumbnailStudio?.guestIcon ?? defaultThumbnailStudio.guestIcon,
+              guestIcons: hydratedGuestIcons.length ? hydratedGuestIcons : current.thumbnailStudio?.guestIcons ?? [],
               autoGenerateRequestedAt: ""
             },
             imports: {
@@ -847,7 +857,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [data.thumbnailStudio?.autoGenerateRequestedAt, selectedEpisode]);
+  }, [data.thumbnailStudio?.autoGenerateRequestedAt, selectedEpisode, data.settings?.responseEndpointUrl, data.settings?.responseSyncToken]);
 
   const updateData = (key, updater) => {
     setData((current) => ({
